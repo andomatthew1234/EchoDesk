@@ -1,230 +1,314 @@
-# AI Monitor
+# The EchoDesk Project
 
-A macOS or Windows companion app plus an ESP32 desk display for keeping AI usage limits visible while you work. It reads Claude, ChatGPT, Antigravity, Gemini, Copilot, or Cursor usage through the local CodexBar CLI, then streams the current limits to a small USB-connected ESP32 display: the 2.8" Cheap Yellow Display (CYD) or the square 4" Guition ESP32-S3-4848S040.
+**ESP-32 and CYD based operating system and utility management**
 
-Usage data travels only over USB: the ESP32 needs no Wi-Fi, never sees cloud credentials, and there is no browser tab to keep open.
+EchoDesk OS is a free, open-source touchscreen interface designed for the **Freenove FNK0114A 2.4-inch ESP32 display**.
+Transform an inexpensive CYD (Cheap Yellow DIsplay) into a compact desktop monitor.
 
-## How It Works
 
-The **AI Monitor** app on your Mac or Windows PC periodically asks the locally installed CodexBar CLI for the selected provider, applies your display settings, and sends a compact JSON frame over USB serial to the ESP32. The ESP32 renders the dashboard on its display.
+Built for makers, developers and anyone who wants a little more information on their desk.
 
-```text
-AI providers -> CodexBar CLI -> AI Monitor app (macOS / Windows) -> USB serial -> ESP32 display
+![EchoDesk OS](assets/echodesk-logo.png)
+
+## Utilities
+
+### Home Dashboard
+
+The launcher to launch applications and utilities.
+
+- **Codex Usage** — Monitor your OpenAI Codex limits. Support for Claude Code and Gemini coming soon.
+- **Clock** — A bold, minimal clock with customisability.
+- **Settings** — Adjust brightness and restart the device, with more settings coming soon.
+
+### Codex Usage Monitor
+
+View your Codex usage directly on your desk without opening a browser.
+
+Support for:
+- 5-hour session usage
+- Weekly usage
+- Usage percentages and progress bars
+- Reset countdowns
+- Live updates through the Windows companion application
+
+EchoDesk builds on the open-source AI Monitor project and uses Win-CodexBar to retrieve Codex usage information.
+
+### Clock
+
+A distinctive two-line clock inspired by EchoDesk's logo, with customisability coming soon.
+
+The hour is displayed in large outlined typography, while the minutes appear in solid, bold lettering.
+
+Supports the Australia/Melbourne timezone and daylight-saving time with more time zones coming soon.
+
+### Settings
+
+Keep things simple.
+
+- **Brightness:** Adjust the screen's backlight using a touchscreen slider.
+- **Restart:** Safely restart EchoDesk OS.
+
+## Required Hardware
+
+## Required Materials
+
+EchoDesk OS is designed to be affordable and easy to assemble. You only need a touchscreen, a USB-C cable and an optional 3D-printed enclosure.
+
+| Component | Requirement | Cost |
+|---|---|---|
+| Display / Microcontroller | Freenove 2.4" CYD | A$26 |
+| Connection | USB-C cable | Included with CYD |
+| Enclosure | 3D-printed case | ~A$2 (at A$30/kg PLA) |
+| **Total** | | **~A$28** |
+
+*Prices are approximate and may vary depending on the retailer, filament and printing settings. A Windows 10 or 11 computer is also required to run the companion software.*
+
+### Display / Microcontroller
+
+<img src="assets/display.jpg" alt="Freenove 2.4-inch ESP32 touchscreen" width="350">
+
+**[Purchase the Freenove 2.4" CYD on Amazon Australia](https://www.amazon.com.au/dp/B0H39PKRN2?ref=ppx_yo2ov_dt_b_fed_asin_title)**
+
+This device provides the processing power for EchoDesk OS and includes a built-in **2.4-inch IPS touchscreen**.
+
+No electronics assembly is required. Simply connect the device to your computer using the included USB-C cable and install the EchoDesk firmware.
+
+**Specifications:**
+- ESP32 dual-core microcontroller
+- 2.4-inch IPS touchscreen
+- 240 × 320 resolution
+- Wi-Fi and Bluetooth connectivity
+- USB-C programming and power
+- ST7789 display controller
+- XPT2046 touch controller
+
+
+**Important:** EchoDesk is specifically designed for the Freenove FNK0114A_2P4. Standard 2.8-inch Cheap Yellow Display boards have different hardware configurations and are not automatically compatible. Check compatiblity with other displays before buying, or use our reccomended one.
+
+### 3D-Printed Enclosure
+
+EchoDesk can operate without an enclosure, but we recommend using one for a cleaner desktop setup and better airflow.
+
+The custom enclosure is designed to house the Freenove touchscreen at a comfortable viewing angle.
+
+**You have two options:**
+
+1. **Print it yourself:** Download the model files (coming soon) and print the enclosure using your own 3D printer. Estimated material cost is approximately A$2 using PLA at A$30/kg including waste in one color.
+2. **Order a printed enclosure:** Don't have a 3D printer? Contact **[matthew@andomail.com](mailto:matthew@andomail.com)** to enquire about ordering a pre-printed enclosure.
+
+The enclosure is optional and does not affect EchoDesk OS functionality, but we strongly recomend it.
+
+
+No soldering or additional electronic components are required for the standard setup.
+
+## Required Software
+
+Install the following applications on your Windows PC.
+
+### 1. Win-CodexBar (Codex usage monitor utility)
+
+Win-CodexBar retrieves Codex usage information from your existing Codex authentication. Support for Claude Code and Gemini is coming soon.
+
+Download:
+
+https://github.com/nesszer/Win-CodexBar/releases
+
+Alternatively, install it using Windows Terminal:
+
+```powershell
+winget install Finesssee.Win-CodexBar
 ```
 
-The Mac app can also flash firmware, check GitHub Releases for app and firmware updates, and remember per-device display settings.
+After installation:
 
-### Intelligent window switching
+1. Launch Win-CodexBar.
+2. Open its system tray menu.
+3. Enable the Codex provider.
+4. Complete authentication if prompted.
+5. Confirm your Codex usage appears correctly.
 
-The Mac and Windows companions offer a third window mode, Intelligent. A
-provider window becomes eligible when usage rises by at least five percentage
-points, crosses 80/90/100%, or resets. Format version 2 display plugins may
-declare optional `attentionRules` for their own source data. The built-in
-Claude Code window requests a switch when a session first needs
-permission or input, or completes and awaits the user. The first successful
-sample or waiting state establishes a baseline; repeated values do not trigger
-a switch. Windows stay visible for at least two minutes, each window has a
-ten-minute cooldown, and touch selection pauses automatic choices for ten
-minutes. Other pending windows remain eligible after a switch until their
-original five-minute event expiry; ties prefer the lowest window index. The companion sends the existing manual `set_views` command, so no
-firmware change is needed.
+### 2. AI Monitor for Windows (Codex usage monitor utility)
 
-### Display plugins (in development)
+AI Monitor is the companion application responsible for sending usage data to EchoDesk over USB.
 
-The companion apps can install declarative `.aimplugin` files from disk or an
-HTTPS release URL. Each installed plugin appears as a placeable window in the
-display manager. Plugins can define separate portrait, landscape, and square
-layouts; the built-in AI dashboards remain the main purpose of the device.
-The desktop fetches plugin data and
-sends bounded drawing scenes to firmware with `sceneProtocol: 1`. Install that
-firmware once; installing another compatible plugin does not require flashing
-again. Plugins in this format contain no executable code, and the app shows
-their data origin and unsigned status before installation. See the
-[plugin architecture](docs/display-plugins.md), [authoring guide](docs/display-plugin-authoring.md),
-and [acceptance test](docs/display-plugin-test.md).
+Download:
 
-### Claude Code window (in development)
+https://github.com/tobymarks/esp32-ai-monitor/releases
 
-A built-in window shows which Claude Code sessions are waiting for approval or
-input, or have finished. Claude Code reports this through HTTP hooks to the
-companion on `127.0.0.1`; the Plugins page sets the hooks up after a
-confirmation. See [Claude Code window](docs/claude-code-window.md).
+Install the Windows companion application from an appropriate `win-v*` release.
 
-## Features
+Keep AI Monitor running whenever you want live Codex usage updates.
 
-- Provider views for Claude, ChatGPT, Antigravity, Gemini CLI, GitHub Copilot, and Cursor
-- Up to eight display windows, each showing a provider or a clock; they rotate after a set interval or stay put until you switch (firmware 2.19.0+)
-- Touch navigation: tap the left or right half of the display to switch windows, long-press to open the on-device settings
-- Standby clock on the display while the app is not running
-- Session, weekly, and provider-specific usage rows where available (including Claude Fable)
-- Centered circular ChatGPT display when only one limit is available, in portrait and landscape
-- Antigravity model rows for Claude, Gemini Pro, and Gemini Flash; Gemini CLI rows for Pro, Flash, and Flash Lite; Cursor rows for plan, auto, and API usage
-- Copilot premium-request quota as a single centered ring
-- Used or remaining percentage display mode
-- Live reset countdowns and local display clock
-- Optional cost/extra-usage support when supplied by the provider data
-- ChatGPT/Codex header badges for workspace extra credits and reset credits (see below)
-- Automatic USB serial detection and instant resend on connect
-- Per-device settings for orientation, theme, language, brightness, timezone, and board variant
-- Portrait plus left/right landscape layouts on the CYD; on the square S3 board the view follows the side the USB cable points to
-- Firmware flashing for the ILI9341 and ST7789 CYD variants and the ESP32-S3-4848S040
-- Optional menu bar quick menu for provider switching
-- Optional Wi-Fi on the display, used only to keep the standby clock accurate via NTP while the app is not connected
+### 3. Python and esptool
 
-### ChatGPT Header Badges
+For manual firmware installation, install Python and Espressif's flashing utility.
 
-Since firmware 2.18.0 (Mac app 1.28.3, Windows app 1.0.1) the ChatGPT view can show small badges next to the provider name:
+Python:
 
-- **`+Cr`** (green): the ChatGPT workspace has purchased extra credits, so you can keep working once your limit is used up. Owners and admins see the balance instead, for example `+238` or `+2.5k`. OpenAI does not share the workspace balance with other members, so they only see `+Cr`.
-- **Arrow icon with a number** (grey): available Codex reset credits. Each one resets your Codex limit early, once. They belong to your own account and you redeem them yourself in the Codex app or the Codex IDE extension; no admin is needed. CodexBar shows when they expire.
+https://www.python.org/downloads/
 
-Without these badges the account reports neither. In portrait the header is narrow, so the reset-credit badge may be left out.
+Then run:
 
-## Quick Start
+```powershell
+py -m pip install esptool
+```
 
-1. **Buy** an [ESP32-2432S028 / ESP32-2432S028R board](https://de.aliexpress.com/item/1005007731775734.html), also known as a Cheap Yellow Display, or a [Guition ESP32-S3-4848S040](https://de.aliexpress.com/item/1005008214679682.html).
-2. **Install [CodexBar](https://codexbar.app/)** so its local CLI is available.
-3. **Download** the AI Monitor app from [GitHub Releases](https://github.com/tobymarks/esp32-ai-monitor/releases): the Mac app (`app-v*`), or the Windows app (`win-v*`).
-4. **Plug** the ESP32 into your computer via a USB data cable.
-5. **Flash** the right firmware variant and choose the provider in the AI Monitor settings window.
+You do not need Arduino IDE to install a precompiled EchoDesk firmware image.
 
-A step-by-step build guide with photos is on [Hackster.io](https://www.hackster.io/toby-marks/esp32-desk-display-for-claude-and-chatgpt-usage-limits-71d7e3).
+## Let's install 🚀
 
-## Requirements
+### Step 1 — Download the Firmware
 
-- macOS 14+ on Apple Silicon or Intel (the app ships as a universal binary), or Windows 10/11 x64 for the Windows app
-- [CodexBar](https://codexbar.app/) installed with its local CLI; on Windows [Win-CodexBar](https://github.com/nesszer/Win-CodexBar) (`winget install Finesssee.Win-CodexBar`), whose `codexbar-cli.exe` provides the same data
-- Windows only: a driver for the CYD's CH340 USB-serial chip if Windows does not install it automatically
-- Windows only: the installer is not code-signed yet, so Windows SmartScreen warns on first launch. Choose "More info", then "Run anyway"
-- At least one of Claude, ChatGPT, Antigravity, Gemini, Copilot, or Cursor set up in CodexBar
-- ESP32-2432S028 / ESP32-2432S028R CYD board, or a Guition ESP32-S3-4848S040
-- USB data cable, not a charge-only cable
-- Optional: PlatformIO if you want to build or flash the firmware manually
+Confirm all of the above applications are installed. Then:
 
-## CodexBar Dependency
+Open the **Releases** section of this GitHub repository.
 
-AI Monitor does not talk to any AI service directly. CodexBar is the required local data source: its CLI obtains the provider limits that AI Monitor sends to the desk display.
+Download the firmware image for your board:
 
-Install CodexBar first:
+`echodesk-freenove-fnk0114a-2p4.bin`
 
-- Website: [codexbar.app](https://codexbar.app/)
-- Repository: [steipete/CodexBar](https://github.com/steipete/CodexBar)
-- Latest download: [CodexBar GitHub Releases](https://github.com/steipete/CodexBar/releases/latest)
-- Homebrew: `brew install --cask steipete/tap/codexbar`
+*If no precompiled release is available yet, build the firmware from source using the instructions below.*
 
-After CodexBar is running, enable the providers you want there. AI Monitor will then offer Claude, ChatGPT, Antigravity, Gemini, Copilot, and Cursor as display sources.
+### Step 2 — Connect Your Screen
 
-## Hardware
+Connect the Freenove display to your Windows PC using a USB-C data cable.
 
-### Cheap Yellow Display (CYD)
+Open **Device Manager → Ports (COM & LPT)**.
 
-- **ESP32-2432S028R / R board:** ILI9341 display controller
-- **ESP32-2432S028 / Hybrid board:** ST7789 display controller
+Find the device named something similar to:
 
-Common hardware:
+`USB-SERIAL CH340 (COM5)`
 
-- **Display:** [ESP32-2432S028 2.8" 320x240 TFT](https://de.aliexpress.com/item/1005007731775734.html)
-- **Touch:** XPT2046
-- **MCU:** ESP32-WROOM-32
-- **Backlight:** GPIO 21
+Your COM port number may be different.
 
-If a CYD stays white or shows noise after flashing, flash the other CYD panel variant from the AI Monitor app. Select the ST7701 image only for the Guition S3 board.
+### Step 3 — Install the Firmware
 
-### Guition ESP32-S3-4848S040
+**Close any applications currently using the display's serial port (eg. AIMonitor)**
 
-- **Display:** [4" 480x480](https://de.aliexpress.com/item/1005008214679682.html), ST7701S over 16-bit RGB
-- **Touch:** GT911
-- **MCU:** ESP32-S3 with octal PSRAM and 16 MB flash
+Open Windows Terminal in the folder containing the downloaded firmware (CD to the path of the folder)
 
-The square layout shows the weekly limit as a large ring with countdown and reset time, and the session as a bar. The board keeps no settings of its own: writing to flash while the panel is running disturbs the RGB output, so the app sends the display settings every time it connects. The apps pick the chip automatically when flashing.
+For a verified, merged ESP32 firmware image intended to be written at address `0x0`, use:
 
-## Enclosures
+```powershell
+py -m esptool --chip esp32 --port COM5 --baud 460800 write-flash 0x0 echodesk-freenove-fnk0114a-2p4.bin
+```
 
-3D-printable cases on MakerWorld:
+Replace `COM5` with your actual port number.
 
-- [CYD landscape: Weather Station Pro for ESP32-2432S028 CYD](https://makerworld.com/de/models/2583102-weather-station-pro-anemometer-esp32-2432s028-cyd#profileId-2849155)
-- [CYD portrait: Aura Smart Weather Forecast Display](https://makerworld.com/de/models/1382304-aura-smart-weather-forecast-display?from=search#profileId-1430951)
-- [ESP32-S3-4848S040: Case Stand V3](https://makerworld.com/de/models/2581572-guition-esp32s3-4848s040-case-stand-v3#profileId-3013482)
+**Important:** Only use this command with a release explicitly documented as a merged image for the original ESP32. Do not use it for application-only firmware binaries. Check the release's flashing instructions before proceeding.
 
-## Build from Source
+Wait for flashing to finish successfully.
 
-### ESP32 Firmware
+Do not disconnect the device during flashing.
+
+### Step 4 — Start EchoDesk
+
+After flashing, restart the display using its reset button or by reconnecting USB.
+
+EchoDesk should boot to the Home Dashboard.
+
+You can now open the Clock and Settings applications using the touchscreen.
+
+### Step 5 — Connect Codex Usage
+
+1. Start Win-CodexBar.
+2. Confirm that Codex usage is available.
+3. Start AI Monitor for Windows.
+4. Connect AI Monitor to the display's serial port.
+5. Open **Codex Usage** on EchoDesk.
+
+Your usage information should appear once the companion successfully communicates with the device.
+
+The Windows computer must remain connected for live USB usage updates.
+
+## Building From Source
+
+EchoDesk uses PlatformIO for firmware development.
+
+Requirements:
+
+- Git
+- Python
+- PlatformIO Core or the PlatformIO VS Code extension
+
+Clone the repository:
 
 ```bash
-# Install PlatformIO, then:
-pio run
-pio run -e esp32dev -t upload
-pio device monitor
+git clone https://github.com/YOUR_USERNAME/EchoDesk-OS.git
+cd EchoDesk-OS
 ```
 
-Firmware targets:
-
-- `esp32dev`: ILI9341 / R-board build
-- `esp32dev-st7789`: ST7789 / Hybrid-board build
-- `esp32s3-4848s040`: Guition ESP32-S3-4848S040 build (Arduino core 3.x via pioarduino, the CYD builds stay on espressif32 6.13.0)
-
-### Installer Binaries
+Build for the Freenove touchscreen:
 
 ```bash
-./scripts/build_firmware.sh
+pio run -e freenove-fnk0114a-2p4
 ```
 
-This merges the bootloader, partitions, app image, and boot app into browser-flashable binaries under `installer/bin/`, then updates the installer manifests. It requires PlatformIO CLI and `esptool.py`.
+The compiled application firmware will appear in the corresponding `.pio/build/` directory.
 
-### Mac Companion App
+**Note:** The application firmware generated by PlatformIO is not necessarily a merged flash image. Follow the repository's firmware packaging instructions before flashing.
 
-```bash
-cd companion
-./build.sh
-```
+## 3D-Printed Enclosure
 
-The supported Mac app source lives in `companion/` and is built with Swift, AppKit, POSIX serial I/O, and GitHub Releases update checks.
+EchoDesk can be used without an enclosure, but a custom 3D-printed desktop housing is recommended.
 
-### Windows Companion App
+The enclosure design includes:
 
-```bash
-cd companion-windows
-pnpm install
-cargo tauri dev
-```
+- Angled desktop viewing position
+- USB-C cable access
+- Rear ventilation
+- Removable rear cover
+- Internal PCB mounting points
 
-The Windows app lives in `companion-windows/` and is built with Tauri 2 (Rust backend, React frontend). The Rust workspace holds the shared logic (`crates/core`), the serial link (`crates/serial`) and the firmware flasher over the espflash library (`crates/flash`); everything builds and runs on macOS too for development. See `companion-windows/README.md` for the fixture mode and developer switches, and `docs/windows-app-plan.md` for the implementation plan and status.
+Designed for printing on the Bambu Lab A1 Mini or another compatible FDM printer.
 
-## Release Flow
+Enclosure files and print instructions will be published in the `hardware/` directory once the physical design has been validated.
 
-- Firmware releases use tags like `v2.11.4`; betas use `fw-beta-v*`.
-- Mac app releases use tags like `app-v1.17.1`; betas use `app-beta-v*`.
-- Windows app releases use tags like `win-v1.0.0`; betas use `win-beta-v*` and are marked as prereleases.
-- Pushes to `main` that touch firmware or installer files build and deploy the GitHub Pages installer.
-- Firmware tags build release assets for the ILI9341, ST7789 and ST7701 (ESP32-S3-4848S040) variants.
-- App tags build `AIMonitor.zip` and `AIMonitor.dmg` via the macOS workflow.
-- Windows tags build `AIMonitor-Setup.exe` plus a `.sha256` sidecar via the Windows workflow (Tauri NSIS bundler, silent install smoke test).
-- App release assets are signed with a Developer ID, notarized by Apple and stapled,
-  so they open without a Gatekeeper warning. The workflow creates the release and
-  attaches both files; no local build is required.
+## Technical Specifications
 
-## Tech Stack
+| Property | Value |
+|---|---|
+| Microcontroller | ESP32 |
+| Display controller | ST7789 |
+| Display resolution | 240 × 320 |
+| Interface orientation | 320 × 240 landscape |
+| Touch controller | XPT2046 |
+| Backlight | GPIO21, active-high PWM |
+| LCD SPI | HSPI |
+| USB serial | CH340C |
+| Serial baud rate | 115200 |
+| Primary data source | Win-CodexBar |
+| Companion application | AI Monitor for Windows |
 
-| Component | Stack |
-|-----------|-------|
-| ESP32 Firmware | PlatformIO, Arduino-ESP32, LVGL v9, ArduinoJson; TFT_eSPI on the CYD, esp_lcd plus GFX Library for Arduino on the S3 |
-| Mac App | Swift, AppKit, POSIX serial, GitHub Releases API |
-| Windows App | Tauri 2, Rust (serialport, espflash), React, GitHub Releases API |
-| Data Source | Local CodexBar CLI (macOS), Win-CodexBar CLI (Windows); explicit HTTPS JSON sources for display plugins |
-| Website | GitHub Pages |
+## Troubleshooting
 
-## License
+**Screen stays black:** Check USB power, firmware compatibility and backlight initialisation.
 
-AI Monitor is released under the [MIT License](LICENSE).
+**Screen is white or corrupted:** Verify the ST7789 display configuration and SPI pin assignments.
 
-The MIT License covers everything in this repository, including the app icon,
-menu bar icon and website artwork, which are original work made for this
-project. See [NOTICE](NOTICE) for third-party components and their licenses.
+**Touchscreen doesn't respond:** Check touch calibration and rotation settings.
 
-## Attribution
+**Codex usage isn't appearing:** Verify that Win-CodexBar is receiving data, AI Monitor is running, and the correct COM port is selected.
 
-- Firmware built with [TFT_eSPI](https://github.com/Bodmer/TFT_eSPI) (MIT/BSD), [LVGL](https://github.com/lvgl/lvgl) (MIT) and [ArduinoJson](https://github.com/bblanchon/ArduinoJson) (MIT)
-- Usage data provided by [CodexBar](https://github.com/steipete/CodexBar), a separate program invoked at runtime
-- Inspired by [Aura](https://github.com/Surrey-Homeware/Aura), a weather display for the same CYD hardware
+**Device cannot be flashed:** Close other applications using the serial port, confirm the COM number, and retry the documented flashing procedure.
 
-Full third-party license details are in [NOTICE](NOTICE).
+## Credits
+
+EchoDesk OS is built upon and inspired by excellent open-source projects (I strongly reccomend trying them):
+
+- [AI Monitor](https://github.com/tobymarks/esp32-ai-monitor) — ESP32 usage display and Windows companion.
+- [Win-CodexBar](https://github.com/nesszer/Win-CodexBar) — Windows Codex usage tracking.
+- [Freenove](https://github.com/Freenove/Freenove_ESP32_Display) — Hardware documentation and examples.
+- [PlatformIO](https://platformio.org/) — Embedded firmware build tools.
+
+EchoDesk is an independent community project and is not affiliated with or endorsed by OpenAI.
+
+## Licence
+
+The licence for EchoDesk OS will be published after confirming compatibility with the licences of its upstream dependencies.
+
+Until then, no additional licence is implied for EchoDesk-specific code.
+
+---
+
+**EchoDesk OS — A little screen. A lot of possibilities.**

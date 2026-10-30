@@ -12,6 +12,7 @@
 //
 //   board_cyd.cpp  — ESP32, SPI-Panel (ILI9341 oder ST7789), XPT2046-Touch
 //   board_s3.cpp   — ESP32-S3, RGB-Panel (ST7701S, 480x480), GT911-Touch
+//   board_freenove_fnk0114a.cpp — Freenove 2.4", ST7789 + XPT2046
 //
 // Welche gebaut wird, entscheidet ein Build-Flag aus platformio.ini
 // (BOARD_CYD bzw. BOARD_S3_4848). Der Rest der Firmware kennt kein

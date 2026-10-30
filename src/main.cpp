@@ -27,6 +27,7 @@
 #include "serial_receiver.h"
 #include "ui_common.h"
 #include "ui_dashboard.h"
+#include "ui_echodesk.h"
 #include "ui_settings.h"
 #include "wifi_time.h"
 
@@ -143,8 +144,153 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 static lv_obj_t *boot_screen = nullptr;
 static lv_obj_t *boot_status = nullptr;
 
+#if defined(BOARD_FREENOVE_FNK0114A)
+static lv_obj_t *boot_corner_tl = nullptr;
+static lv_obj_t *boot_corner_br = nullptr;
+static unsigned long boot_screen_started = 0;
+
+static constexpr uint32_t BOOT_SCREEN_MIN_MS = 2000;
+static constexpr int16_t BOOT_CORNER_W = 96;
+static constexpr int16_t BOOT_CORNER_H = 68;
+static constexpr int16_t BOOT_CORNER_THICKNESS = 4;
+static constexpr int16_t BOOT_CORNER_MARGIN_X = 18;
+static constexpr int16_t BOOT_CORNER_MARGIN_Y = 16;
+static constexpr int16_t BOOT_CORNER_TRAVEL = 8;
+
+static lv_obj_t *boot_create_rect(lv_obj_t *parent, int16_t width, int16_t height,
+                                  int16_t x, int16_t y)
+{
+    lv_obj_t *rect = lv_obj_create(parent);
+    lv_obj_remove_style_all(rect);
+    lv_obj_set_size(rect, width, height);
+    lv_obj_set_pos(rect, x, y);
+    lv_obj_set_style_bg_color(rect, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(rect, LV_OPA_COVER, LV_PART_MAIN);
+    return rect;
+}
+
+static lv_obj_t *boot_create_corner(lv_obj_t *parent, bool bottom_right,
+                                    int16_t x, int16_t y)
+{
+    lv_obj_t *corner = lv_obj_create(parent);
+    lv_obj_remove_style_all(corner);
+    lv_obj_set_size(corner, BOOT_CORNER_W, BOOT_CORNER_H);
+    lv_obj_set_pos(corner, x, y);
+
+    if (bottom_right) {
+        boot_create_rect(corner, BOOT_CORNER_W, BOOT_CORNER_THICKNESS,
+                         0, BOOT_CORNER_H - BOOT_CORNER_THICKNESS);
+        boot_create_rect(corner, BOOT_CORNER_THICKNESS, BOOT_CORNER_H,
+                         BOOT_CORNER_W - BOOT_CORNER_THICKNESS, 0);
+    } else {
+        boot_create_rect(corner, BOOT_CORNER_W, BOOT_CORNER_THICKNESS, 0, 0);
+        boot_create_rect(corner, BOOT_CORNER_THICKNESS, BOOT_CORNER_H, 0, 0);
+    }
+    return corner;
+}
+
+static lv_obj_t *boot_create_logo_label(const char *text, lv_color_t color,
+                                        int16_t x, int16_t y, int16_t letter_space)
+{
+    lv_obj_t *label = lv_label_create(boot_screen);
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_color(label, color, LV_PART_MAIN);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_48, LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(label, letter_space, LV_PART_MAIN);
+    lv_obj_align(label, LV_ALIGN_CENTER, x, y);
+    return label;
+}
+
+static void boot_anim_set_x(void *obj, int32_t value)
+{
+    lv_obj_set_x(static_cast<lv_obj_t *>(obj), value);
+}
+
+static void boot_anim_set_y(void *obj, int32_t value)
+{
+    lv_obj_set_y(static_cast<lv_obj_t *>(obj), value);
+}
+
+static void boot_start_corner_animation(lv_obj_t *corner,
+                                        int16_t start_x, int16_t end_x,
+                                        int16_t start_y, int16_t end_y)
+{
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, corner);
+    lv_anim_set_exec_cb(&anim, boot_anim_set_x);
+    lv_anim_set_values(&anim, start_x, end_x);
+    lv_anim_set_duration(&anim, 700);
+    lv_anim_set_reverse_duration(&anim, 700);
+    lv_anim_set_repeat_count(&anim, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_in_out);
+    lv_anim_start(&anim);
+
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, corner);
+    lv_anim_set_exec_cb(&anim, boot_anim_set_y);
+    lv_anim_set_values(&anim, start_y, end_y);
+    lv_anim_set_duration(&anim, 700);
+    lv_anim_set_reverse_duration(&anim, 700);
+    lv_anim_set_repeat_count(&anim, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_in_out);
+    lv_anim_start(&anim);
+}
+
+static void draw_freenove_boot_screen(void)
+{
+    boot_screen = lv_obj_create(nullptr);
+    lv_obj_set_style_bg_color(boot_screen, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(boot_screen, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(boot_screen, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(boot_screen, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(boot_screen, LV_OBJ_FLAG_SCROLLABLE);
+
+    const int16_t br_x = static_cast<int16_t>(SCREEN_WIDTH) - BOOT_CORNER_W - BOOT_CORNER_MARGIN_X;
+    const int16_t br_y = static_cast<int16_t>(SCREEN_HEIGHT) - BOOT_CORNER_H - BOOT_CORNER_MARGIN_Y;
+
+    boot_corner_tl = boot_create_corner(boot_screen, false,
+                                        BOOT_CORNER_MARGIN_X, BOOT_CORNER_MARGIN_Y);
+    boot_corner_br = boot_create_corner(boot_screen, true, br_x, br_y);
+
+    // Build an outlined word without a bitmap or custom font: eight white
+    // copies form the stroke and the centered black copy cuts out the fill.
+    static const int8_t outline_offsets[][2] = {
+        {-2, -2}, {0, -2}, {2, -2},
+        {-2,  0},           {2,  0},
+        {-2,  2}, {0,  2}, {2,  2},
+    };
+    for (const auto &offset : outline_offsets) {
+        boot_create_logo_label("ECHO", lv_color_white(), offset[0], -30 + offset[1], -1);
+    }
+    boot_create_logo_label("ECHO", lv_color_black(), 0, -30, -1);
+
+    // Slightly layered copies give the built-in Montserrat face the same
+    // heavy visual weight as the reference's DESK wordmark.
+    boot_create_logo_label("DESK", lv_color_white(), -1, 27, 1);
+    boot_create_logo_label("DESK", lv_color_white(),  0, 27, 1);
+    boot_create_logo_label("DESK", lv_color_white(),  1, 27, 1);
+
+    boot_start_corner_animation(
+        boot_corner_tl,
+        BOOT_CORNER_MARGIN_X, BOOT_CORNER_MARGIN_X + BOOT_CORNER_TRAVEL,
+        BOOT_CORNER_MARGIN_Y, BOOT_CORNER_MARGIN_Y + BOOT_CORNER_TRAVEL);
+    boot_start_corner_animation(
+        boot_corner_br,
+        br_x, br_x - BOOT_CORNER_TRAVEL,
+        br_y, br_y - BOOT_CORNER_TRAVEL);
+
+    boot_screen_started = millis();
+    lv_screen_load(boot_screen);
+    lv_refr_now(NULL);
+}
+#endif
+
 static void draw_boot_screen(void)
 {
+#if defined(BOARD_FREENOVE_FNK0114A)
+    draw_freenove_boot_screen();
+#else
     boot_screen = lv_obj_create(nullptr);
     lv_obj_set_style_bg_color(boot_screen, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(boot_screen, LV_OPA_COVER, LV_PART_MAIN);
@@ -170,6 +316,19 @@ static void draw_boot_screen(void)
 
     lv_screen_load(boot_screen);
     lv_refr_now(NULL);
+#endif
+}
+
+static void wait_for_boot_screen(void)
+{
+#if defined(BOARD_FREENOVE_FNK0114A)
+    while (millis() - boot_screen_started < BOOT_SCREEN_MIN_MS) {
+        lv_timer_handler();
+        delay(5);
+    }
+#else
+    delay(1000);
+#endif
 }
 
 // ============================================================
@@ -187,10 +346,25 @@ static void update_boot_status(const char *msg) {
 // Transition to main dashboard UI
 // ============================================================
 static void enter_main_ui(void) {
+#if defined(ECHODESK_OS)
+    ui_echodesk_init();
+    dashboard_active = false;
+    boot_screen = nullptr;
+    boot_corner_tl = nullptr;
+    boot_corner_br = nullptr;
+    Serial.println("[UI] EchoDesk OS Home active (USB receiver remains online)");
+#else
     ui_dashboard_create();
     lv_obj_t *dash_scr = ui_dashboard_get_screen();
     if (dash_scr) {
+#if defined(BOARD_FREENOVE_FNK0114A)
+        lv_screen_load_anim(dash_scr, LV_SCR_LOAD_ANIM_FADE_IN, 250, 0, true);
+        boot_screen = nullptr;
+        boot_corner_tl = nullptr;
+        boot_corner_br = nullptr;
+#else
         lv_screen_load(dash_scr);
+#endif
     }
     dashboard_active = true;
 
@@ -199,6 +373,7 @@ static void enter_main_ui(void) {
 
     Serial.println("[UI] Dashboard active (waiting for USB data)");
     lv_refr_now(NULL);
+#endif
 }
 
 // ============================================================
@@ -223,6 +398,25 @@ void setup()
     // Einstellungen laden. Auf Boards ohne dauerhafte Ablage sind das die
     // Voreinstellungen, bis der Host sein Geraeteprofil schickt.
     config_load(g_config);
+#if defined(ECHODESK_OS)
+    // EchoDesk is designed specifically for the 320x240 landscape panel.
+    // Preserve either landscape cable orientation, but recover old/corrupt
+    // NVS values before LVGL allocates its display. Its local brightness UI
+    // intentionally exposes 10..100 percent, so normalize that range too.
+    bool echodesk_config_changed = false;
+    if (g_config.orientation != ORIENTATION_LANDSCAPE_LEFT &&
+        g_config.orientation != ORIENTATION_LANDSCAPE_RIGHT) {
+        g_config.orientation = ORIENTATION_LANDSCAPE_RIGHT;
+        echodesk_config_changed = true;
+        Serial.println("[EchoDesk] Portrait setting normalized to landscape_right");
+    }
+    if (g_config.brightness_pct < 10) {
+        g_config.brightness_pct = 10;
+        echodesk_config_changed = true;
+        Serial.println("[EchoDesk] Brightness normalized to 10% minimum");
+    }
+    if (echodesk_config_changed) config_save(g_config);
+#endif
     backlight_apply_percent(g_config.brightness_pct);
 
     // Apply persisted theme before creating UI
@@ -262,7 +456,7 @@ void setup()
     serial_receiver_init();
     wifi_time_init();
     update_boot_status(L(STR_USB_CONNECTED));
-    delay(1000);
+    wait_for_boot_screen();
 
     // --- Enter dashboard ---
     enter_main_ui();
@@ -290,10 +484,17 @@ void loop()
     // with frame reception. State (theme/language/orientation/dimensions) was
     // already applied synchronously in the parser.
     if (serial_ui_rebuild_requested()) {
+#if defined(ECHODESK_OS)
+        ui_echodesk_recreate();
+#else
         ui_dashboard_recreate();
+#endif
         serial_ui_rebuild_clear();
     }
 
+#if defined(ECHODESK_OS)
+    ui_echodesk_tick();
+#else
     // Update dashboard UI on new data OR every 1s (clock/countdown)
     if (dashboard_active) {
         if (serial_has_new_data() || (millis() - last_ui_update >= UI_UPDATE_INTERVAL)) {
@@ -302,6 +503,7 @@ void loop()
             last_ui_update = millis();
         }
     }
+#endif
 
     // Loop debug + heap monitoring (every 10 seconds)
     loopCount++;

@@ -12,6 +12,11 @@ void serial_receiver_tick();
 // Get a copy of the current monitor state
 MonitorState serial_get_state();
 
+// Get the most recent cached state for a specific provider without changing
+// the companion-managed active view. EchoDesk uses this to keep its Codex app
+// bound to live Codex data while its own Home/Clock/Settings navigation is open.
+bool serial_get_provider_state(uint8_t provider, MonitorState &out);
+
 // Returns true if we received valid data within the last 5 minutes
 bool serial_has_recent_data();
 

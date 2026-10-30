@@ -16,7 +16,11 @@
 #include <time.h>
 #include <stdlib.h>
 
+#if defined(ECHODESK_OS)
+static const char *TZ_INFO = "AEST-10AEDT,M10.1.0,M4.1.0/3";
+#else
 static const char *TZ_INFO = "CET-1CEST,M3.5.0,M10.5.0/3";
+#endif
 static const char *NTP_SERVER_1 = "pool.ntp.org";
 static const char *NTP_SERVER_2 = "time.nist.gov";
 static const unsigned long WIFI_RECONNECT_INTERVAL_MS = 30000;
@@ -69,7 +73,9 @@ static void ensure_ntp_started() {
     // and restore the TZ env var around it.
     if (host_timezone_is_set()) {
         const char *saved_tz = getenv("TZ");
-        char saved_tz_buf[24] = "";
+        // Melbourne's DST rule is longer than the old fixed-offset value.
+        // Keep the whole POSIX string when configTzTime() temporarily replaces it.
+        char saved_tz_buf[48] = "";
         if (saved_tz) {
             strlcpy(saved_tz_buf, saved_tz, sizeof(saved_tz_buf));
         }

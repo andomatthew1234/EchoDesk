@@ -255,6 +255,16 @@ static void apply_timezone_offset_minutes(int offset_minutes) {
 
     timezone_offset_minutes = (int16_t)offset_minutes;
 
+#if defined(ECHODESK_OS)
+    // EchoDesk is a Melbourne desk appliance. A fixed UTC+10/+11 offset from
+    // one companion frame would become wrong at the next DST transition, so
+    // retain the full Melbourne POSIX rule while the UTC system clock keeps
+    // advancing between companion/NTP updates.
+    setenv("TZ", "AEST-10AEDT,M10.1.0,M4.1.0/3", 1);
+    tzset();
+    return;
+#endif
+
     // POSIX TZ signs are inverted: UTC+2 is encoded as "AIM-2".
     int posix_minutes = -offset_minutes;
     char sign = '+';
@@ -289,6 +299,7 @@ static void handle_set_orientation(JsonDocument &doc) {
         return;
     }
     uint8_t new_orient;
+    const char *applied_val = val;
     if (strcmp(val, "portrait") == 0) {
         new_orient = ORIENTATION_PORTRAIT;
     } else if (strcmp(val, "landscape_left") == 0 || strcmp(val, "landscape") == 0) {
@@ -299,12 +310,18 @@ static void handle_set_orientation(JsonDocument &doc) {
         Serial.printf("{\"type\":\"error\",\"message\":\"set_orientation: invalid value '%s'\"}\n", val);
         return;
     }
+#if defined(ECHODESK_OS)
+    if (new_orient == ORIENTATION_PORTRAIT) {
+        new_orient = ORIENTATION_LANDSCAPE_RIGHT;
+        applied_val = "landscape_right";
+    }
+#endif
     if (new_orient != g_config.orientation) {
         g_config.orientation = new_orient;
         config_save(g_config);
         apply_orientation(new_orient);  // live rotation — no ESP.restart()
     }
-    Serial.printf("{\"type\":\"ok\",\"cmd\":\"set_orientation\",\"value\":\"%s\"}\n", val);
+    Serial.printf("{\"type\":\"ok\",\"cmd\":\"set_orientation\",\"value\":\"%s\"}\n", applied_val);
 }
 
 // --- set_brightness (0..100 percent) ---
@@ -316,7 +333,11 @@ static void handle_set_brightness(JsonDocument &doc) {
         return;
     }
     int val = doc["value"];
+#if defined(ECHODESK_OS)
+    if (val < 10) val = 10;
+#else
     if (val < BRIGHTNESS_MIN_PERCENT) val = BRIGHTNESS_MIN_PERCENT;
+#endif
     if (val > BRIGHTNESS_MAX_PERCENT) val = BRIGHTNESS_MAX_PERCENT;
     bool persist = doc["persist"] | true;
     g_config.brightness_pct = (uint8_t)val;
@@ -1218,6 +1239,23 @@ MonitorState serial_get_state() {
     MonitorState copy;
     memcpy(&copy, &state, sizeof(MonitorState));
     return copy;
+}
+
+bool serial_get_provider_state(uint8_t provider, MonitorState &out) {
+    for (uint8_t i = 0; i < view_count; ++i) {
+        if (view_types[i] == provider) {
+            memcpy(&out, &view_states[i], sizeof(MonitorState));
+            return true;
+        }
+    }
+
+    // Legacy companions expose a single active provider and may not have sent
+    // set_views. Keep that wire-compatible path available as a fallback.
+    if (state.provider == provider) {
+        memcpy(&out, &state, sizeof(MonitorState));
+        return true;
+    }
+    return false;
 }
 
 // ============================================================
