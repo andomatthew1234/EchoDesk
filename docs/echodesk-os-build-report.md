@@ -22,9 +22,13 @@
 
 ## Final build result
 
-The final figures and SHA-256 are populated from the last clean build performed
-after all implementation and audit fixes. See the adjacent checksum file for
-the machine-readable digest.
+- Result: **SUCCESS**
+- RAM: 119,836 / 327,680 bytes (36.6%)
+- Application flash: 1,314,765 / 1,966,080 bytes (66.9%)
+- Merged image size: 1,386,880 bytes
+- Merged image offset: `0x0`
+- SHA-256:
+  `CE820EC683F9F3C87889FCDF3661317BBCFED320B3AF0786504F0F6FB09B4A8D`
 
 ## Hardware status
 
