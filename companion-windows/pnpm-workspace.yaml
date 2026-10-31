@@ -1,0 +1,3 @@
+allowBuilds:
+  # Vite's pinned JavaScript bundler installs its platform-specific executable.
+  esbuild: true

@@ -139,9 +139,13 @@ pub fn set_settings(app: AppHandle, patch: Map<String, Value>) -> Result<Setting
         current.save(&app);
     }
 
+    let ai_usage_changed = next.ai_usage_enabled != previous.ai_usage_enabled;
+    if ai_usage_changed {
+        poll::ai_usage_enabled_changed(&app, next.ai_usage_enabled);
+    }
     if next.provider != previous.provider {
         apply_provider(&app, next.provider);
-    } else {
+    } else if !ai_usage_changed {
         // Prozentmodus oder Sprache: Snapshot und Tray neu aufbauen.
         poll::emit_snapshot(&app);
     }

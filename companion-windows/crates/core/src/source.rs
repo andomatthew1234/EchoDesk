@@ -56,6 +56,8 @@ pub struct Snapshot {
     pub source: Option<String>,
     pub updated_at: Option<DateTime<Utc>>,
     pub fetched_at: Option<DateTime<Utc>>,
+    /// Last fetch which produced usable, non-stale quota data.
+    pub last_successful_at: Option<DateTime<Utc>>,
     pub fetching: bool,
     pub percent_mode: PercentMode,
     pub cli_path: Option<PathBuf>,
@@ -71,6 +73,7 @@ pub struct Source {
     last_entry: Option<Entry>,
     last_source: Option<String>,
     last_fetched_at: Option<DateTime<Utc>>,
+    last_successful_at: Option<DateTime<Utc>>,
     cache: HashMap<Provider, Cached>,
     fetching: bool,
     pending_reload: bool,
@@ -90,6 +93,7 @@ impl Source {
             last_entry: None,
             last_source: None,
             last_fetched_at: None,
+            last_successful_at: None,
             cache: HashMap::new(),
             fetching: false,
             pending_reload: false,
@@ -168,6 +172,25 @@ impl Source {
         Some(self.provider)
     }
 
+    /// Forget an outstanding worker without accepting its result. Used when
+    /// the AI Usage component is disabled while a CLI invocation is running.
+    pub fn cancel_fetch(&mut self) {
+        self.fetching = false;
+        self.pending_reload = false;
+    }
+
+    /// Drop publishable usage while retaining the timestamp of the last
+    /// successful run for component diagnostics.
+    pub fn disable(&mut self) {
+        self.cancel_fetch();
+        self.status = Status::NotYet;
+        self.last_entry = None;
+        self.last_source = None;
+        self.last_fetched_at = None;
+        self.cache.clear();
+        self.last_run = None;
+    }
+
     /// Ergebnis eines Abrufs übernehmen. Gibt `true` zurück, wenn sofort ein
     /// weiterer Abruf nötig ist (Provider hat inzwischen gewechselt oder ein
     /// Abruf wurde während des Laufs angefordert).
@@ -195,6 +218,7 @@ impl Source {
 
     fn apply_status(&mut self, status: Status, entry: Option<Entry>, source: Option<String>) {
         if let (Some(e), true) = (&entry, status.is_ok()) {
+            self.last_successful_at = self.last_fetched_at;
             self.cache.insert(
                 self.provider,
                 Cached {
@@ -229,6 +253,7 @@ impl Source {
             source: self.last_source.clone(),
             updated_at: self.last_entry.as_ref().and_then(|e| e.updated_at),
             fetched_at: self.last_fetched_at,
+            last_successful_at: self.last_successful_at,
             fetching: self.fetching,
             percent_mode: mode,
             cli_path: self.cli_path.clone(),
@@ -337,5 +362,14 @@ mod tests {
         assert_eq!(snap.rows[0].used_percent, 70);
         assert_eq!(snap.last_run.as_ref().unwrap().stdout, CLAUDE);
         assert_eq!(snap.provider_label, "Claude");
+        assert_eq!(snap.last_successful_at, Some(t(1)));
+
+        s.begin_fetch();
+        s.disable();
+        let disabled = s.snapshot(PercentMode::Remaining);
+        assert!(!disabled.fetching);
+        assert!(disabled.entry.is_none());
+        assert_eq!(disabled.status, Status::NotYet);
+        assert_eq!(disabled.last_successful_at, Some(t(1)));
     }
 }

@@ -138,6 +138,14 @@
 // Others
 // ============================================================
 #define LV_USE_FS_STDIO 0
+#if defined(ECHODESK_OS)
+#define LV_USE_FS_MEMFS 1
+#define LV_FS_MEMFS_LETTER 'M'
+#define LV_USE_TJPGD   1
+#else
+#define LV_USE_FS_MEMFS 0
+#define LV_USE_TJPGD   0
+#endif
 #define LV_USE_PNG      0
 #define LV_USE_BMP      0
 #define LV_USE_GIF      0

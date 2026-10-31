@@ -54,6 +54,58 @@ Datenframes gehen bei jedem neuen Snapshot, Provider-, Einstellungs- und
 Profilwechsel über einen 120-ms-Debounce, dazu ein Heartbeat alle 60 s.
 Drei unbestätigte Frames in Folge lösen einen Reconnect aus (Abkühlung 60 s).
 
+## EchoDesk Desktop broker
+
+AI Monitor remains the sole owner of the USB serial port. On Windows it also
+hosts the local named pipe `\\.\pipe\EchoDesk.Companion.v1`; the separate WPF
+EchoDesk Desktop process never opens a COM port. The pipe rejects remote
+clients, uses a protected current-user/System/administrator DACL, accepts one local desktop client, and
+limits each UTF-8 newline-delimited JSON request to 65,536 bytes.
+
+The v1 broker exposes only six allowlisted methods: `hello`, `get_state`,
+`open_app`, `set_settings`, `restart`, and `reconnect`. There is deliberately
+no raw-serial method. Responses preserve the request ID, and `state` events
+carry a monotonic `brokerRevision`; firmware settings carry their separate
+revision for stale-write rejection. Device commands are sent only after
+`get_info` negotiates `echoDeskControlProtocol:1`. The serial thread validates
+all app names, setting names, ranges, response IDs, response sizes and device
+state fields before publishing them to the pipe.
+
+Example request and response:
+
+```json
+{"version":1,"id":"desktop-7","method":"open_app","params":{"app":"clock"}}
+{"version":1,"id":"desktop-7","ok":true,"result":{"brokerAvailable":true,"brokerRevision":12,"connection":"connected","port":"COM5","firmware":"2.28.0","deviceState":{"activeApp":"clock","revision":4}}}
+```
+
+`set_settings` requires `baseRevision`, `persist`, and a partial `settings`
+object. A non-persistent update is brightness-only, preventing slider motion
+from writing ESP32 flash. On connect, the serial owner retrieves the complete
+device state; touchscreen-originated state frames update the broker cache and
+are forwarded as events.
+
+## EchoDesk Now Playing (Windows)
+
+`src-tauri/src/music.rs` liest Windows-GSMTC-Sitzungen ungefähr einmal pro
+Sekunde. Eine spielende Sitzung schlägt immer pausierte Hintergrund- oder
+Browser-Sitzungen; bei Gleichstand bleiben Auswahl und Sortierung stabil. Der
+Serial-Service sendet Metadaten nur an Geräte mit `musicProtocol:1`, überträgt
+höchstens 12 KiB große 96×96-JPEGs in bestätigten 1536-Byte-Blöcken und sendet
+dasselbe Artwork erst nach einem Reconnect erneut. Gerätebefehle enthalten die
+Sitzungs-Generation und werden vor der GSMTC-Ausführung erneut gegen die
+gemeldeten Fähigkeiten geprüft. Der Zustand wird erst aus der nächsten
+bestätigten Windows-Abfrage aktualisiert.
+
+Für `musicBackgroundProtocol:1` erzeugt der Companion aus demselben Quellbild
+ein unverzerrt auf 320×240 zugeschnittenes, lokal weichgezeichnetes JPEG bis
+32 KiB. Es wird nur übertragen, solange das Gerät per
+`music_background_request` darum bittet. Audio Bars ist ebenfalls opt-in: Erst
+`music_visualizer enabled:true` startet WASAPI-Loopback auf dem aktuellen
+Windows-Standardgerät für Multimedia. Ein 1024-Punkt-FFT reduziert das Signal
+ungefähr 20-mal pro Sekunde auf 16 Byte-Bänder. PCM wird weder gespeichert noch
+übertragen. Loopback kann sämtliche Töne dieses Ausgabegeräts enthalten, nicht
+nur die aktive GSMTC-Sitzung; bei Fehlern wird ein Unavailable-Zustand gesendet.
+
 Der Zustand geht als `ConnectionSnapshot` über das Event
 `connection-changed` ans Frontend (Zustand, Port, `info`, Profil, letzter
 Receipt, Zähler, Protokoll). Geräteprofile liegen als `devices.json` neben
@@ -143,6 +195,7 @@ companion-windows/
     src/poll.rs         Abrufzyklus (POLL_INTERVAL, spawn_blocking)
     src/commands.rs     Tauri-Commands fürs Frontend
     src/serial_service.rs Serial-Thread: Scan, Handshake, Frames, ACK-Buchführung, Pause/Resume
+    src/music.rs        GSMTC-Erkennung, deterministische Sessionwahl, Metadaten, Artwork und Controls
     src/updates.rs      Release-Abfrage, Firmware-Download, App-Update
     src/flash.rs        Flash-Ablauf mit Pause/Resume des Serial-Threads
     src/registry.rs     devices.json (Geräteprofile) unter app_config_dir()
@@ -159,6 +212,41 @@ companion-windows/
 Einstellungen und Geräteprofile liegen unter macOS in
 `~/Library/Application Support/de.aimonitor.companion/` (`settings.json`,
 `devices.json`), unter Windows in `%APPDATA%\de.aimonitor.companion\`.
+
+## EchoDesk Performance Centre (Windows)
+
+On Windows the companion starts the bundled
+`echodesk-performance-helper.exe`. The helper uses the official stable
+`LibreHardwareMonitorLib` 0.9.6 package, samples once per second, and writes
+compact NDJSON to stdout. It never opens a serial port. A single-slot mailbox
+coalesces slow-consumer bursts, and the existing `aimonitor-serial` thread
+remains the only COM owner.
+
+Performance frames are sent only after device `get_info` explicitly reports
+`"performanceProtocol":1`. Stock AI Monitor firmware therefore keeps its
+existing Codex-only behavior. The telemetry payload is versioned, stays below
+1024 bytes, and carries CPU/GPU/RAM percentages, RAM bytes, network byte rates,
+and available CPU/GPU/motherboard temperatures. Missing sensors are `null`.
+
+Build the helper before `cargo tauri build`:
+
+```powershell
+.\tools\echodesk-performance-helper\build.ps1
+```
+
+The build requires the .NET 8 SDK; the published helper is self-contained, so
+end users do not need to install .NET. The Windows Tauri configuration bundles
+the executable and its third-party notice under `performance/`.
+
+LibreHardwareMonitor is MPL-2.0 and is consumed unmodified from its official
+NuGet package. Exact source, package, license and sensor-selection details are
+recorded in
+[`tools/echodesk-performance-helper/THIRD-PARTY-NOTICES.md`](tools/echodesk-performance-helper/THIRD-PARTY-NOTICES.md)
+and
+[`tools/echodesk-performance-helper/README.md`](tools/echodesk-performance-helper/README.md).
+Some low-level temperature or motherboard sensors require administrator
+rights. The helper deliberately does not request elevation; unavailable values
+remain `null` and all other monitoring continues without an elevation prompt.
 
 
 ### Plugin data fixtures

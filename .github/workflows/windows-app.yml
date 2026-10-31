@@ -1,231 +1,300 @@
-name: Windows App Build
+name: EchoDesk Desktop Windows Build
 
-# Baut die Windows-Companion-App (companion-windows/, Tauri 2) als NSIS-Setup.
-# Trigger nur auf Windows-App-Tags (win-v1.x.x, win-beta-v*), damit der
-# Runner nicht bei jedem Commit läuft. Manuell per Dispatch startbar; dann
-# wird nur gebaut und als Workflow-Artefakt abgelegt, außer upload_to_release
-# ist gesetzt.
-#
-# Signierung: optional über Azure Trusted Signing (Secrets AZURE_*) oder ein
-# PFX-Zertifikat (WINDOWS_CERTIFICATE_BASE64 + WINDOWS_CERTIFICATE_PASSWORD).
-# Fehlen beide, entsteht ein unsigniertes Setup; SmartScreen warnt dann.
-
+# Ordinary CI runs only create artifacts. Publishing is available solely from
+# an explicit manual dispatch and only to a release that already exists.
 on:
   push:
-    tags:
-      - 'win-v*.*.*'
-      - 'win-beta-v*'
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-app.yml'
+      - 'desktop/**'
+      - 'companion-windows/**'
+      - 'src/**'
+      - 'scripts/build_freenove_firmware.ps1'
+      - 'scripts/package_echodesk_firmware.ps1'
+      - 'scripts/test_echodesk_firmware_package.ps1'
+      - 'platformio.ini'
+  pull_request:
+    paths:
+      - '.github/workflows/windows-app.yml'
+      - 'desktop/**'
+      - 'companion-windows/**'
+      - 'src/**'
+      - 'scripts/build_freenove_firmware.ps1'
+      - 'scripts/package_echodesk_firmware.ps1'
+      - 'scripts/test_echodesk_firmware_package.ps1'
+      - 'platformio.ini'
   workflow_dispatch:
     inputs:
       upload_to_release:
-        description: 'Setup + SHA-256 zum vorhandenen Release hochladen (Tag angeben)'
-        required: false
-        default: 'false'
+        description: 'Upload verified assets to an existing GitHub Release'
+        type: boolean
+        required: true
+        default: false
       tag:
-        description: 'Release-Tag (nur bei upload_to_release=true)'
+        description: 'Existing release tag ending in v0.2.0 (only when uploading)'
+        type: string
         required: false
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: windows-app-${{ github.ref }}
+  group: echodesk-desktop-windows-${{ github.ref }}
   cancel-in-progress: true
 
-defaults:
-  run:
-    shell: bash
-
 env:
-  APP_DIR: companion-windows
-  SETUP_NAME: AIMonitor-Setup.exe
-  # Exponiert, damit Steps per `if: env.X != ''` erkennen, ob Signing-Secrets da sind.
+  DESKTOP_VERSION: '0.2.0'
+  CODEXBAR_VERSION: '0.70.0'
+  CODEXBAR_ARCHIVE_SHA256: '79C3AA5B01B0CAD92BE0BED108CA1A97A901DF8B3998319272DBBDBA44FD3AE4'
+  CODEXBAR_EXE_SHA256: 'F81570B0CD7593ABB9822EB2362F9B9EDA3A382A571457718EE37E664E9A62FC'
   AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
   WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
 
 jobs:
   build:
+    name: Build, test and package
     runs-on: windows-latest
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # Die Version steht an drei Stellen: tauri.conf.json, package.json und
-      # der Workspace-Cargo.toml. Bei einem Release-Tag müssen alle drei zum
-      # Tag passen, sonst meldet der In-App-Updater eine andere Version als
-      # ausgeliefert wird.
-      - name: Verify app version matches tag
-        if: startsWith(github.ref, 'refs/tags/win-v') || startsWith(github.ref, 'refs/tags/win-beta-v')
-        working-directory: ${{ env.APP_DIR }}
-        run: |
-          set -euo pipefail
-          REF="${GITHUB_REF#refs/tags/}"
-          if [[ "$REF" == win-beta-v* ]]; then TAG="${REF#win-beta-v}"; else TAG="${REF#win-v}"; fi
-          CONF=$(python3 -c 'import json;print(json.load(open("src-tauri/tauri.conf.json"))["version"])')
-          PKG=$(python3 -c 'import json;print(json.load(open("package.json"))["version"])')
-          CARGO=$(grep -E '^version = ' Cargo.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-          fail=0
-          for pair in "tauri.conf.json:$CONF" "package.json:$PKG" "Cargo.toml:$CARGO"; do
-            name="${pair%%:*}"; val="${pair#*:}"
-            if [ "$val" != "$TAG" ]; then
-              echo "::error::Tag $REF passt nicht zu $name '$val' (erwartet Version $TAG)"
-              fail=1
-            fi
-          done
-          [ "$fail" = 0 ] && echo "Version OK: $TAG"
-          exit $fail
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
-      # Die Seite zeigt die veröffentlichte Windows-Version. Bei einem Release-Tag
-      # muss sie zum Code passen, sonst verlinkt sie auf ein falsches Setup.
-      # Beta-Tags bleiben aussen vor: die Seite verlinkt nur Stable, und die
-      # Muster in sync_site_versions.sh kennen keine Versionen mit -beta.N.
-      - name: Verify site versions are in sync
-        if: startsWith(github.ref, 'refs/tags/win-v')
-        run: ./scripts/sync_site_versions.sh --check
-
-      - name: Setup pnpm
+      - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - name: Setup Node
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: ${{ env.APP_DIR }}/pnpm-lock.yaml
+          cache-dependency-path: companion-windows/pnpm-lock.yaml
 
-      - name: Setup Rust
+      - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Rust cache
+      - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: ${{ env.APP_DIR }} -> target
+          workspaces: companion-windows -> target
 
-      - name: Install frontend dependencies
-        working-directory: ${{ env.APP_DIR }}
-        run: pnpm install --frozen-lockfile
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
 
-      # Erster echter Windows-Build der Crates: serialport (COMPort), espflash,
-      # dark-light und der CLI-Aufruf ohne Konsolenfenster laufen nur hier
-      # durch ihren Windows-Zweig.
-      - name: Run tests (Windows)
-        working-directory: ${{ env.APP_DIR }}
+      - name: Install PlatformIO and NSIS
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check platformio==6.1.18
+          choco install nsis --version=3.13.0 -y --no-progress
+          $nsis = @(
+            'C:\Program Files (x86)\NSIS\makensis.exe',
+            'C:\Program Files\NSIS\makensis.exe'
+          ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $nsis) { throw 'NSIS makensis.exe was not installed.' }
+          "NSIS_COMPILER=$nsis" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Install host frontend dependencies
+        working-directory: companion-windows
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build merged EchoDesk Mini firmware
+        shell: pwsh
+        run: .\scripts\build_freenove_firmware.ps1
+
+      - name: Test firmware release packaging
+        shell: pwsh
+        run: .\scripts\test_echodesk_firmware_package.ps1
+
+      - name: Test Rust workspace
+        working-directory: companion-windows
         run: cargo test --workspace --locked
 
-      # ------------------------------------------------------------------
-      # Signierung, Variante A: Azure Trusted Signing
-      # Secrets: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
-      #          AZURE_SIGNING_ENDPOINT (z. B. https://weu.codesigning.azure.net),
-      #          AZURE_SIGNING_ACCOUNT, AZURE_SIGNING_PROFILE
-      # ------------------------------------------------------------------
+      - name: Build release host
+        working-directory: companion-windows
+        run: cargo build --package aimonitor --release --locked
+
+      - name: Build and test WPF desktop
+        shell: pwsh
+        run: |
+          dotnet build .\desktop\EchoDesk.Desktop.sln -c Release
+          dotnet run --project .\desktop\tests\EchoDesk.Desktop.Tests\EchoDesk.Desktop.Tests.csproj -c Release --no-build
+
+      - name: Download and verify CLI-only Codex provider
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "CodexBarCLI-v$env:CODEXBAR_VERSION-windows-x64.zip"
+          $url = "https://github.com/nesszer/Win-CodexBar/releases/download/v$env:CODEXBAR_VERSION/CodexBarCLI-v$env:CODEXBAR_VERSION-windows-x64.zip"
+          Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $archive
+          $archiveHash = (Get-FileHash $archive -Algorithm SHA256).Hash
+          if ($archiveHash -ne $env:CODEXBAR_ARCHIVE_SHA256) { throw "Codex provider archive digest mismatch: $archiveHash" }
+          $extract = Join-Path $env:RUNNER_TEMP 'echodesk-codexbar-cli'
+          Expand-Archive $archive -DestinationPath $extract -Force
+          $cli = Get-ChildItem $extract -Recurse -File -Filter codexbar-cli.exe | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $cli) { throw 'The pinned archive did not contain codexbar-cli.exe.' }
+          $cliHash = (Get-FileHash $cli -Algorithm SHA256).Hash
+          if ($cliHash -ne $env:CODEXBAR_EXE_SHA256) { throw "Codex provider executable digest mismatch: $cliHash" }
+          $reported = (& $cli --version | Select-Object -First 1) -join ''
+          if ($LASTEXITCODE -ne 0 -or $reported -notmatch [regex]::Escape($env:CODEXBAR_VERSION)) { throw "Unexpected Codex provider version: $reported" }
+          "CODEXBAR_CLI=$cli" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build EchoDesk Desktop v0.2 package and installer
+        shell: pwsh
+        run: |
+          .\desktop\build.ps1 `
+            -HostExecutable .\companion-windows\target\release\aimonitor.exe `
+            -CodexBarCli $env:CODEXBAR_CLI `
+            -NsisCompiler $env:NSIS_COMPILER `
+            -RequireInstaller
+
       - name: Prepare Azure Trusted Signing
         if: env.AZURE_CLIENT_ID != ''
-        run: |
-          set -euo pipefail
-          cargo install trusted-signing-cli --locked
-          ENDPOINT="${{ secrets.AZURE_SIGNING_ENDPOINT }}"
-          ACCOUNT="${{ secrets.AZURE_SIGNING_ACCOUNT }}"
-          PROFILE="${{ secrets.AZURE_SIGNING_PROFILE }}"
-          echo "TAURI_SIGN_CONFIG={\"bundle\":{\"windows\":{\"signCommand\":\"trusted-signing-cli -e $ENDPOINT -a $ACCOUNT -c $PROFILE -d \\\"AI Monitor\\\" %1\"}}}" >> "$GITHUB_ENV"
-          echo "Signierung: Azure Trusted Signing"
+        shell: pwsh
+        run: cargo install trusted-signing-cli --locked
 
-      # ------------------------------------------------------------------
-      # Signierung, Variante B: PFX-Zertifikat im Zertifikatsspeicher
-      # Secrets: WINDOWS_CERTIFICATE_BASE64, WINDOWS_CERTIFICATE_PASSWORD
-      # ------------------------------------------------------------------
-      - name: Import PFX certificate
+      - name: Sign setup with Azure Trusted Signing
+        if: env.AZURE_CLIENT_ID != ''
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
+        run: |
+          $setup = Resolve-Path ".\desktop\dist\EchoDesk-Desktop-v$env:DESKTOP_VERSION-win-x64-setup.exe"
+          trusted-signing-cli -e $env:AZURE_SIGNING_ENDPOINT -a $env:AZURE_SIGNING_ACCOUNT -c $env:AZURE_SIGNING_PROFILE -d 'EchoDesk Desktop' $setup
+          if ($LASTEXITCODE -ne 0) { throw 'Azure Trusted Signing failed.' }
+
+      - name: Sign setup with PFX certificate
         if: env.AZURE_CLIENT_ID == '' && env.WINDOWS_CERTIFICATE_BASE64 != ''
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
-          $pfx = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          $pfx = Join-Path $env:RUNNER_TEMP 'echodesk-signing.pfx'
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
-          $pw = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
-          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pw
-          Remove-Item $pfx
-          $cfg = @{ bundle = @{ windows = @{ certificateThumbprint = $cert.Thumbprint; digestAlgorithm = "sha256"; timestampUrl = "http://timestamp.digicert.com" } } } | ConvertTo-Json -Compress -Depth 5
-          "TAURI_SIGN_CONFIG=$cfg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "Signierung: PFX-Zertifikat $($cert.Thumbprint)"
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $certificate = Import-PfxCertificate $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx -Force
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -File -Filter signtool.exe |
+            Where-Object FullName -Match '\\x64\\signtool\.exe$' | Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) { throw 'Windows SDK signtool.exe was not found.' }
+          $setup = Resolve-Path ".\desktop\dist\EchoDesk-Desktop-v$env:DESKTOP_VERSION-win-x64-setup.exe"
+          & $signtool sign /sha1 $certificate.Thumbprint /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $setup
+          if ($LASTEXITCODE -ne 0) { throw 'Authenticode signing failed.' }
 
-      - name: Build NSIS setup
-        working-directory: ${{ env.APP_DIR }}
-        env:
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-        run: |
-          set -euo pipefail
-          if [ -n "${TAURI_SIGN_CONFIG:-}" ]; then
-            pnpm tauri build --bundles nsis --config "$TAURI_SIGN_CONFIG"
-          else
-            echo "Unsignierter Build (keine Signing-Secrets hinterlegt)."
-            pnpm tauri build --bundles nsis
-          fi
-
-      # Tauri benennt das Setup "AI Monitor_<version>_x64-setup.exe" und legt es im
-      # Workspace-Zielordner target/ ab, nicht unter src-tauri/. Der
-      # In-App-Updater sucht das Asset unter dem festen Namen AIMonitor-Setup.exe
-      # und prüft es gegen die .sha256-Sidecar-Datei.
-      - name: Collect release assets
-        working-directory: ${{ env.APP_DIR }}
-        run: |
-          set -euo pipefail
-          SRC=$(ls target/release/bundle/nsis/*-setup.exe | head -1)
-          [ -f "$SRC" ] || { echo "::error::Kein NSIS-Setup gefunden"; exit 1; }
-          mkdir -p release
-          cp "$SRC" "release/$SETUP_NAME"
-          (cd release && sha256sum "$SETUP_NAME" > "$SETUP_NAME.sha256")
-          ls -la release
-          cat "release/$SETUP_NAME.sha256"
-
-      # Der stille Modus ist genau der Pfad, den der In-App-Updater nimmt.
-      - name: Smoke test silent install
-        working-directory: ${{ env.APP_DIR }}
+      - name: Finalize and verify release checksums
         shell: pwsh
         run: |
-          $setup = Resolve-Path "release\$env:SETUP_NAME"
-          $p = Start-Process -FilePath $setup -ArgumentList "/S" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "Installer Exit-Code $($p.ExitCode)" }
-          $exe = Join-Path $env:LOCALAPPDATA "AI Monitor\aimonitor.exe"
-          if (-not (Test-Path $exe)) { throw "aimonitor.exe nicht unter $exe" }
-          $sig = Get-AuthenticodeSignature $exe
-          Write-Host "Installiert: $exe, Signatur: $($sig.Status)"
-          $uninst = Join-Path $env:LOCALAPPDATA "AI Monitor\uninstall.exe"
-          if (Test-Path $uninst) { Start-Process -FilePath $uninst -ArgumentList "/S" -Wait }
+          $dist = Resolve-Path '.\desktop\dist'
+          $assets = @(
+            "EchoDesk-Desktop-v$env:DESKTOP_VERSION-win-x64.zip",
+            "EchoDesk-Desktop-v$env:DESKTOP_VERSION-win-x64-setup.exe"
+          )
+          foreach ($name in $assets) {
+            $path = Join-Path $dist $name
+            if (-not (Test-Path $path -PathType Leaf)) { throw "Missing release asset: $path" }
+            $hash = (Get-FileHash $path -Algorithm SHA256).Hash
+            Set-Content "$path.sha256" -Value "$hash  $name" -Encoding ascii
+            Write-Host "$hash  $name"
+          }
+          $component = Get-Content (Join-Path $dist 'EchoDesk-Desktop-win-x64\component-manifest.json') -Raw | ConvertFrom-Json
+          if ($component.packageVersion -ne $env:DESKTOP_VERSION) { throw 'Component manifest version mismatch.' }
+          if ($component.flashEngine -ne 'espflash-in-process') { throw 'Unexpected firmware flashing engine.' }
 
-      - name: Upload workflow artifact
+      - name: Smoke-test silent per-user install and uninstall
+        shell: pwsh
+        run: |
+          $setup = Resolve-Path ".\desktop\dist\EchoDesk-Desktop-v$env:DESKTOP_VERSION-win-x64-setup.exe"
+          $process = Start-Process $setup -ArgumentList '/S' -Wait -PassThru -WindowStyle Hidden
+          if ($process.ExitCode -ne 0) { throw "Installer exited with $($process.ExitCode)." }
+          $install = Join-Path $env:LOCALAPPDATA 'Programs\EchoDesk Desktop'
+          $required = @(
+            'EchoDesk Desktop.exe',
+            'EchoDesk Host.exe',
+            'components\codexbar-cli.exe',
+            'firmware\firmware-manifest.json',
+            'firmware\firmware-manifest.json.sha256',
+            'Uninstall EchoDesk Desktop.exe'
+          )
+          foreach ($relative in $required) {
+            $path = Join-Path $install $relative
+            if (-not (Test-Path $path -PathType Leaf)) { throw "Installed file missing: $path" }
+          }
+          $firmwareManifest = Get-Content (Join-Path $install 'firmware\firmware-manifest.json') -Raw | ConvertFrom-Json
+          $firmwareImage = Join-Path (Join-Path $install 'firmware') ($firmwareManifest.releases[0].imageFile -replace '/', [IO.Path]::DirectorySeparatorChar)
+          if (-not (Test-Path $firmwareImage -PathType Leaf)) { throw "Installed firmware image missing: $firmwareImage" }
+          $uninstaller = Join-Path $install 'Uninstall EchoDesk Desktop.exe'
+          $process = Start-Process $uninstaller -ArgumentList '/S' -Wait -PassThru -WindowStyle Hidden
+          if ($process.ExitCode -ne 0) { throw "Uninstaller exited with $($process.ExitCode)." }
+          Start-Sleep -Seconds 2
+          if (Test-Path $install) { throw "Uninstaller left the installation directory behind: $install" }
+
+      - name: Upload verified workflow artifact
         uses: actions/upload-artifact@v7
         with:
-          name: AIMonitor-Setup
+          name: EchoDesk-Desktop-v0.2.0-Windows
           path: |
-            ${{ env.APP_DIR }}/release/${{ env.SETUP_NAME }}
-            ${{ env.APP_DIR }}/release/${{ env.SETUP_NAME }}.sha256
+            desktop/dist/EchoDesk-Desktop-v0.2.0-win-x64.zip
+            desktop/dist/EchoDesk-Desktop-v0.2.0-win-x64.zip.sha256
+            desktop/dist/EchoDesk-Desktop-v0.2.0-win-x64-setup.exe
+            desktop/dist/EchoDesk-Desktop-v0.2.0-win-x64-setup.exe.sha256
+            desktop/dist/EchoDesk-Desktop-win-x64/component-manifest.json
+            desktop/dist/EchoDesk-Desktop-win-x64/firmware/firmware-manifest.json
+            desktop/dist/EchoDesk-Desktop-win-x64/firmware/firmware-manifest.json.sha256
           if-no-files-found: error
+          retention-days: 14
 
-      - name: Attach assets to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/win-v') || startsWith(github.ref, 'refs/tags/win-beta-v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_release == 'true' && github.event.inputs.tag != '')
-        working-directory: ${{ env.APP_DIR }}
+  publish:
+    name: Upload to an existing release
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.upload_to_release == true && inputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified build artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: EchoDesk-Desktop-v0.2.0-Windows
+          path: release-assets
+
+      - name: Validate explicit release target
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.tag }}"
-          else
-            TAG="${GITHUB_REF#refs/tags/}"
+          if [[ ! "$RELEASE_TAG" =~ (^|-)v0\.2\.0$ ]]; then
+            echo "::error::Release tag must end in v0.2.0; received '$RELEASE_TAG'."
+            exit 1
           fi
-          # Release anlegen, falls es noch nicht existiert. Beta-Tags werden als
-          # prerelease markiert, damit der Updater sie nur im Beta-Kanal anbietet.
-          # Vorhandene Notes bleiben unverändert, es werden nur Assets angehängt.
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            if [[ "$TAG" == win-beta-v* ]]; then
-              gh release create "$TAG" --prerelease --title "$TAG" \
-                --notes "Automatisierter Beta-Build der Windows-App."
-            else
-              gh release create "$TAG" --title "$TAG" --generate-notes
-            fi
-          fi
-          gh release upload "$TAG" "release/$SETUP_NAME" "release/$SETUP_NAME.sha256" --clobber
-          echo "Assets an $TAG angehängt."
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null || {
+            echo "::error::Release '$RELEASE_TAG' does not already exist. This workflow never creates releases."
+            exit 1
+          }
+
+      - name: Upload verified assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" \
+            release-assets/EchoDesk-Desktop-v0.2.0-win-x64.zip \
+            release-assets/EchoDesk-Desktop-v0.2.0-win-x64.zip.sha256 \
+            release-assets/EchoDesk-Desktop-v0.2.0-win-x64-setup.exe \
+            release-assets/EchoDesk-Desktop-v0.2.0-win-x64-setup.exe.sha256 \
+            --repo "$GITHUB_REPOSITORY" --clobber

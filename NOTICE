@@ -22,4 +22,6 @@ Third-party components used at build or run time keep their own licenses:
     Cursor) — vector paths from simple-icons (CC0); the marks themselves are
     trademarks of their respective owners and are used only to identify the
     supported services
-  - CodexBar — separate program invoked at runtime, MIT, not distributed here
+  - Win-CodexBar CLI 0.70.0 — bundled headless usage provider, MIT,
+    Copyright (c) 2025 Peter Steinberger; the complete licence text and pinned
+    binary checksum are included in desktop/THIRD-PARTY-NOTICES.md

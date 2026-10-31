@@ -18,6 +18,9 @@ pub const SNAPSHOT_EVENT: &str = "snapshot-changed";
 /// Snapshot ans Frontend schicken, Tray-Tooltip nachziehen und dem Gerät
 /// einen Datenframe über den Debounce anbieten.
 pub fn emit_snapshot(app: &AppHandle) {
+    app.state::<AppState>()
+        .desktop_broker_revision
+        .fetch_add(1, Ordering::AcqRel);
     let snap = current_snapshot(app);
     if let Err(e) = app.emit(SNAPSHOT_EVENT, &snap) {
         eprintln!("[aimonitor] Event nicht gesendet: {e}");
@@ -29,6 +32,10 @@ pub fn emit_snapshot(app: &AppHandle) {
 /// Abruf starten, falls keiner läuft (sonst wird er in der Quelle vorgemerkt).
 pub fn start_fetch(app: &AppHandle) {
     let state = app.state::<AppState>();
+    if !state.settings.lock().unwrap().ai_usage_enabled {
+        return;
+    }
+    let generation = state.ai_usage_generation.load(Ordering::Acquire);
     let (provider, cli) = {
         let mut src = state.source.lock().unwrap();
         let provider = src.begin_fetch();
@@ -44,13 +51,26 @@ pub fn start_fetch(app: &AppHandle) {
                 .await;
         let Ok(outcome) = outcome else {
             eprintln!("[aimonitor] Abruf-Thread abgebrochen");
+            let state = app.state::<AppState>();
+            if state.ai_usage_generation.load(Ordering::Acquire) == generation {
+                state.source.lock().unwrap().cancel_fetch();
+            }
             return;
         };
+        let state = app.state::<AppState>();
+        let enabled = state.settings.lock().unwrap().ai_usage_enabled;
+        if !enabled || state.ai_usage_generation.load(Ordering::Acquire) != generation {
+            return;
+        }
         let again = {
-            let state = app.state::<AppState>();
             let mut src = state.source.lock().unwrap();
             src.apply(outcome)
         };
+        if !state.settings.lock().unwrap().ai_usage_enabled
+            || state.ai_usage_generation.load(Ordering::Acquire) != generation
+        {
+            return;
+        }
         {
             let snap = current_snapshot(&app);
             println!(
@@ -158,6 +178,10 @@ pub fn refresh_plugins(app: &AppHandle) {
 /// Framelimit auch bei acht Fenstern eingehalten wird.
 pub fn refresh_views(app: &AppHandle) {
     let state = app.state::<AppState>();
+    if !state.settings.lock().unwrap().ai_usage_enabled {
+        return;
+    }
+    let generation = state.ai_usage_generation.load(Ordering::Acquire);
     if state.view_fetching.swap(true, Ordering::SeqCst) {
         state.view_refresh_pending.store(true, Ordering::SeqCst);
         return;
@@ -197,6 +221,11 @@ pub fn refresh_views(app: &AppHandle) {
             .await;
             if let Ok((src, snapshot)) = result {
                 let state = app.state::<AppState>();
+                if !state.settings.lock().unwrap().ai_usage_enabled
+                    || state.ai_usage_generation.load(Ordering::Acquire) != generation
+                {
+                    break;
+                }
                 state.view_clients.lock().unwrap().insert(provider, src);
                 if snapshot.status.is_ok() {
                     if let Some(entry) = &snapshot.entry {
@@ -218,8 +247,27 @@ pub fn refresh_views(app: &AppHandle) {
         }
         let state = app.state::<AppState>();
         state.view_fetching.store(false, Ordering::SeqCst);
-        if state.view_refresh_pending.swap(false, Ordering::SeqCst) {
+        let pending = state.view_refresh_pending.swap(false, Ordering::SeqCst);
+        if state.settings.lock().unwrap().ai_usage_enabled && pending {
             refresh_views(&app);
         }
     });
+}
+
+/// Apply the effects of a persisted AI Usage component toggle. The caller
+/// updates `Settings` first, then invokes this exactly once when it changed.
+pub fn ai_usage_enabled_changed(app: &AppHandle, enabled: bool) {
+    let state = app.state::<AppState>();
+    state.ai_usage_generation.fetch_add(1, Ordering::AcqRel);
+    if !enabled {
+        state.source.lock().unwrap().disable();
+        state.view_sources.lock().unwrap().clear();
+        state.view_clients.lock().unwrap().clear();
+        state.view_refresh_pending.store(false, Ordering::Release);
+    }
+    emit_snapshot(app);
+    if enabled {
+        start_fetch(app);
+        refresh_views(app);
+    }
 }

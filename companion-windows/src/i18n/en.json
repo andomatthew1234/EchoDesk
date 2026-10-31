@@ -186,6 +186,7 @@
   "download.failed": "Download failed",
   "download.running.ellipsis": "Downloading …",
   "dsp.notice.climissing": "CodexBar CLI missing",
+  "dsp.notice.auth": "Sign in to Codex",
   "dsp.notice.failed": "Fetch failed",
   "dsp.notice.loading": "Loading provider ...",
   "dsp.notice.parse": "Data error",

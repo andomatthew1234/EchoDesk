@@ -3,7 +3,8 @@
 EchoDesk OS is the Freenove FNK0114A_2P4 user interface built on the existing
 AI Monitor firmware. It keeps the verified Freenove display, touch,
 backlight, NVS and CH340/UART implementation, and it keeps the existing
-AI Monitor / Win-CodexBar serial protocol unchanged.
+AI Monitor / Win-CodexBar compatibility while extending the serial protocol
+with an explicitly negotiated Performance v1 frame.
 
 The feature is enabled only by `ECHODESK_OS=1` in the
 `freenove-fnk0114a-2p4` PlatformIO environment. The CYD and ESP32-S3 targets
@@ -15,22 +16,50 @@ continue to compile their original dashboard and settings paths.
 screen. App screens are deleted after returning Home, which keeps LVGL object
 memory bounded on the ESP32.
 
-- **Home** — three 300x56 touch cards for Codex Usage, Clock and Settings.
+- **Home** — five large touch cards in a non-scrolling 2×3 layout for Codex
+  Usage, Clock, Performance, Now Playing and Settings.
 - **Codex Usage** — reads the cached OpenAI provider state without changing the
   companion-managed active view. It displays the live 5-hour and weekly
   values, `PERCENT USED` or `PERCENT LEFT`, progress bars, reset countdowns and
-  provider-specific connection freshness.
+  provider-specific connection freshness. When the provider has no active
+  5-hour window, that card is omitted rather than showing an invented zero.
+  Unavailable usage data is represented by an animated loading spinner.
 - **Clock** — uses the existing embedded DIN-style 76 px font. Eight offset
   white labels plus a centered black label form real outlined hour digits; the
   minute row is solid white. The ESP32 system clock is set by companion UTC
   frames and continues running between updates. Optional NTP can resynchronise
-  it.
-- **Settings** — contains only the 10–100% live backlight slider and Restart.
+  it. Unsynchronised time uses an animated loading spinner.
+- **Performance** — opens the last persisted Performance view. Usage and
+  temperature selectors each provide five large targets. The aggregate
+  dashboards show four 60-sample mini-graphs; individual views show full-width
+  graphs. Missing sensors are `N/A`, data becomes stale after 3 seconds and is
+  removed after 15 seconds offline. Temperature Pressure is a smoothed,
+  hysteretic estimate based on the highest component-specific pressure, with
+  GOOD/MODERATE/HIGH colour status and the contributing component.
+- **Now Playing** — shows the selected Windows media session's title, artist,
+  album, application, confirmed state, locally smoothed position, duration and
+  96×96 artwork. Previous, play/pause and next are enabled only when GSMTC
+  reports support. Missing metadata and artwork use explicit fallbacks; stale
+  or offline data disables controls. Its local customisation panel independently
+  persists Album Cover, CarPlay Inspired or EchoDesk Style and Album Cover,
+  EchoDesk or Audio Bars backgrounds. All nine combinations are valid. Layout
+  changes apply the layout's default background only until the user explicitly
+  overrides it; Restore Layout Default clears that override. Windows prepares
+  a cropped, blurred 320×240 background JPEG and sends it only while requested.
+  EchoDesk is pure black/white according to the global theme. Audio Bars opts
+  into local WASAPI loopback, renders 16 real FFT bands at 25 FPS with peak
+  decay, and settles on pause/stop or stale data. No PCM reaches the ESP32.
+  The four EchoDesk artwork brackets still animate by two pixels at 25 FPS only
+  during confirmed playback. The companion remains the sole COM-port owner.
+- **Settings** — contains the 10–100% live backlight slider, a persisted
+  Dark/Light theme control, and Restart. The Light theme inverts the product
+  palette to white surfaces with black type while retaining grey hierarchy.
   Slider movement changes GPIO21 PWM immediately; release commits the value to
   NVS. Restart uses a confirmation overlay and defers `ESP.restart()` until
   after the LVGL event callback.
 
-All app screens have a 54x26 Home control. Navigation uses 140 ms fades and a
+All app screens have a Home control; Now Playing uses a 68x36 target for the
+resistive touchscreen. Navigation uses 140 ms fades and a
 350 ms input guard to reject accidental double taps. Serial parsing and NTP
 ticks remain in the main loop regardless of the visible app.
 
@@ -102,9 +131,10 @@ existing NVS configuration:
 py "$env:USERPROFILE\.platformio\packages\tool-esptoolpy\esptool.py" --chip esp32 --port COM5 --baud 460800 write_flash 0x10000 .\.pio\build\freenove-fnk0114a-2p4\firmware.bin
 ```
 
-After a manual flash, restart AI Monitor. It can continue using COM5 at 115200
-baud and the same framed or legacy JSON protocol. No separate Windows app is
-required.
+After a manual flash, restart the updated AI Monitor Windows companion. It can
+continue using COM5 at 115200 baud and remains the only serial-port owner. Its
+bundled LibreHardwareMonitor helper supplies Performance telemetry through the
+same serial thread; no second COM-port application is required.
 
 ## Validation boundary
 
@@ -116,6 +146,10 @@ build.
 
 ## Preview
 
-The four-screen rendered preview is in
-[`echodesk-os-preview.svg`](echodesk-os-preview.svg). Preview usage and time
-values are labelled as sample data; the firmware never hardcodes those values.
+The shell preview remains in [`echodesk-os-preview.svg`](echodesk-os-preview.svg).
+The exact-aspect Performance selector, usage dashboard and pressure view are in
+[`performance-centre-preview.svg`](performance-centre-preview.svg). Preview
+values are labelled as sample data; production firmware never hardcodes them.
+Feishin's supported GSMTC configuration and the optional credential-safe
+Remote fallback design are documented in
+[`feishin-windows-media-research.md`](feishin-windows-media-research.md).

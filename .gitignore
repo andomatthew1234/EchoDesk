@@ -21,6 +21,17 @@ hardware-test/**/managed_components/
 hardware-test/**/dependencies.lock
 hardware-test/**/sdkconfig*
 
+# EchoDesk Desktop build intermediates and local distributables. Release
+# packages belong in GitHub Releases, not the source repository.
+desktop/**/bin/
+desktop/**/obj/
+/desktop/dist/
+
+# .NET helper build products and local validation output
+/companion-windows/tools/**/bin/
+/companion-windows/tools/**/obj/
+/test-results/
+
 # S3-Firmware: Artefakte des IDF-Builds im Projektwurzelverzeichnis
 # (custom_sdkconfig in platformio.ini, werden bei jedem Build neu erzeugt)
 /.dummy/

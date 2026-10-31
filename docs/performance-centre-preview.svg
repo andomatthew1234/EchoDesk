@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="992" height="256" viewBox="0 0 992 256">
+  <title>EchoDesk Performance Centre — exact 320 by 240 previews</title>
+  <desc>Selection, all-usage dashboard, and Temperature Pressure views. Values are illustrative preview data.</desc>
+  <style>
+    .screen{fill:#000;stroke:#555}.panel{fill:#101010;stroke:#3c3c3c}.button{fill:#101010;stroke:#555}.selected{fill:#fff;stroke:#fff}.w{fill:#fff}.g{fill:#a0a0a0}.grid{stroke:#3c3c3c;stroke-width:.7}.line{fill:none;stroke:#fff;stroke-width:1.4}.line2{fill:none;stroke:#9a9a9a;stroke-width:1.2}.txt{font-family:Montserrat,Arial,sans-serif}.good{fill:#31d158}
+  </style>
+  <rect width="992" height="256" fill="#181818"/>
+
+  <g transform="translate(8 8)">
+    <rect class="screen" width="320" height="240"/>
+    <rect class="button" x="6" y="5" width="62" height="30" rx="7"/><text class="txt w" x="37" y="24" font-size="12" text-anchor="middle">HOME</text>
+    <text class="txt w" x="160" y="25" font-size="14" text-anchor="middle">PERFORMANCE</text>
+    <rect class="button" x="252" y="5" width="62" height="30" rx="7"/><text class="txt w" x="283" y="24" font-size="12" text-anchor="middle">BACK</text>
+    <line class="grid" x1="8" y1="39" x2="312" y2="39"/>
+    <rect class="selected" x="8" y="47" width="146" height="34" rx="8"/><text class="txt" x="81" y="68" font-size="12" text-anchor="middle">USAGE</text>
+    <rect class="button" x="166" y="47" width="146" height="34" rx="8"/><text class="txt w" x="239" y="68" font-size="12" text-anchor="middle">TEMPERATURE</text>
+    <g class="txt w" font-size="12" text-anchor="middle">
+      <rect class="button" x="8" y="89" width="146" height="43" rx="9"/><text x="81" y="115">ALL USAGE</text>
+      <rect class="button" x="166" y="89" width="146" height="43" rx="9"/><text x="239" y="115">CPU USAGE</text>
+      <rect class="button" x="8" y="138" width="146" height="43" rx="9"/><text x="81" y="164">GPU USAGE</text>
+      <rect class="button" x="166" y="138" width="146" height="43" rx="9"/><text x="239" y="164">MEMORY</text>
+      <rect class="button" x="8" y="187" width="146" height="43" rx="9"/><text x="81" y="213">NETWORK</text>
+    </g>
+  </g>
+
+  <g transform="translate(336 8)">
+    <rect class="screen" width="320" height="240"/>
+    <rect class="button" x="6" y="5" width="62" height="30" rx="7"/><text class="txt w" x="37" y="24" font-size="12" text-anchor="middle">HOME</text>
+    <text class="txt w" x="160" y="25" font-size="14" text-anchor="middle">ALL USAGE</text>
+    <rect class="button" x="252" y="5" width="62" height="30" rx="7"/><text class="txt w" x="283" y="24" font-size="12" text-anchor="middle">BACK</text>
+    <line class="grid" x1="8" y1="39" x2="312" y2="39"/>
+    <g transform="translate(8 48)"><rect class="panel" width="148" height="82" rx="10"/><text class="txt g" x="7" y="16" font-size="12">CPU</text><text class="txt g" x="141" y="16" font-size="10" text-anchor="end">CURRENT</text><text class="txt w" x="7" y="38" font-size="16">34%</text><path class="grid" d="M7 58H141M51 43V77M96 43V77"/><path class="line" d="M7 70 L18 65 L29 68 L40 55 L51 59 L62 49 L73 57 L84 47 L95 52 L106 43 L117 51 L128 46 L141 54"/></g>
+    <g transform="translate(164 48)"><rect class="panel" width="148" height="82" rx="10"/><text class="txt g" x="7" y="16" font-size="12">GPU</text><text class="txt g" x="141" y="16" font-size="10" text-anchor="end">CURRENT</text><text class="txt w" x="7" y="38" font-size="16">61%</text><path class="grid" d="M7 58H141M51 43V77M96 43V77"/><path class="line" d="M7 74 L18 72 L29 67 L40 62 L51 64 L62 55 L73 49 L84 51 L95 45 L106 47 L117 42 L128 44 L141 48"/></g>
+    <g transform="translate(8 138)"><rect class="panel" width="148" height="82" rx="10"/><text class="txt g" x="7" y="16" font-size="12">MEMORY</text><text class="txt g" x="141" y="16" font-size="10" text-anchor="end">CURRENT</text><text class="txt w" x="7" y="38" font-size="16">58%</text><path class="grid" d="M7 58H141M51 43V77M96 43V77"/><path class="line" d="M7 57 L29 57 L51 56 L73 55 L95 55 L117 54 L141 53"/></g>
+    <g transform="translate(164 138)"><rect class="panel" width="148" height="82" rx="10"/><text class="txt g" x="7" y="16" font-size="12">NETWORK</text><text class="txt g" x="141" y="16" font-size="10" text-anchor="end">BITS/S</text><text class="txt w" x="7" y="37" font-size="12">D 8.2M  U 1.1M</text><path class="grid" d="M7 58H141M51 43V77M96 43V77"/><path class="line" d="M7 75 L18 74 L29 66 L40 72 L51 48 L62 69 L73 58 L84 73 L95 44 L106 64 L117 54 L128 70 L141 50"/><path class="line2" d="M7 76 L29 74 L51 68 L73 72 L95 66 L117 71 L141 64"/></g>
+    <text class="txt g" x="309" y="235" font-size="9" text-anchor="end">PREVIEW DATA</text>
+  </g>
+
+  <g transform="translate(664 8)">
+    <rect class="screen" width="320" height="240"/>
+    <rect class="button" x="6" y="5" width="62" height="30" rx="7"/><text class="txt w" x="37" y="24" font-size="12" text-anchor="middle">HOME</text>
+    <text class="txt w" x="160" y="25" font-size="14" text-anchor="middle">PRESSURE</text>
+    <rect class="button" x="252" y="5" width="62" height="30" rx="7"/><text class="txt w" x="283" y="24" font-size="12" text-anchor="middle">BACK</text>
+    <line class="grid" x1="8" y1="39" x2="312" y2="39"/>
+    <text class="txt w" x="309" y="58" font-size="12" text-anchor="end">LIVE</text>
+    <text class="txt good" x="160" y="116" font-size="36" font-weight="700" text-anchor="middle">GOOD</text>
+    <text class="txt g" x="160" y="145" font-size="14" text-anchor="middle">CPU  /  ESTIMATE 24%</text>
+    <rect x="8" y="159" width="304" height="75" rx="7" fill="#000" stroke="#3c3c3c"/>
+    <path class="grid" d="M8 178H312M8 197H312M8 216H312M84 159V234M160 159V234M236 159V234"/>
+    <path class="line" d="M13 220 L28 219 L43 218 L58 216 L73 217 L88 211 L103 214 L118 207 L133 210 L148 205 L163 202 L178 204 L193 198 L208 201 L223 194 L238 197 L253 191 L268 193 L283 188 L307 190"/>
+    <text class="txt g" x="309" y="235" font-size="9" text-anchor="end">PREVIEW DATA</text>
+  </g>
+</svg>

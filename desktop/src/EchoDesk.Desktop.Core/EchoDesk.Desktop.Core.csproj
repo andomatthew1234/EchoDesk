@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>EchoDesk.Desktop.Core</AssemblyName>
+    <RootNamespace>EchoDesk.Desktop.Core</RootNamespace>
+  </PropertyGroup>
+</Project>

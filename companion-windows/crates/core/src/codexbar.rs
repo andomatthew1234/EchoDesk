@@ -139,12 +139,52 @@ pub struct CliResult {
     pub source: Option<String>,
     pub usage: Option<CliUsage>,
     pub error: Option<CliError>,
+    #[serde(default, alias = "errorKind")]
+    pub error_kind: Option<String>,
     /// Win-CodexBar schreibt seine Version in jedes Ergebnis.
     pub version: Option<String>,
     #[serde(default)]
     pub credits: Option<CliCredits>,
     #[serde(default)]
     pub cost: Option<CliCost>,
+}
+
+fn classify_error(error: &CliError, top_level_kind: Option<&str>) -> Status {
+    let message = error.message();
+    let kind = top_level_kind
+        .or_else(|| match error {
+            CliError::Object { kind, .. } => kind.as_deref(),
+            CliError::Text(_) => None,
+        })
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let normalized = message.to_ascii_lowercase();
+    if kind.contains("auth")
+        || kind.contains("credential")
+        || normalized.contains("not logged in")
+        || normalized.contains("sign in")
+        || normalized.contains("login required")
+        || normalized.contains("no credentials")
+        || normalized.contains("unauthorized")
+    {
+        Status::AuthenticationRequired
+    } else if kind.contains("rate")
+        || normalized.contains("rate limit")
+        || normalized.contains("too many requests")
+    {
+        Status::RateLimited
+    } else if kind.contains("network")
+        || kind.contains("offline")
+        || normalized.contains("network is unreachable")
+        || normalized.contains("connection refused")
+        || normalized.contains("dns")
+    {
+        Status::NetworkUnavailable
+    } else {
+        // Retain the upstream text for the legacy diagnostics view. The
+        // EchoDesk broker maps it to a generic, bounded user-facing message.
+        Status::ProviderUnavailable { message }
+    }
 }
 
 /// Rohausgabe der CLI in das erste Ergebnis übersetzen.
@@ -256,11 +296,9 @@ pub fn evaluate(
 ) -> Evaluation {
     let source = result.source.clone();
 
-    if let Some(err) = result.error {
+    if let Some(ref err) = result.error {
         return Evaluation {
-            status: Status::ProviderUnavailable {
-                message: err.message(),
-            },
+            status: classify_error(err, result.error_kind.as_deref()),
             entry: None,
             source,
         };
@@ -400,17 +438,18 @@ mod tests {
     }
 
     #[test]
-    fn error_string_and_error_object_both_mean_unavailable() {
+    fn errors_are_classified_without_exposing_authentication_details() {
         let win = br#"[{"provider":"cursor","error":"No credentials found for cursor"}]"#;
         let eval = evaluate(parse_output(win).unwrap(), Provider::Cursor, now(), Duration::from_secs(900));
-        assert_eq!(
-            eval.status,
-            Status::ProviderUnavailable { message: "No credentials found for cursor".into() }
-        );
+        assert_eq!(eval.status, Status::AuthenticationRequired);
 
         let mac = br#"[{"provider":"cursor","source":"web","error":{"code":1,"message":"not logged in","kind":"auth"}}]"#;
         let eval = evaluate(parse_output(mac).unwrap(), Provider::Cursor, now(), Duration::from_secs(900));
-        assert_eq!(eval.status, Status::ProviderUnavailable { message: "not logged in".into() });
+        assert_eq!(eval.status, Status::AuthenticationRequired);
+
+        let rate = br#"[{"provider":"codex","error":"Too many requests","errorKind":"rate_limit"}]"#;
+        let eval = evaluate(parse_output(rate).unwrap(), Provider::Codex, now(), Duration::from_secs(900));
+        assert_eq!(eval.status, Status::RateLimited);
     }
 
     #[test]

@@ -1,0 +1,237 @@
+using System.Text.Json;
+using EchoDesk.Desktop.Core.Models;
+
+namespace EchoDesk.Desktop.Core.Services;
+
+public static class BrokerStateMapper
+{
+    public static BrokerState FromPayload(JsonElement payload)
+    {
+        if (payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("state", out var nested))
+        {
+            payload = nested;
+        }
+
+        var connection = Text(payload, "connection") ?? "disconnected";
+        var port = Text(payload, "port");
+        var lastError = Text(payload, "lastError");
+        var firmware = Text(payload, "firmware");
+        if (payload.TryGetProperty("firmware", out var firmwareNode) && firmwareNode.ValueKind == JsonValueKind.Object)
+        {
+            firmware = Text(firmwareNode, "version");
+        }
+
+        if (!payload.TryGetProperty("deviceState", out var state) || state.ValueKind != JsonValueKind.Object)
+        {
+            state = payload;
+        }
+
+        var settings = state.TryGetProperty("settings", out var settingsNode)
+            ? ParseSettings(settingsNode)
+            : new DeviceSettings();
+        var revision = ULong(state, "revision") ?? ULong(state, "settingsRevision") ?? 0;
+        var activeApp = Text(state, "activeApp");
+        var supportedApps = Strings(state, "supportedApps");
+        var unsupportedSettings = Strings(state, "unsupportedSettings");
+        var info = payload.TryGetProperty("device", out var deviceInfo) && deviceInfo.ValueKind == JsonValueKind.Object
+            ? deviceInfo
+            : default;
+        var hardware = Text(state, "hardwareModel")
+                       ?? Text(info, "hardwareModel")
+                       ?? Text(info, "display");
+        var name = Text(state, "deviceName") ?? Text(state, "name") ?? Text(info, "name") ?? "EchoDesk";
+        var controlProtocol = Int(state, "controlProtocol")
+                              ?? Int(info, "echoDeskControlProtocol")
+                              ?? (supportedApps.Count > 0 ? 1 : 0);
+
+        EchoDeskDevice? device = null;
+        if (string.Equals(connection, "connected", StringComparison.OrdinalIgnoreCase)
+            || activeApp is not null || supportedApps.Count > 0)
+        {
+            device = new EchoDeskDevice
+            {
+                Name = name,
+                FirmwareVersion = firmware ?? Text(state, "firmwareVersion"),
+                HardwareModel = hardware,
+                ActiveApp = activeApp,
+                SupportedApps = supportedApps,
+                Brightness = settings.Brightness ?? Int(state, "brightness"),
+                Theme = settings.Theme ?? Text(state, "theme"),
+                SettingsRevision = revision,
+                Settings = settings,
+                UnsupportedSettings = unsupportedSettings,
+                Capabilities = new DeviceCapabilities
+                {
+                    ControlProtocol = controlProtocol,
+                    Theme = controlProtocol > 0,
+                    Brightness = controlProtocol > 0,
+                    NowPlaying = controlProtocol > 0,
+                    Restart = controlProtocol > 0,
+                },
+            };
+        }
+
+        return new BrokerState
+        {
+            BrokerRevision = ULong(payload, "brokerRevision") ?? 0,
+            BrokerAvailable = true,
+            Connection = connection,
+            Port = port,
+            Device = device,
+            LastError = lastError,
+            AiUsage = ParseAiUsage(payload),
+            FirmwareManager = ParseFirmwareManager(payload),
+        };
+    }
+
+    private static FirmwareManagerState ParseFirmwareManager(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("firmwareManager", out var manager)
+            || manager.ValueKind != JsonValueKind.Object)
+        {
+            return FirmwareManagerState.Unavailable;
+        }
+
+        var devices = new List<FirmwareDeviceCandidate>();
+        if (manager.TryGetProperty("devices", out var deviceNodes)
+            && deviceNodes.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var device in deviceNodes.EnumerateArray())
+            {
+                if (device.ValueKind != JsonValueKind.Object || string.IsNullOrWhiteSpace(Text(device, "port"))) continue;
+                devices.Add(new FirmwareDeviceCandidate
+                {
+                    Port = Text(device, "port")!,
+                    DisplayName = Text(device, "displayName") ?? "Serial device",
+                    Vid = Text(device, "vid"),
+                    Pid = Text(device, "pid"),
+                    Adapter = Text(device, "adapter"),
+                    ChipFamily = Text(device, "chipFamily"),
+                    FlashSizeBytes = ULong(device, "flashSizeBytes"),
+                    EchoDeskHandshake = Bool(device, "echoDeskHandshake") ?? false,
+                    FirmwareVersion = Text(device, "firmwareVersion"),
+                    HardwareModel = Text(device, "hardwareModel"),
+                    Compatible = Bool(device, "compatible") ?? false,
+                    RequiresBoardConfirmation = Bool(device, "requiresBoardConfirmation") ?? false,
+                });
+            }
+        }
+
+        var progress = Int(manager, "progressPercent");
+        if (progress is < 0 or > 100) progress = null;
+        return new FirmwareManagerState
+        {
+            Available = Bool(manager, "available") ?? true,
+            Status = Text(manager, "status") ?? "idle",
+            Operation = Text(manager, "operation"),
+            Stage = Text(manager, "stage"),
+            ProgressPercent = progress,
+            Message = SafeText(manager, "message"),
+            ErrorCode = Text(manager, "errorCode"),
+            ErrorMessage = SafeText(manager, "errorMessage"),
+            SelectedPort = Text(manager, "selectedPort"),
+            SelectedHardwareModel = Text(manager, "selectedHardwareModel"),
+            BoardConfirmed = Bool(manager, "boardConfirmed") ?? false,
+            WriteCompleted = Bool(manager, "writeCompleted") ?? false,
+            Reconnected = Bool(manager, "reconnected") ?? false,
+            SettingsBackupAvailable = Bool(manager, "settingsBackupAvailable") ?? false,
+            UpdateNotificationsEnabled = Bool(manager, "updateNotificationsEnabled") ?? false,
+            CurrentVersion = Text(manager, "currentVersion"),
+            AvailableVersion = Text(manager, "availableVersion"),
+            ReleaseNotes = SafeLongText(manager, "releaseNotes", 4000),
+            Devices = devices,
+        };
+    }
+
+    private static AiUsageComponentState ParseAiUsage(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("components", out var components) || components.ValueKind != JsonValueKind.Object)
+        {
+            return AiUsageComponentState.Unavailable;
+        }
+
+        if (!components.TryGetProperty("aiUsage", out var component)
+            && !components.TryGetProperty("aiUsageMonitor", out component))
+        {
+            return AiUsageComponentState.Unavailable;
+        }
+        if (component.ValueKind != JsonValueKind.Object) return AiUsageComponentState.Unavailable;
+
+        return new AiUsageComponentState
+        {
+            Available = true,
+            Enabled = Bool(component, "enabled") ?? false,
+            Status = Text(component, "status") ?? "waiting",
+            LastSuccessfulUpdate = DateTime(component, "lastSuccessfulUpdate"),
+            Error = SafeText(component, "error"),
+            Provider = Text(component, "provider") ?? "Codex",
+            Fetching = Bool(component, "fetching") ?? false,
+            Source = Text(component, "source"),
+            CliVersion = Text(component, "cliVersion"),
+        };
+    }
+
+    private static DeviceSettings ParseSettings(JsonElement node) => new()
+    {
+        Theme = Text(node, "theme"),
+        Brightness = Int(node, "brightness"),
+        NowPlayingLayout = Text(node, "nowPlayingLayout"),
+        NowPlayingBackground = Text(node, "nowPlayingBackground"),
+        NowPlayingBackgroundCustomized = Bool(node, "nowPlayingBackgroundCustomized"),
+    };
+
+    private static string? Text(JsonElement node, string name) =>
+        node.ValueKind == JsonValueKind.Object && node.TryGetProperty(name, out var value)
+            && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static int? Int(JsonElement node, string name) =>
+        node.ValueKind == JsonValueKind.Object && node.TryGetProperty(name, out var value)
+            && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) ? number : null;
+
+    private static ulong? ULong(JsonElement node, string name) =>
+        node.ValueKind == JsonValueKind.Object && node.TryGetProperty(name, out var value)
+            && value.ValueKind == JsonValueKind.Number && value.TryGetUInt64(out var number) ? number : null;
+
+    private static bool? Bool(JsonElement node, string name) =>
+        node.ValueKind == JsonValueKind.Object && node.TryGetProperty(name, out var value)
+            && value.ValueKind is JsonValueKind.True or JsonValueKind.False ? value.GetBoolean() : null;
+
+    private static DateTimeOffset? DateTime(JsonElement node, string name)
+    {
+        var value = Text(node, name);
+        return DateTimeOffset.TryParse(value, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed) ? parsed : null;
+    }
+
+    private static string? SafeText(JsonElement node, string name)
+    {
+        var value = Text(node, name)?.Trim();
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        value = string.Join(' ', value.Split(['\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries));
+        return value.Length <= 240 ? value : value[..237] + "…";
+    }
+
+    private static string? SafeLongText(JsonElement node, string name, int maximumLength)
+    {
+        var value = Text(node, name)?.Trim();
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        value = value.Replace("\0", string.Empty, StringComparison.Ordinal);
+        return value.Length <= maximumLength ? value : value[..(maximumLength - 1)] + "…";
+    }
+
+    private static IReadOnlyList<string> Strings(JsonElement node, string name)
+    {
+        if (node.ValueKind != JsonValueKind.Object || !node.TryGetProperty(name, out var values)
+            || values.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return values.EnumerateArray()
+            .Where(value => value.ValueKind == JsonValueKind.String)
+            .Select(value => value.GetString())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Cast<string>()
+            .ToArray();
+    }
+}

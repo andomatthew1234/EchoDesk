@@ -52,7 +52,7 @@ fn every_synthetic_fixture_parses() {
         let eval = evaluate(result, provider, synthetic_now(), Duration::from_secs(900));
         let name = file.file_stem().unwrap().to_string_lossy().into_owned();
         match name.as_str() {
-            "cursor-error" => assert!(matches!(eval.status, Status::ProviderUnavailable { .. }), "{name}"),
+            "cursor-error" => assert!(matches!(eval.status, Status::ProviderUnavailable { .. } | Status::AuthenticationRequired | Status::NetworkUnavailable | Status::RateLimited), "{name}"),
             "claude-stale" => assert!(matches!(eval.status, Status::Stale { .. }), "{name}"),
             _ => assert_eq!(eval.status, Status::Ok, "{name}"),
         }
@@ -151,7 +151,7 @@ fn real_windows_fixtures_parse_when_present() {
         let name = file.file_stem().unwrap().to_string_lossy().into_owned();
         let eval = evaluate(result, provider_of(&file), Utc::now(), Duration::from_secs(900));
         if name.ends_with("-error") {
-            assert!(matches!(eval.status, Status::ProviderUnavailable { .. }), "{name}");
+            assert!(matches!(eval.status, Status::ProviderUnavailable { .. } | Status::AuthenticationRequired | Status::NetworkUnavailable | Status::RateLimited), "{name}");
         } else {
             // Aufnahmen sind alt, also Stale, aber der Eintrag muss da sein und Zeilen ergeben.
             let entry = eval.entry.unwrap_or_else(|| panic!("{name}: kein Eintrag, Status {:?}", eval.status));

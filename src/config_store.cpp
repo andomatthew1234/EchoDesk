@@ -29,6 +29,9 @@ void config_load(AppConfig &cfg) {
         cfg.theme             = THEME_DARK;
         cfg.language          = LANG_DE;
         cfg.brightness_pct    = BRIGHTNESS_DEFAULT_PERCENT;
+        cfg.now_playing_layout = NOW_PLAYING_LAYOUT_DEFAULT;
+        cfg.now_playing_background = NOW_PLAYING_BACKGROUND_DEFAULT;
+        cfg.now_playing_background_customized = false;
         Serial.println("[Config] Voreinstellungen (dieses Board speichert nicht)");
         return;
     }
@@ -40,8 +43,26 @@ void config_load(AppConfig &cfg) {
     cfg.theme             = prefs.getUChar("theme", THEME_DARK);
     cfg.language          = prefs.getUChar("lang", LANG_DE);
     cfg.brightness_pct    = prefs.getUChar("bright", BRIGHTNESS_DEFAULT_PERCENT);
+    cfg.now_playing_layout = prefs.getUChar("np_layout", NOW_PLAYING_LAYOUT_DEFAULT);
+    cfg.now_playing_background = prefs.getUChar(
+        "np_bg", cfg.now_playing_layout == NOW_PLAYING_LAYOUT_ECHODESK
+                     ? NOW_PLAYING_BACKGROUND_ECHODESK
+                     : NOW_PLAYING_BACKGROUND_ALBUM_COVER);
+    cfg.now_playing_background_customized = prefs.getBool("np_bg_custom", false);
     if (cfg.brightness_pct < BRIGHTNESS_MIN_PERCENT) cfg.brightness_pct = BRIGHTNESS_MIN_PERCENT;
     if (cfg.brightness_pct > BRIGHTNESS_MAX_PERCENT) cfg.brightness_pct = BRIGHTNESS_MAX_PERCENT;
+    if (cfg.now_playing_layout > NOW_PLAYING_LAYOUT_ECHODESK) {
+        cfg.now_playing_layout = NOW_PLAYING_LAYOUT_DEFAULT;
+    }
+    if (cfg.now_playing_background > NOW_PLAYING_BACKGROUND_AUDIO_BARS) {
+        cfg.now_playing_background_customized = false;
+    }
+    if (!cfg.now_playing_background_customized) {
+        cfg.now_playing_background =
+            cfg.now_playing_layout == NOW_PLAYING_LAYOUT_ECHODESK
+                ? NOW_PLAYING_BACKGROUND_ECHODESK
+                : NOW_PLAYING_BACKGROUND_ALBUM_COVER;
+    }
 
     prefs.end();
 
@@ -60,6 +81,10 @@ void config_load(AppConfig &cfg) {
     Serial.printf("[Config] Language: %s\n",
                   cfg.language == LANG_EN ? "en" : "de");
     Serial.printf("[Config] Brightness: %u%%\n", cfg.brightness_pct);
+    Serial.printf("[Config] Now Playing layout: %u\n", cfg.now_playing_layout);
+    Serial.printf("[Config] Now Playing background: %u (%s)\n",
+                  cfg.now_playing_background,
+                  cfg.now_playing_background_customized ? "custom" : "layout default");
 }
 
 // ============================================================
@@ -78,6 +103,9 @@ void config_save(const AppConfig &cfg) {
     prefs.putUChar("theme",   cfg.theme);
     prefs.putUChar("lang",    cfg.language);
     prefs.putUChar("bright",  cfg.brightness_pct);
+    prefs.putUChar("np_layout", cfg.now_playing_layout);
+    prefs.putUChar("np_bg", cfg.now_playing_background);
+    prefs.putBool("np_bg_custom", cfg.now_playing_background_customized);
 
     prefs.end();
     Serial.println("[Config] Saved to NVS");

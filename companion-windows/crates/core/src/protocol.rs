@@ -231,6 +231,16 @@ pub struct DeviceInfo {
     pub serial_transport: Option<String>,
     pub max_frame_bytes: Option<usize>,
     pub scene_protocol: Option<u32>,
+    /// EchoDesk host-performance telemetry contract. Missing means unsupported.
+    pub performance_protocol: Option<u32>,
+    /// EchoDesk Windows media-session and artwork contract.
+    pub music_protocol: Option<u32>,
+    /// Display-ready 320x240 Now Playing background-image contract.
+    pub music_background_protocol: Option<u32>,
+    /// Opt-in PCM-free Audio Bars contract.
+    pub music_visualizer_protocol: Option<u32>,
+    /// EchoDesk Desktop remote-control and two-way settings contract.
+    pub echo_desk_control_protocol: Option<u32>,
     pub wifi_configured: Option<bool>,
     pub wifi_connected: Option<bool>,
     pub time_synced: Option<bool>,
@@ -292,6 +302,26 @@ impl DeviceInfo {
                 .get("sceneProtocol")
                 .and_then(Value::as_u64)
                 .map(|n| n as u32),
+            performance_protocol: v
+                .get("performanceProtocol")
+                .and_then(Value::as_u64)
+                .map(|n| n as u32),
+            music_protocol: v
+                .get("musicProtocol")
+                .and_then(Value::as_u64)
+                .map(|n| n as u32),
+            music_background_protocol: v
+                .get("musicBackgroundProtocol")
+                .and_then(Value::as_u64)
+                .map(|n| n as u32),
+            music_visualizer_protocol: v
+                .get("musicVisualizerProtocol")
+                .and_then(Value::as_u64)
+                .map(|n| n as u32),
+            echo_desk_control_protocol: v
+                .get("echoDeskControlProtocol")
+                .and_then(Value::as_u64)
+                .map(|n| n as u32),
             wifi_configured: v.get("wifiConfigured").and_then(Value::as_bool),
             wifi_connected: v.get("wifiConnected").and_then(Value::as_bool),
             time_synced: v.get("timeSynced").and_then(Value::as_bool),
@@ -337,6 +367,26 @@ impl DeviceInfo {
         self.supports_views() && self.scene_protocol.unwrap_or(0) >= 1
     }
 
+    pub fn supports_performance(&self) -> bool {
+        self.performance_protocol.unwrap_or(0) >= 1
+    }
+
+    pub fn supports_music(&self) -> bool {
+        self.music_protocol.unwrap_or(0) >= 1
+    }
+
+    pub fn supports_music_background(&self) -> bool {
+        self.supports_music() && self.music_background_protocol.unwrap_or(0) >= 1
+    }
+
+    pub fn supports_music_visualizer(&self) -> bool {
+        self.supports_music() && self.music_visualizer_protocol.unwrap_or(0) >= 1
+    }
+
+    pub fn supports_echo_desk_control(&self) -> bool {
+        self.echo_desk_control_protocol.unwrap_or(0) >= 1
+    }
+
     pub fn max_frame_bytes(&self) -> usize {
         self.max_frame_bytes.unwrap_or(MAX_FRAME_BYTES)
     }
@@ -365,6 +415,22 @@ pub enum DeviceMessage {
     },
     WifiStatus(Value),
     WifiScan(Value),
+    MusicControl {
+        version: u8,
+        generation: u64,
+        action: String,
+    },
+    MusicVisualizer {
+        version: u8,
+        enabled: bool,
+    },
+    MusicBackgroundRequest {
+        version: u8,
+        enabled: bool,
+    },
+    EchoDeskState(Value),
+    EchoDeskAck(Value),
+    EchoDeskError(Value),
     Other(Value),
 }
 
@@ -420,6 +486,48 @@ impl DeviceMessage {
             },
             "wifi_status" => DeviceMessage::WifiStatus(v),
             "wifi_scan" => DeviceMessage::WifiScan(v),
+            "music_control" => {
+                let version = v.get("version").and_then(Value::as_u64).unwrap_or(0);
+                let generation = v.get("generation").and_then(Value::as_u64).unwrap_or(0);
+                let action = v.get("action").and_then(Value::as_str).unwrap_or("");
+                if version == 1 && generation > 0 &&
+                    matches!(action, "toggle" | "previous" | "next") {
+                    DeviceMessage::MusicControl {
+                        version: version as u8,
+                        generation,
+                        action: action.to_string(),
+                    }
+                } else {
+                    DeviceMessage::Other(v)
+                }
+            }
+            "music_visualizer" => {
+                let version = v.get("version").and_then(Value::as_u64).unwrap_or(0);
+                let enabled = v.get("enabled").and_then(Value::as_bool);
+                if version == 1 && enabled.is_some() {
+                    DeviceMessage::MusicVisualizer {
+                        version: version as u8,
+                        enabled: enabled.unwrap(),
+                    }
+                } else {
+                    DeviceMessage::Other(v)
+                }
+            }
+            "music_background_request" => {
+                let version = v.get("version").and_then(Value::as_u64).unwrap_or(0);
+                let enabled = v.get("enabled").and_then(Value::as_bool);
+                if version == 1 && enabled.is_some() {
+                    DeviceMessage::MusicBackgroundRequest {
+                        version: version as u8,
+                        enabled: enabled.unwrap(),
+                    }
+                } else {
+                    DeviceMessage::Other(v)
+                }
+            }
+            "echodesk_state" => DeviceMessage::EchoDeskState(v),
+            "echodesk_ack" => DeviceMessage::EchoDeskAck(v),
+            "echodesk_error" => DeviceMessage::EchoDeskError(v),
             _ => DeviceMessage::Other(v),
         })
     }
@@ -433,6 +541,12 @@ impl DeviceMessage {
             DeviceMessage::Ok { .. } => "ok",
             DeviceMessage::WifiStatus(_) => "wifi_status",
             DeviceMessage::WifiScan(_) => "wifi_scan",
+            DeviceMessage::MusicControl { .. } => "music_control",
+            DeviceMessage::MusicVisualizer { .. } => "music_visualizer",
+            DeviceMessage::MusicBackgroundRequest { .. } => "music_background_request",
+            DeviceMessage::EchoDeskState(_) => "echodesk_state",
+            DeviceMessage::EchoDeskAck(_) => "echodesk_ack",
+            DeviceMessage::EchoDeskError(_) => "echodesk_error",
             DeviceMessage::Other(_) => "other",
         }
     }
@@ -597,7 +711,7 @@ mod tests {
 
     #[test]
     fn parses_info_with_defaults() {
-        let line = r#"{"type":"info","version":"2.17.0","mac":"A4:CF:12:34:56:78","display":"ili9341","orientation":"landscape_right","theme":"dark","language":"de","brightness":80,"serialTransport":"AIM1","maxFrameBytes":4095,"uptime":12,"heap":180000}"#;
+        let line = r#"{"type":"info","version":"2.17.0","mac":"A4:CF:12:34:56:78","display":"ili9341","orientation":"landscape_right","theme":"dark","language":"de","brightness":80,"serialTransport":"AIM1","maxFrameBytes":4095,"performanceProtocol":1,"musicProtocol":1,"uptime":12,"heap":180000}"#;
         let Some(DeviceMessage::Info(info)) = DeviceMessage::parse_line(line) else {
             panic!()
         };
@@ -609,6 +723,66 @@ mod tests {
         assert!(info.supports_ack());
         assert!(info.supports_brightness_preview());
         assert!(info.supports_notice());
+        assert!(info.supports_performance());
+        assert!(info.supports_music());
+        assert!(!info.supports_music_background());
+        assert!(!info.supports_music_visualizer());
+    }
+
+    #[test]
+    fn parses_part3_capabilities_and_visualizer_opt_in() {
+        let info = DeviceInfo::from_value(&serde_json::json!({
+            "type": "info", "version": "2.27.0", "musicProtocol": 1,
+            "musicBackgroundProtocol": 1, "musicVisualizerProtocol": 1
+        }))
+        .unwrap();
+        assert!(info.supports_music_background());
+        assert!(info.supports_music_visualizer());
+        assert!(matches!(
+            DeviceMessage::parse_line(
+                r#"{"type":"music_visualizer","version":1,"enabled":true}"#
+            ),
+            Some(DeviceMessage::MusicVisualizer { enabled: true, .. })
+        ));
+        assert!(matches!(
+            DeviceMessage::parse_line(
+                r#"{"type":"music_visualizer","version":2,"enabled":true}"#
+            ),
+            Some(DeviceMessage::Other(_))
+        ));
+        assert!(matches!(
+            DeviceMessage::parse_line(
+                r#"{"type":"music_background_request","version":1,"enabled":false}"#
+            ),
+            Some(DeviceMessage::MusicBackgroundRequest { enabled: false, .. })
+        ));
+    }
+
+    #[test]
+    fn parses_echodesk_desktop_capability_and_responses() {
+        let info = DeviceInfo::from_value(&serde_json::json!({
+            "type": "info", "version": "2.28.0", "echoDeskControlProtocol": 1
+        }))
+        .unwrap();
+        assert!(info.supports_echo_desk_control());
+        assert!(matches!(
+            DeviceMessage::parse_line(
+                r#"{"type":"echodesk_state","version":1,"requestId":4,"revision":9}"#
+            ),
+            Some(DeviceMessage::EchoDeskState(_))
+        ));
+        assert!(matches!(
+            DeviceMessage::parse_line(
+                r#"{"type":"echodesk_ack","version":1,"requestId":4,"revision":9}"#
+            ),
+            Some(DeviceMessage::EchoDeskAck(_))
+        ));
+        assert!(matches!(
+            DeviceMessage::parse_line(
+                r#"{"type":"echodesk_error","version":1,"requestId":4,"code":"stale_revision"}"#
+            ),
+            Some(DeviceMessage::EchoDeskError(_))
+        ));
     }
 
     #[test]
@@ -653,6 +827,8 @@ mod tests {
         assert_eq!(info.display, None);
         assert!(!info.supports_framed());
         assert!(!info.supports_ack());
+        assert!(!info.supports_performance());
+        assert!(!info.supports_music());
         assert_eq!(info.max_frame_bytes(), 4095);
     }
 
@@ -687,6 +863,20 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(ok, DeviceMessage::Ok { ref cmd, .. } if cmd == "set_brightness"));
+        let music = DeviceMessage::parse_line(
+            r#"{"type":"music_control","version":1,"generation":7,"action":"next"}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            music,
+            DeviceMessage::MusicControl { generation: 7, ref action, .. } if action == "next"
+        ));
+        assert!(matches!(
+            DeviceMessage::parse_line(
+                r#"{"type":"music_control","version":2,"generation":7,"action":"next"}"#
+            ),
+            Some(DeviceMessage::Other(_))
+        ));
     }
 
     #[test]

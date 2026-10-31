@@ -2,16 +2,20 @@
 //! den blockierenden CLI-Aufruf oder einen seriellen Zugriff hinweg (siehe
 //! `poll` und `serial_service`).
 
-use crate::flash::FlashRecord;
 use crate::claude_code::ClaudeCode;
+use crate::audio_visualizer::VisualizerFeed;
+use crate::flash::FlashRecord;
+use crate::firmware_manager::FirmwareManagerState;
 use crate::plugins::PluginStore;
+use crate::performance::PerformanceFeed;
+use crate::music::MusicFeed;
 use crate::serial_service::{ConnectionSnapshot, Job};
 use crate::settings::Settings;
 use crate::updates::ReleaseCache;
 use aimonitor_core::Provider;
 use aimonitor_core::{DeviceRegistry, Snapshot, Source};
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::mpsc::Sender;
 use std::sync::{Condvar, Mutex};
 use tauri::{tray::TrayIcon, AppHandle, Manager};
@@ -23,6 +27,9 @@ pub struct AppState {
     pub view_clients: Mutex<HashMap<Provider, Source>>,
     pub view_fetching: AtomicBool,
     pub view_refresh_pending: AtomicBool,
+    /// Invalidates provider workers when AI Usage is disabled or re-enabled.
+    /// Results are only accepted when their captured generation still matches.
+    pub ai_usage_generation: AtomicU64,
     pub settings: Mutex<Settings>,
     pub tray: Mutex<Option<TrayIcon>>,
     pub registry: Mutex<DeviceRegistry>,
@@ -33,6 +40,18 @@ pub struct AppState {
     pub connection: Mutex<ConnectionSnapshot>,
     /// Aufträge an den Serial-Thread.
     pub serial: Sender<Job>,
+    /// Latest-value mailbox for the hardware helper. It cannot access COM.
+    pub performance: PerformanceFeed,
+    /// Latest GSMTC snapshot and bounded control queue. It never owns COM.
+    pub music: MusicFeed,
+    /// Opt-in WASAPI band snapshots. Raw PCM never leaves the worker.
+    pub audio_visualizer: VisualizerFeed,
+    /// Last validated EchoDesk control state reported by firmware. The local
+    /// desktop broker reads this cache; it never opens the serial port.
+    pub echo_desk_state: Mutex<Option<serde_json::Value>>,
+    /// Monotonic status/event revision for stale-update protection in the WPF
+    /// client. Device settings additionally carry their firmware revision.
+    pub desktop_broker_revision: AtomicU64,
     /// Zuletzt geladene GitHub-Releases mit Zeitstempel (Phase 3).
     pub releases: Mutex<ReleaseCache>,
     /// `true`, solange eine Release-Abfrage läuft; parallele Aufrufe warten
@@ -44,6 +63,9 @@ pub struct AppState {
     pub last_flash: Mutex<Option<FlashRecord>>,
     /// Ein App-Update wird gerade geladen oder installiert.
     pub installing: AtomicBool,
+    /// Consumer-facing install/update/recovery workflow. It contains no raw
+    /// flash command or caller-controlled file path.
+    pub firmware_manager: Mutex<FirmwareManagerState>,
 }
 
 impl AppState {
@@ -60,6 +82,7 @@ impl AppState {
             view_clients: Mutex::new(HashMap::new()),
             view_fetching: AtomicBool::new(false),
             view_refresh_pending: AtomicBool::new(false),
+            ai_usage_generation: AtomicU64::new(1),
             settings: Mutex::new(settings),
             tray: Mutex::new(None),
             registry: Mutex::new(registry),
@@ -67,11 +90,17 @@ impl AppState {
             claude_code: Mutex::new(ClaudeCode::default()),
             connection: Mutex::new(ConnectionSnapshot::default()),
             serial,
+            performance: PerformanceFeed::default(),
+            music: MusicFeed::default(),
+            audio_visualizer: VisualizerFeed::default(),
+            echo_desk_state: Mutex::new(None),
+            desktop_broker_revision: AtomicU64::new(1),
             releases: Mutex::new(ReleaseCache::default()),
             release_check: (Mutex::new(false), Condvar::new()),
             flashing: AtomicBool::new(false),
             last_flash: Mutex::new(None),
             installing: AtomicBool::new(false),
+            firmware_manager: Mutex::new(FirmwareManagerState::default()),
         }
     }
 }

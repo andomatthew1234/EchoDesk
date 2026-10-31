@@ -15,6 +15,12 @@ pub enum Status {
     CliMissing,
     /// CLI erreichbar, aber der Provider liefert nicht.
     ProviderUnavailable { message: String },
+    /// Provider credentials are absent or expired.
+    AuthenticationRequired,
+    /// The provider could not be reached because networking is unavailable.
+    NetworkUnavailable,
+    /// The provider explicitly asked the caller to retry later.
+    RateLimited,
     /// Aufruf fehlgeschlagen oder Timeout.
     CliFailed { message: String },
     /// Daten vorhanden, aber älter als die Stale-Schwelle.
@@ -35,6 +41,9 @@ impl Status {
             Status::NotYet => "…".into(),
             Status::CliMissing => "CLI missing".into(),
             Status::ProviderUnavailable { .. } => "offline".into(),
+            Status::AuthenticationRequired => "sign-in required".into(),
+            Status::NetworkUnavailable => "network unavailable".into(),
+            Status::RateLimited => "rate limited".into(),
             Status::CliFailed { .. } => "failed".into(),
             Status::Stale { age_seconds } => format!("stale ({}m alt)", age_seconds / 60),
             Status::ParseError { .. } => "parse error".into(),
@@ -48,6 +57,8 @@ impl Status {
             Status::Ok | Status::NotYet => None,
             Status::CliMissing => Some("dsp.notice.climissing"),
             Status::ProviderUnavailable { .. } => Some("dsp.notice.startapp"),
+            Status::AuthenticationRequired => Some("dsp.notice.auth"),
+            Status::NetworkUnavailable | Status::RateLimited => Some("dsp.notice.failed"),
             Status::CliFailed { .. } => Some("dsp.notice.failed"),
             Status::Stale { .. } => Some("dsp.notice.stale"),
             Status::ParseError { .. } => Some("dsp.notice.parse"),

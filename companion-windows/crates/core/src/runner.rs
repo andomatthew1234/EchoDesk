@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 /// `<dir>/<provider>.json` gelesen. Nur Provider mit vorhandener Datei werden
 /// ersetzt, die übrigen laufen weiter über das echte CLI.
 pub const FIXTURE_DIR_ENV: &str = "AIMONITOR_CODEXBAR_FIXTURE_DIR";
+pub const ECHODESK_CLI_ENV: &str = "ECHODESK_CODEXBAR_CLI";
 
 /// Was ein Lauf hinterlässt, für die Diagnose-Ansicht.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -29,6 +30,20 @@ pub struct RawRun {
 /// zuverlässig, deshalb zuerst feste Pfade, PATH nur als Ergänzung.
 pub fn candidate_paths() -> Vec<PathBuf> {
     let mut out = Vec::new();
+
+    // EchoDesk installers can ship a reviewed CLI beside the internal host.
+    // An explicit host-provided path and bundled resources always win over a
+    // separately installed CodexBar copy.
+    if let Some(path) = std::env::var_os(ECHODESK_CLI_ENV).filter(|p| !p.is_empty()) {
+        out.push(PathBuf::from(path));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            out.push(dir.join("components").join("codexbar-cli.exe"));
+            out.push(dir.join("resources").join("components").join("codexbar-cli.exe"));
+            out.push(dir.join("codexbar-cli.exe"));
+        }
+    }
 
     #[cfg(windows)]
     {
@@ -108,6 +123,16 @@ pub struct RunOutcome {
     pub result: Result<CliResult, Status>,
 }
 
+fn usage_args(provider: Provider) -> Vec<&'static str> {
+    let mut args = vec!["usage", "--provider", provider.key(), "--json"];
+    // Codex OAuth reads the existing local Codex sign-in. Forcing the source
+    // avoids browser-cookie probing and keeps the host deterministic.
+    if provider == Provider::Codex {
+        args.extend(["--source", "oauth"]);
+    }
+    args
+}
+
 /// `usage --provider <p> --json` ausführen oder die Fixture lesen.
 pub fn run_usage(cli: Option<&Path>, provider: Provider, timeout: Duration) -> RunOutcome {
     if let Some(file) = fixture_path(provider) {
@@ -139,12 +164,12 @@ pub fn run_usage(cli: Option<&Path>, provider: Provider, timeout: Duration) -> R
         };
     };
 
-    let args = ["usage", "--provider", provider.key(), "--json"];
+    let args = usage_args(provider);
     let command = format!("{} {}", cli.display(), args.join(" "));
     let started = Instant::now();
 
     let mut child = match hidden_command(cli)
-        .args(args)
+        .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -269,5 +294,17 @@ mod tests {
         std::env::remove_var(FIXTURE_DIR_ENV);
         let out = run_usage(None, Provider::Claude, Duration::from_secs(1));
         assert_eq!(out.result.unwrap_err(), Status::CliMissing);
+    }
+
+    #[test]
+    fn codex_forces_oauth_without_changing_other_providers() {
+        assert_eq!(
+            usage_args(Provider::Codex),
+            ["usage", "--provider", "codex", "--json", "--source", "oauth"]
+        );
+        assert_eq!(
+            usage_args(Provider::Claude),
+            ["usage", "--provider", "claude", "--json"]
+        );
     }
 }

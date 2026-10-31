@@ -18,6 +18,8 @@ The launcher to launch applications and utilities.
 
 - **Codex Usage** — Monitor your OpenAI Codex limits. Support for Claude Code and Gemini coming soon.
 - **Clock** — A bold, minimal clock with customisability.
+- **Performance** — Live CPU, GPU, memory, network and temperature graphs from the Windows host.
+- **Now Playing** — Live Windows media metadata, artwork, progress and supported transport controls.
 - **Settings** — Adjust brightness and restart the device, with more settings coming soon.
 
 ### Codex Usage Monitor
@@ -31,7 +33,9 @@ Support for:
 - Reset countdowns
 - Live updates through the Windows companion application
 
-EchoDesk builds on the open-source AI Monitor project and uses Win-CodexBar to retrieve Codex usage information.
+EchoDesk builds on the open-source AI Monitor project. EchoDesk Desktop manages
+the bundled, headless Win-CodexBar provider internally to retrieve Codex usage
+through the user's existing local Codex login.
 
 ### Clock
 
@@ -40,6 +44,59 @@ A distinctive two-line clock inspired by EchoDesk's logo, with customisability c
 The hour is displayed in large outlined typography, while the minutes appear in solid, bold lettering.
 
 Supports the Australia/Melbourne timezone and daylight-saving time with more time zones coming soon.
+
+### Performance Centre
+
+Performance Centre is a compact Task Manager for the 320×240 touchscreen. It
+provides ten views: four-graph usage and temperature dashboards, dedicated
+CPU/GPU/RAM/network graphs, CPU/GPU/motherboard temperature graphs, and an
+estimated overall Temperature Pressure view. History is a fixed 60-sample
+ring updated about once per second.
+
+The headless EchoDesk Host managed by EchoDesk Desktop is the sole owner of the
+USB COM port. It starts a bundled, Windows-only helper based on `LibreHardwareMonitorLib`
+0.9.6, coalesces the latest sample, and sends a compact versioned frame over
+the existing 115200-baud connection. Missing sensors are shown as `N/A`.
+Motherboard and some low-level temperature sensors may require administrator
+access; the companion does not elevate itself or fabricate values.
+
+Temperature Pressure uses the highest component-specific pressure rather than
+an average. The built-in CPU/GPU/motherboard thresholds are conservative
+estimates, smoothing and hysteresis prevent status flicker, and the result is
+not presented as actual thermal-throttling detection. See
+[`docs/serial-protocol.md`](docs/serial-protocol.md#12-echodesk-performance-protocol-v1)
+for the payload, units, defaults and override names.
+
+### Now Playing
+
+Now Playing follows the best Windows Global System Media Transport Controls
+session and displays confirmed playback state, title, artist, album,
+application, progress and resized album artwork. Previous, play/pause and next
+are disabled whenever the selected player does not advertise support. The
+Windows companion remains the only USB serial owner and transfers metadata and
+bounded, CRC-checked JPEG chunks over the existing connection.
+
+The on-device customisation button independently selects three persisted
+320×240 layouts—**Album Cover**, **CarPlay Inspired**, and **EchoDesk Style**—
+and three backgrounds—**Album Cover**, **EchoDesk**, and **Audio Bars**. All
+nine combinations work. Layout defaults are Album Cover/Album Cover,
+CarPlay/Album Cover and EchoDesk/EchoDesk; an explicit background override is
+retained when the layout changes, and Restore Layout Default removes it.
+
+For Album Cover backgrounds, Windows crops the source art to 4:3 without
+stretching, resizes it to 320×240, applies the blur and sends a bounded JPEG
+only while that background is active. Audio Bars is an explicit opt-in to
+local WASAPI loopback analysis: a 1,024-point FFT produces 16 compact bands at
+about 20 Hz. Raw audio is never written to disk, uploaded, or sent over USB.
+The bars may represent every sound on the current Windows default multimedia
+output, not only the selected player. Unavailable capture is shown honestly.
+EchoDesk's artwork brackets and audio bars update only their small LVGL objects
+and settle when playback pauses or stops.
+
+Feishin's Web playback backend can publish a Windows media session when its
+media-session option is enabled; its MPV backend currently does not. See the
+[Feishin integration research](docs/feishin-windows-media-research.md) for the
+verified setup and the optional Windows-only remote integration design.
 
 ### Settings
 
@@ -96,112 +153,60 @@ The custom enclosure is designed to house the Freenove touchscreen at a comforta
 1. **Print it yourself:** Download the model files (coming soon) and print the enclosure using your own 3D printer. Estimated material cost is approximately A$2 using PLA at A$30/kg including waste in one color.
 2. **Order a printed enclosure:** Don't have a 3D printer? Contact **[matthew@andomail.com](mailto:matthew@andomail.com)** to enquire about ordering a pre-printed enclosure.
 
-The enclosure is optional and does not affect EchoDesk OS functionality, but we strongly recomend it.
+The enclosure is optional and does not affect EchoDesk OS functionality, but we strongly recommend it.
 
 
 No soldering or additional electronic components are required for the standard setup.
 
 ## Required Software
 
-Install the following applications on your Windows PC.
+Install EchoDesk Desktop on your Windows PC. Its package contains the headless
+host and AI usage provider required by the device.
 
-### 1. Win-CodexBar (Codex usage monitor utility)
+### 1. EchoDesk Desktop
 
-Win-CodexBar retrieves Codex usage information from your existing Codex authentication. Support for Claude Code and Gemini is coming soon.
+EchoDesk Desktop retrieves Codex usage through your existing supported local
+Codex authentication, discovers and reconnects the display, and supplies AI
+Usage, Performance and Now Playing data over one serial connection.
 
-Download:
-
-https://github.com/nesszer/Win-CodexBar/releases
-
-Alternatively, install it using Windows Terminal:
-
-```powershell
-winget install Finesssee.Win-CodexBar
-```
-
-After installation:
-
-1. Launch Win-CodexBar.
-2. Open its system tray menu.
-3. Enable the Codex provider.
-4. Complete authentication if prompted.
-5. Confirm your Codex usage appears correctly.
-
-### 2. AI Monitor for Windows (Codex usage monitor utility)
-
-AI Monitor is the companion application responsible for sending usage data to EchoDesk over USB.
-
-Download:
-
-https://github.com/tobymarks/esp32-ai-monitor/releases
-
-Install the Windows companion application from an appropriate `win-v*` release.
-
-Keep AI Monitor running whenever you want live Codex usage updates.
-
-### 3. Python and esptool
-
-For manual firmware installation, install Python and Espressif's flashing utility.
-
-Python:
-
-https://www.python.org/downloads/
-
-Then run:
+Build the current package from source with:
 
 ```powershell
-py -m pip install esptool
+.\desktop\build.ps1
 ```
 
-You do not need Arduino IDE to install a precompiled EchoDesk firmware image.
+Then install or run the package produced under `desktop\dist`. No separate AI
+Monitor or visible Win-CodexBar application is required. Sign in with the
+normal Codex CLI flow if EchoDesk Desktop reports that authentication is
+required; EchoDesk never asks you to paste a token or extracts browser
+credentials.
 
 ## Let's install 🚀
 
-### Step 1 — Download the Firmware
-
-Confirm all of the above applications are installed. Then:
-
-Open the **Releases** section of this GitHub repository.
-
-Download the firmware image for your board:
-
-`echodesk-freenove-fnk0114a-2p4.bin`
-
-*If no precompiled release is available yet, build the firmware from source using the instructions below.*
-
-### Step 2 — Connect Your Screen
+### Step 1 — Connect Your Screen
 
 Connect the Freenove display to your Windows PC using a USB-C data cable.
 
-Open **Device Manager → Ports (COM & LPT)**.
+Windows should expose it as a serial device such as `USB-SERIAL CH340
+(COM5)`. The COM number can be different. A CH340 adapter alone does not prove
+the connected hardware is an EchoDesk Mini.
 
-Find the device named something similar to:
+### Step 2 — Install EchoDesk OS
 
-`USB-SERIAL CH340 (COM5)`
+1. Open **EchoDesk Desktop → Setup & Updates**.
+2. Select the detected device. For a first installation or recovery, confirm
+   that the physical board is a Freenove FNK0114A_2P4 EchoDesk Mini.
+3. Choose **Install EchoDesk OS**.
+4. Keep USB connected while EchoDesk Desktop verifies the bundled firmware,
+   identifies the ESP32 bootloader, writes and verifies the image, restarts the
+   board, and reconnects to EchoDesk OS.
 
-Your COM port number may be different.
+EchoDesk Desktop includes its verified firmware and flashing engine. Customers
+do not install Python, PlatformIO, esptool or AI Monitor, and do not need to
+know the COM port number. The app reports success only after the installed
+firmware boots and reconnects.
 
-### Step 3 — Install the Firmware
-
-**Close any applications currently using the display's serial port (eg. AIMonitor)**
-
-Open Windows Terminal in the folder containing the downloaded firmware (CD to the path of the folder)
-
-For a verified, merged ESP32 firmware image intended to be written at address `0x0`, use:
-
-```powershell
-py -m esptool --chip esp32 --port COM5 --baud 460800 write-flash 0x0 echodesk-freenove-fnk0114a-2p4.bin
-```
-
-Replace `COM5` with your actual port number.
-
-**Important:** Only use this command with a release explicitly documented as a merged image for the original ESP32. Do not use it for application-only firmware binaries. Check the release's flashing instructions before proceeding.
-
-Wait for flashing to finish successfully.
-
-Do not disconnect the device during flashing.
-
-### Step 4 — Start EchoDesk
+### Step 3 — Start EchoDesk
 
 After flashing, restart the display using its reset button or by reconnecting USB.
 
@@ -209,17 +214,21 @@ EchoDesk should boot to the Home Dashboard.
 
 You can now open the Clock and Settings applications using the touchscreen.
 
-### Step 5 — Connect Codex Usage
+### Step 4 — Connect Codex Usage
 
-1. Start Win-CodexBar.
-2. Confirm that Codex usage is available.
-3. Start AI Monitor for Windows.
-4. Connect AI Monitor to the display's serial port.
-5. Open **Codex Usage** on EchoDesk.
+1. Sign in through the supported Codex CLI flow if you are not already signed in.
+2. Start EchoDesk Desktop.
+3. Confirm that **AI Usage Monitor** is enabled on the Overview page.
+4. Connect EchoDesk by USB and wait for automatic device discovery.
+5. Open **Codex Usage** on the touchscreen.
 
 Your usage information should appear once the companion successfully communicates with the device.
 
 The Windows computer must remain connected for live USB usage updates.
+
+Manual command-line flashing is retained only for firmware developers and
+advanced recovery. Its verified image layout and safety instructions are in
+[`docs/freenove-fnk0114a-2p4.md`](docs/freenove-fnk0114a-2p4.md).
 
 ## Building From Source
 
@@ -234,8 +243,8 @@ Requirements:
 Clone the repository:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/EchoDesk-OS.git
-cd EchoDesk-OS
+git clone https://github.com/andomatthew1234/EchoDesk.git
+cd EchoDesk
 ```
 
 Build for the Freenove touchscreen:
@@ -277,8 +286,8 @@ Enclosure files and print instructions will be published in the `hardware/` dire
 | LCD SPI | HSPI |
 | USB serial | CH340C |
 | Serial baud rate | 115200 |
-| Primary data source | Win-CodexBar |
-| Companion application | AI Monitor for Windows |
+| Primary data source | Bundled Win-CodexBar CLI (headless) |
+| Companion application | EchoDesk Desktop |
 
 ## Troubleshooting
 
@@ -288,7 +297,9 @@ Enclosure files and print instructions will be published in the `hardware/` dire
 
 **Touchscreen doesn't respond:** Check touch calibration and rotation settings.
 
-**Codex usage isn't appearing:** Verify that Win-CodexBar is receiving data, AI Monitor is running, and the correct COM port is selected.
+**Codex usage isn't appearing:** Open EchoDesk Desktop and check the AI Usage
+Monitor status. If authentication is required, complete the normal Codex CLI
+login. Ensure no serial terminal or legacy companion is holding the COM port.
 
 **Device cannot be flashed:** Close other applications using the serial port, confirm the COM number, and retry the documented flashing procedure.
 
@@ -305,9 +316,10 @@ EchoDesk is an independent community project and is not affiliated with or endor
 
 ## Licence
 
-The licence for EchoDesk OS will be published after confirming compatibility with the licences of its upstream dependencies.
-
-Until then, no additional licence is implied for EchoDesk-specific code.
+EchoDesk is distributed under the [MIT License](LICENSE). Third-party
+components and bundled providers retain their respective licences; see
+[NOTICE](NOTICE) and the component-specific notices included with the desktop
+package.
 
 ---
 

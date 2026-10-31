@@ -1,0 +1,407 @@
+<Window x:Class="EchoDesk.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:EchoDesk.Desktop.ViewModels"
+        Title="EchoDesk Desktop" Width="1080" Height="720" MinWidth="680" MinHeight="540"
+        WindowStartupLocation="CenterScreen" Icon="Assets/echodesk-logo.png">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolVisibility"/>
+        <Style x:Key="PageTitle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontFamily" Value="Segoe UI Variable Display, Segoe UI"/>
+            <Setter Property="FontSize" Value="30"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
+        </Style>
+        <Style x:Key="SectionTitle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,0,12"/>
+        </Style>
+        <Style x:Key="Muted" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/>
+        </Style>
+        <Style x:Key="NavButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Margin" Value="8,3"/>
+            <Setter Property="Padding" Value="14,11"/>
+        </Style>
+        <Style x:Key="NavText" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="Margin" Value="14,0,0,0"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsCompact}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Grid Background="{DynamicResource WindowBrush}">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition x:Name="SidebarColumn" Width="220"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,0,1,0">
+            <DockPanel LastChildFill="True">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="20,22,14,20">
+                    <Image Source="Assets/echodesk-logo.png" Width="34" Height="34" Stretch="Uniform"/>
+                    <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="17" FontWeight="SemiBold" Text="EchoDesk"/>
+                        <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" Text="DESKTOP 0.2.2"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel DockPanel.Dock="Bottom" Margin="14,8,14,18">
+                    <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="10" Padding="12">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="8" Height="8" VerticalAlignment="Center">
+                                    <Ellipse.Style>
+                                        <Style TargetType="Ellipse">
+                                            <Setter Property="Fill" Value="{DynamicResource WarningBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                                    <Setter Property="Fill" Value="{DynamicResource SuccessBrush}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Ellipse.Style>
+                                </Ellipse>
+                                <TextBlock Style="{StaticResource NavText}" Text="{Binding ConnectionLabel}" FontSize="11" FontWeight="SemiBold"/>
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource NavText}" Text="{Binding State.Port, TargetNullValue=Waiting…}" Margin="22,4,0,0"
+                                       Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <StackPanel Margin="0,4">
+                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Overview">
+                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" FontSize="18" Text="&#xE80F;"/><TextBlock Style="{StaticResource NavText}" Text="Overview"/></StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Device Control">
+                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" FontSize="18" Text="&#xE8D7;"/><TextBlock Style="{StaticResource NavText}" Text="Device Control"/></StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Customisation">
+                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" FontSize="18" Text="&#xE713;"/><TextBlock Style="{StaticResource NavText}" Text="Customisation"/></StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Setup &amp; Updates">
+                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" FontSize="18" Text="&#xE895;"/><TextBlock Style="{StaticResource NavText}" Text="Setup &amp; Updates"/></StackPanel>
+                    </Button>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+
+            <Grid Margin="32,26,32,18">
+                <!-- Overview -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsOverview, Converter={StaticResource BoolVisibility}}">
+                    <StackPanel MaxWidth="1050">
+                        <TextBlock Style="{StaticResource PageTitle}" Text="Overview"/>
+                        <TextBlock Style="{StaticResource Muted}" Text="Your EchoDesk, at a glance." Margin="0,0,0,24"/>
+
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,18">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse Width="10" Height="10" VerticalAlignment="Center" Margin="0,0,10,0">
+                                            <Ellipse.Style><Style TargetType="Ellipse"><Setter Property="Fill" Value="{DynamicResource WarningBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsConnected}" Value="True"><Setter Property="Fill" Value="{DynamicResource SuccessBrush}"/></DataTrigger></Style.Triggers></Style></Ellipse.Style>
+                                        </Ellipse>
+                                        <TextBlock Text="{Binding ConnectionLabel}" FontWeight="Bold" FontSize="12"/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding DeviceName}" FontSize="26" FontWeight="SemiBold" Margin="0,12,0,2"/>
+                                    <TextBlock Style="{StaticResource Muted}" Text="{Binding ConnectionDetail}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Command="{Binding ReconnectCommand}" Content="Reconnect" Margin="0,0,8,0"/>
+                                    <Button Style="{StaticResource PrimaryButton}" Command="{Binding RefreshCommand}" Content="Refresh"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <UniformGrid Columns="3" Margin="0,0,0,18">
+                            <Border Style="{StaticResource Card}" Margin="0,0,9,0"><StackPanel><TextBlock Style="{StaticResource Muted}" Text="FIRMWARE" FontSize="11"/><TextBlock Text="{Binding Firmware}" FontSize="17" FontWeight="SemiBold" Margin="0,8,0,0"/></StackPanel></Border>
+                            <Border Style="{StaticResource Card}" Margin="9,0"><StackPanel><TextBlock Style="{StaticResource Muted}" Text="HARDWARE" FontSize="11"/><TextBlock Text="{Binding Hardware}" FontSize="17" FontWeight="SemiBold" Margin="0,8,0,0"/></StackPanel></Border>
+                            <Border Style="{StaticResource Card}" Margin="9,0,0,0"><StackPanel><TextBlock Style="{StaticResource Muted}" Text="ACTIVE APP" FontSize="11"/><TextBlock Text="{Binding ActiveApp}" FontSize="17" FontWeight="SemiBold" Margin="0,8,0,0"/></StackPanel></Border>
+                        </UniformGrid>
+
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="Components"/>
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,18">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel Margin="0,0,24,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="AI Usage Monitor" FontSize="17" FontWeight="SemiBold"/>
+                                        <Border Margin="12,0,0,0" Padding="8,3" CornerRadius="10" Background="{DynamicResource SurfaceAltBrush}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <Ellipse Width="7" Height="7" Margin="0,0,6,0" VerticalAlignment="Center">
+                                                    <Ellipse.Style>
+                                                        <Style TargetType="Ellipse">
+                                                            <Setter Property="Fill" Value="{DynamicResource WarningBrush}"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding AiUsageEnabled}" Value="True"><Setter Property="Fill" Value="{DynamicResource SuccessBrush}"/></DataTrigger>
+                                                                <DataTrigger Binding="{Binding AiUsageNeedsAttention}" Value="True"><Setter Property="Fill" Value="{DynamicResource DangerBrush}"/></DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Ellipse.Style>
+                                                </Ellipse>
+                                                <TextBlock Text="{Binding AiUsageStatus}" FontSize="11" FontWeight="Bold"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                    <TextBlock Style="{StaticResource Muted}" Text="{Binding AiUsageGuidance}" TextWrapping="Wrap" Margin="0,10,0,0"/>
+                                    <TextBlock Margin="0,8,0,0" FontSize="12">
+                                        <Run Foreground="{DynamicResource MutedTextBrush}" Text="Last successful update: "/><Run Text="{Binding AiUsageLastUpdated, Mode=OneWay}"/>
+                                    </TextBlock>
+                                    <ProgressBar Height="3" Margin="0,12,0,0" IsIndeterminate="True" Visibility="{Binding AiUsageFetching, Converter={StaticResource BoolVisibility}}"/>
+                                </StackPanel>
+                                <CheckBox Grid.Column="1" VerticalAlignment="Top" Content="Enabled" IsChecked="{Binding AiUsageEnabled, Mode=OneWay}"
+                                          IsEnabled="{Binding AiUsageAvailable}" Command="{Binding ToggleAiUsageCommand}"/>
+                            </Grid>
+                        </Border>
+
+                        <TextBlock Style="{StaticResource SectionTitle}" Text="Quick actions"/>
+                        <ItemsControl ItemsSource="{Binding AppTiles}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="3"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:AppTile}">
+                                    <Button Command="{Binding DataContext.OpenAppCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}" Margin="0,0,10,10" HorizontalContentAlignment="Left">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="{Binding Glyph}" FontFamily="Segoe Fluent Icons" FontSize="18" Width="30"/><TextBlock Text="{Binding Label}" FontWeight="SemiBold" VerticalAlignment="Center"/></StackPanel>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Device Control -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsDeviceControl, Converter={StaticResource BoolVisibility}}">
+                    <StackPanel MaxWidth="1050">
+                        <TextBlock Style="{StaticResource PageTitle}" Text="Device Control"/>
+                        <TextBlock Style="{StaticResource Muted}" Text="Open an app on the physical touchscreen." Margin="0,0,0,24"/>
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,18">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource SectionTitle}" Text="Apps"/>
+                                <ItemsControl ItemsSource="{Binding AppTiles}">
+                                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="2"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate><DataTemplate DataType="{x:Type vm:AppTile}">
+                                        <Button Command="{Binding DataContext.OpenAppCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}" Margin="0,0,10,10" MinHeight="54" HorizontalContentAlignment="Left">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="{Binding Glyph}" FontFamily="Segoe Fluent Icons" FontSize="20" Width="38"/><TextBlock Text="{Binding Label}" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/></StackPanel>
+                                        </Button>
+                                    </DataTemplate></ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource Card}">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Restart EchoDesk" FontWeight="SemiBold" FontSize="16"/><TextBlock Style="{StaticResource Muted}" Text="The USB connection will briefly disconnect and recover automatically." Margin="0,5,20,0"/></StackPanel>
+                                <Button Grid.Column="1" Content="Restart…" Click="Restart_Click" Background="{DynamicResource DangerBrush}" Foreground="White" IsEnabled="{Binding IsConnected}"/>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Setup and Updates -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsSetupUpdates, Converter={StaticResource BoolVisibility}}">
+                    <StackPanel MaxWidth="1050">
+                        <Grid Margin="0,0,0,24">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource PageTitle}" Text="Setup &amp; Updates"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="Install, update or recover EchoDesk OS without command-line tools."/>
+                            </StackPanel>
+                            <Button Grid.Column="1" Command="{Binding ScanFirmwareDevicesCommand}" Content="Scan for devices" VerticalAlignment="Center"/>
+                        </Grid>
+
+                        <!-- Screen 1: Connect EchoDesk -->
+                        <Border Style="{StaticResource Card}" Visibility="{Binding IsFirmwareConnectScreen, Converter={StaticResource BoolVisibility}}">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Grid Width="190" Height="170" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <Border Width="145" Height="106" CornerRadius="13" Background="#16191F" BorderBrush="#687180" BorderThickness="3" HorizontalAlignment="Center" VerticalAlignment="Top">
+                                        <Grid><TextBlock Text="ECHO&#x0a;DESK" Foreground="White" FontSize="22" FontWeight="Bold" TextAlignment="Center" VerticalAlignment="Center"/></Grid>
+                                    </Border>
+                                    <Path Data="M 95,106 L 95,145 C 95,158 125,158 125,145" Stroke="{DynamicResource AccentBrush}" StrokeThickness="5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                    <Border Width="31" Height="13" CornerRadius="4" Background="{DynamicResource AccentBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,42,4"/>
+                                </Grid>
+                                <StackPanel Grid.Column="1" Margin="28,0,0,0">
+                                    <TextBlock Text="{Binding FirmwareConnectionHeading}" FontSize="23" FontWeight="SemiBold"/>
+                                    <TextBlock Style="{StaticResource Muted}" Text="{Binding FirmwareConnectionMessage}" TextWrapping="Wrap" Margin="0,8,0,18"/>
+                                    <TextBlock Text="Detected serial devices" FontWeight="SemiBold" Margin="0,0,0,7"/>
+                                    <ComboBox ItemsSource="{Binding FirmwareDevices}" ItemTemplate="{StaticResource ComboSummaryTemplate}" SelectedValuePath="Port"
+                                              SelectedValue="{Binding SelectedFirmwarePort}" MinWidth="340" HorizontalAlignment="Left"/>
+                                    <TextBlock Style="{StaticResource Muted}" Text="{Binding FirmwareDeviceDetails}" Margin="0,7,0,0"/>
+                                    <StackPanel Visibility="{Binding ShowBoardConfirmation, Converter={StaticResource BoolVisibility}}" Margin="0,16,0,0">
+                                        <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="8" Padding="12">
+                                            <StackPanel>
+                                                <TextBlock Text="Manual hardware confirmation required" FontWeight="SemiBold"/>
+                                                <TextBlock Style="{StaticResource Muted}" Text="CH340 is a generic adapter and does not identify the board. Check the label and physical hardware before continuing." TextWrapping="Wrap" Margin="0,5,0,9"/>
+                                                <ComboBox ItemsSource="{Binding FirmwareHardwareOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value"
+                                                          SelectedValue="{Binding SelectedFirmwareHardwareModel}" Margin="0,0,0,9"/>
+                                                <CheckBox IsChecked="{Binding FirmwareBoardConfirmed}" Content="I confirm this is a Freenove FNK0114A_2P4 EchoDesk Mini"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
+                                        <Button Style="{StaticResource PrimaryButton}" Command="{Binding SelectFirmwareDeviceCommand}" Content="Use this device" Margin="0,0,8,0"/>
+                                        <Button Command="{Binding ScanFirmwareDevicesCommand}" Content="Scan again"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- Screen 2: Ready to install / update -->
+                        <StackPanel Visibility="{Binding IsFirmwareReadyScreen, Converter={StaticResource BoolVisibility}}">
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                                <StackPanel>
+                                    <TextBlock Text="EchoDesk Mini is ready" FontSize="23" FontWeight="SemiBold"/>
+                                    <TextBlock Style="{StaticResource Muted}" Text="The ESP32 and firmware package have been checked. EchoDesk Desktop will release the serial port before writing and reconnect afterwards." TextWrapping="Wrap" Margin="0,7,0,18"/>
+                                    <UniformGrid Columns="3">
+                                        <StackPanel Margin="0,0,12,0"><TextBlock Style="{StaticResource Muted}" Text="DEVICE" FontSize="11"/><TextBlock Text="EchoDesk Mini" FontWeight="SemiBold" FontSize="16" Margin="0,6,0,0"/></StackPanel>
+                                        <StackPanel Margin="12,0"><TextBlock Style="{StaticResource Muted}" Text="CURRENT VERSION" FontSize="11"/><TextBlock Text="{Binding FirmwareCurrentVersion}" FontWeight="SemiBold" FontSize="16" Margin="0,6,0,0"/></StackPanel>
+                                        <StackPanel Margin="12,0,0,0"><TextBlock Style="{StaticResource Muted}" Text="AVAILABLE VERSION" FontSize="11"/><TextBlock Text="{Binding FirmwareAvailableVersion}" FontWeight="SemiBold" FontSize="16" Margin="0,6,0,0"/></StackPanel>
+                                    </UniformGrid>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource SectionTitle}" Text="What happens"/>
+                                    <TextBlock Text="1  Verify firmware    2  Enter bootloader    3  Write and verify    4  Restart and reconnect" TextWrapping="Wrap"/>
+                                    <TextBlock Foreground="{DynamicResource WarningBrush}" Text="A repair or reinstall may reset device settings. EchoDesk will preserve and restore supported settings where available. Do not unplug the USB cable." TextWrapping="Wrap" Margin="0,12,0,0"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                                <StackPanel>
+                                    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Style="{StaticResource SectionTitle}" Text="Release notes"/><Button Grid.Column="1" Command="{Binding CheckFirmwareUpdatesCommand}" Content="Check for updates"/></Grid>
+                                    <TextBlock Text="{Binding FirmwareReleaseNotes}" TextWrapping="Wrap" Margin="0,4,0,14"/>
+                                    <CheckBox IsChecked="{Binding UpdateNotificationsEnabled, Mode=OneWay}" Command="{Binding ToggleUpdateNotificationsCommand}" Content="Notify me when EchoDesk OS updates are available"/>
+                                </StackPanel>
+                            </Border>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Style="{StaticResource PrimaryButton}" Content="Install EchoDesk OS" Tag="install" Click="FirmwareAction_Click" Margin="0,0,8,0"/>
+                                <Button Content="Install update" Tag="update" Click="FirmwareAction_Click" Margin="0,0,8,0" IsEnabled="{Binding FirmwareUpdateAvailable}"/>
+                                <Button Content="Reinstall current version" Tag="reinstall" Click="FirmwareAction_Click" Margin="0,0,8,0"/>
+                                <Button Content="Repair device…" Tag="repair" Click="FirmwareAction_Click"/>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Screen 3: Installing. Percentage is shown only when reported by the flashing engine. -->
+                        <Border Style="{StaticResource Card}" Visibility="{Binding IsFirmwareInstallingScreen, Converter={StaticResource BoolVisibility}}">
+                            <StackPanel>
+                                <TextBlock Text="Installing EchoDesk OS" FontSize="23" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding FirmwareStageLabel}" FontSize="17" FontWeight="SemiBold" Margin="0,18,0,3"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="{Binding FirmwareOperationMessage}" TextWrapping="Wrap"/>
+                                <ProgressBar Height="8" Margin="0,20,0,7" Minimum="0" Maximum="100" Value="{Binding FirmwareManager.ProgressPercent}"
+                                             Visibility="{Binding FirmwareHasMeasuredProgress, Converter={StaticResource BoolVisibility}}"/>
+                                <ProgressBar Height="8" Margin="0,20,0,7" IsIndeterminate="True"
+                                             Visibility="{Binding FirmwareHasNoMeasuredProgress, Converter={StaticResource BoolVisibility}}"/>
+                                <TextBlock Text="{Binding FirmwareProgressLabel}" HorizontalAlignment="Right" FontWeight="SemiBold"/>
+                                <Border Background="#FFF6DD" CornerRadius="8" Padding="12" Margin="0,18,0,0">
+                                    <TextBlock Foreground="#6B4A00" Text="Keep the device connected and prevent Windows from sleeping until EchoDesk reconnects." TextWrapping="Wrap"/>
+                                </Border>
+                                <Button Command="{Binding CancelFirmwareOperationCommand}" Content="Cancel safely" HorizontalAlignment="Left" Margin="0,18,0,0"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Screen 4: Success -->
+                        <Border Style="{StaticResource Card}" Visibility="{Binding IsFirmwareSuccessScreen, Converter={StaticResource BoolVisibility}}">
+                            <StackPanel HorizontalAlignment="Center" MaxWidth="620" Margin="30">
+                                <Border Width="66" Height="66" CornerRadius="33" Background="{DynamicResource SuccessBrush}"><TextBlock Text="&#xE73E;" FontFamily="Segoe Fluent Icons" Foreground="White" FontSize="32" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                <TextBlock Text="EchoDesk is ready!" FontSize="28" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,18,0,6"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="EchoDesk OS was written, verified, restarted and reconnected successfully." TextAlignment="Center" TextWrapping="Wrap"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,24,0,0">
+                                    <Button Style="{StaticResource PrimaryButton}" Command="{Binding NavigateCommand}" CommandParameter="Overview" Content="Go to Overview" Margin="0,0,8,0"/>
+                                    <Button Command="{Binding NavigateCommand}" CommandParameter="Device Control" Content="Open EchoDesk Desktop" Margin="0,0,8,0"/>
+                                    <Button Command="{Binding NavigateCommand}" CommandParameter="Customisation" Content="Customise device"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- A completed write without a verified reboot is deliberately not called success. -->
+                        <Border Style="{StaticResource Card}" Visibility="{Binding IsFirmwarePartialScreen, Converter={StaticResource BoolVisibility}}">
+                            <StackPanel>
+                                <TextBlock Text="Firmware written — connection not confirmed" FontSize="23" FontWeight="SemiBold"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="The flash operation completed, but EchoDesk OS did not reconnect. Unplug and reconnect USB, then scan again. Use Repair only if it still cannot connect." TextWrapping="Wrap" Margin="0,8,0,18"/>
+                                <StackPanel Orientation="Horizontal"><Button Style="{StaticResource PrimaryButton}" Command="{Binding ScanFirmwareDevicesCommand}" Content="Scan again" Margin="0,0,8,0"/><Button Content="Repair device…" Tag="repair" Click="FirmwareAction_Click"/></StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Visibility="{Binding IsFirmwareFailureScreen, Converter={StaticResource BoolVisibility}}">
+                            <StackPanel>
+                                <TextBlock Text="EchoDesk OS was not installed" FontSize="23" FontWeight="SemiBold" Foreground="{DynamicResource DangerBrush}"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="{Binding FirmwareErrorMessage}" TextWrapping="Wrap" Margin="0,8,0,12"/>
+                                <TextBlock Text="No completed operation is reported as successful. Reconnect the USB cable, close serial terminals, then scan again. If Windows or antivirus blocked the flashing engine, allow the signed EchoDesk component and retry once." TextWrapping="Wrap" Margin="0,0,0,18"/>
+                                <StackPanel Orientation="Horizontal"><Button Style="{StaticResource PrimaryButton}" Command="{Binding ScanFirmwareDevicesCommand}" Content="Try detection again" Margin="0,0,8,0"/><Button Content="Recovery options…" Tag="repair" Click="FirmwareAction_Click"/></StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Customisation -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsCustomisation, Converter={StaticResource BoolVisibility}}">
+                    <StackPanel MaxWidth="1050">
+                        <TextBlock Style="{StaticResource PageTitle}" Text="Customisation"/>
+                        <TextBlock Style="{StaticResource Muted}" Text="Every enabled control writes to the physical EchoDesk and waits for confirmation." Margin="0,0,0,24"/>
+
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                            <StackPanel IsEnabled="{Binding SupportsSettings}">
+                                <TextBlock Style="{StaticResource SectionTitle}" Text="General"/>
+                                <TextBlock Text="Device appearance" FontWeight="SemiBold"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,9,0,18">
+                                    <Button Command="{Binding SetThemeCommand}" CommandParameter="light" Content="Light" Width="110" Margin="0,0,8,0"/>
+                                    <Button Command="{Binding SetThemeCommand}" CommandParameter="dark" Content="Dark" Width="110"/>
+                                </StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="54"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Brightness" FontWeight="SemiBold"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding Brightness, StringFormat={}{0}%}" HorizontalAlignment="Right" FontWeight="SemiBold"/>
+                                </Grid>
+                                <Slider Minimum="10" Maximum="100" TickFrequency="5" Value="{Binding Brightness, UpdateSourceTrigger=PropertyChanged}" Margin="0,7,0,2"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="Preview updates are not written to flash; only the final value is persisted." FontSize="12"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                            <StackPanel IsEnabled="{Binding SupportsSettings}">
+                                <TextBlock Style="{StaticResource SectionTitle}" Text="Now Playing"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <StackPanel><TextBlock Text="Layout" FontWeight="SemiBold" Margin="0,0,0,7"/><ComboBox ItemsSource="{Binding LayoutOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding NowPlayingLayout}"/></StackPanel>
+                                    <StackPanel Grid.Column="2"><TextBlock Text="Background" FontWeight="SemiBold" Margin="0,0,0,7"/><ComboBox ItemsSource="{Binding BackgroundOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding NowPlayingBackground}"/></StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,14" Opacity="0.68">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource SectionTitle}" Text="Not supported by the current firmware"/>
+                                <TextBlock Text="Startup app · Clock 12/24-hour format · Timezone · Codex used/remaining mode · Preferred Codex display · Performance default view" FontWeight="SemiBold"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="These controls stay disabled because the connected firmware reports them as unsupported. EchoDesk Desktop never pretends a local-only change reached the device." Margin="0,8,0,0"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource SectionTitle}" Text="Desktop app"/>
+                                <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="160"/><ColumnDefinition Width="220"/></Grid.ColumnDefinitions><TextBlock Text="Desktop appearance" VerticalAlignment="Center"/><ComboBox Grid.Column="1" ItemsSource="{Binding AppearanceOptions}" SelectedItem="{Binding DesktopAppearance}"/></Grid>
+                                <CheckBox Content="Minimise to the system tray when the window closes" IsChecked="{Binding MinimizeToTray}"/>
+                                <CheckBox Content="Launch EchoDesk Desktop with Windows" IsChecked="{Binding LaunchWithWindows}"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+
+            <Border Grid.Row="1" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,11">
+                <TextBlock Text="{Binding Feedback}" Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis"/>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

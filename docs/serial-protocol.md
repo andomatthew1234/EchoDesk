@@ -1,6 +1,6 @@
 # USB-Serial-Protokoll zwischen Companion-App und ESP32-Firmware
 
-Basisstand: 10. September 2026. Bezug: Mac-App 1.28.0 `(main.swift:33)`, Firmware 2.17.0 `(config.h:11)`. Die Windows-Erweiterung vom 25. September 2026 steht in Abschnitt 10.
+Basisstand: 30. Oktober 2026. Die EchoDesk-Performance-Erweiterung steht in Abschnitt 12.
 
 Diese Spezifikation beschreibt das Protokoll implementierungsunabhängig. Jede Aussage trägt einen Quellverweis in der Form `(main.swift:1706)` oder `(serial_receiver.cpp:120)`, damit sie gegen den Code prüfbar bleibt. Zeilenangaben beziehen sich auf `companion/Sources/main.swift`, `companion/Sources/CodexBarSource.swift`, `companion/Sources/SettingsWindow+*.swift` sowie `src/*.cpp` und `src/*.h` im Stand des oben genannten Commits.
 
@@ -157,6 +157,11 @@ Antwort auf `get_info` `(serial_receiver.cpp:353-389)`.
 | `serialTransport` | String | `"AIM1"` | 377, `(serial_receiver.cpp:38)` |
 | `maxFrameBytes` | Int | 4095 | 377 |
 | `sceneProtocol` | Int | `1` bei Firmware mit Display-Szenen; fehlt bei älterer Firmware | `serial_receiver.cpp` |
+| `performanceProtocol` | Int | `1` bei EchoDesk-Firmware mit Performance Centre; fehlt bei inkompatibler Firmware. Der Windows-Companion sendet Telemetrie ausschließlich nach dieser Aushandlung. | `serial_receiver.cpp`, `companion-windows/crates/core/src/protocol.rs` |
+| `musicProtocol` | Int | `1` bei Firmware mit GSMTC-Now-Playing-Metadaten, Artwork und Rückkanal-Steuerung | `serial_receiver.cpp`, `companion-windows/crates/core/src/protocol.rs` |
+| `musicBackgroundProtocol` | Int | `1` bei Firmware mit dem bedarfsgesteuerten 320×240-Hintergrundtransfer | `serial_receiver.cpp`, `companion-windows/crates/core/src/protocol.rs` |
+| `musicVisualizerProtocol` | Int | `1` bei Firmware mit opt-in Audio-Bars aus 16 FFT-Bändern | `serial_receiver.cpp`, `companion-windows/crates/core/src/protocol.rs` |
+| `echoDeskControlProtocol` | Int | `1` bei EchoDesk Desktop Control v1; fehlt bei Firmware ohne sichere App-/Einstellungsfernsteuerung | `serial_receiver.cpp` |
 | `wifiConfigured` | Bool | Zugangsdaten gespeichert | 378 |
 | `wifiConnected` | Bool | WLAN verbunden | 378 |
 | `timeSynced` | Bool | NTP-Sync erfolgt | 378 |
@@ -175,6 +180,10 @@ Beispiel:
 Der Host liest `version` (Pflicht), `serialTransport`, `maxFrameBytes`, `mac`, `display`, `brightness` `(main.swift:1841-1873)`. Die übrigen Felder werden vom Host nicht ausgewertet. `serialTransport` wird kleingeschrieben und getrimmt verglichen, `mac` und `display` ebenfalls kleingeschrieben `(main.swift:1846-1869)`. Fehlt `mac` oder ist es leer, verwendet der Host die Pseudo-MAC `legacy-device` `(main.swift:99)`, `(main.swift:1859-1861)`. `display` wird nur übernommen, wenn es `ili9341` oder `st7789` ist `(main.swift:1974-1977)`, `(main.swift:53-56)`.
 
 Ab App 1.32.0 liest der Host zusätzlich `panel`. Weicht ein erkannter Controller (`ili9341`, `st7789`) von `display` ab, flasht die App direkt nach einem eigenen Flash die passende Variante nach, sonst zeigt sie einen Hinweis. `noreply` gilt nur als Verdacht auf ST7789: Korrigiert wird dann ausschließlich die Standard-Variante, die die App beim ersten Flash selbst gewählt hat.
+
+EchoDesk ergänzt `"performanceProtocol":1`. Das Feld ist eine explizite
+Capability und keine Versionsheuristik: fehlt es, bleiben ältere Geräte beim
+bisherigen Usage-/Plugin-Verhalten.
 
 ### 4.2 `ack`
 
@@ -743,6 +752,9 @@ Ist keine Geräteversion bekannt, fällt der Host für die ACK- und Brightness-P
 | 2.17.0 | Provider `gemini`, `copilot`, `cursor` | `(config.h:138-143)`, `(providers.cpp:39-67)` |
 | 2.18.0 | `usage.credits` und `usage.resetCredits` als Kennzeichen im Header | `(serial_receiver.cpp, parse_credits)`, `(ui_dashboard.cpp, layout_header_center)` |
 | 2.18.1 | Funkmodul startet nur mit gespeicherten WLAN-Zugangsdaten; kein USB-Abfall mehr beim ersten Boot nach einem Flash | `(wifi_time.cpp, wifi_time_init)` |
+| 2.26.0 | Now Playing mit GSMTC-Metadaten, 96×96-Artwork, drei Layouts und bestätigten Wiedergabesteuerungen | `(music_data.cpp)`, `(ui_now_playing.cpp)`, `(companion-windows/src-tauri/src/music.rs)` |
+| 2.27.0 | Unabhängige Hintergrundwahl, 320×240-Albumhintergrund und opt-in Audio Bars mit 16 FFT-Bändern | `(music_data.cpp)`, `(ui_now_playing.cpp)`, `(companion-windows/src-tauri/src/audio_visualizer.rs)` |
+| 2.28.0 | EchoDesk Desktop Control v1 mit App-Navigation, versioniertem Gerätezustand, Revisionsschutz und persistenten Einstellungen | `(echodesk_control.cpp)`, `(serial_receiver.cpp)`, `(ui_echodesk.cpp)` |
 
 Unbekannte Felder werden von der Firmware ignoriert (ArduinoJson-Zugriff per Schlüssel), unbekannte Provider fallen auf `claude` zurück `(providers.cpp:107)`.
 
@@ -864,3 +876,268 @@ Der Companion wählt auf dem ST7701-S3-Board eine eigene quadratische Szene,
 sofern das Paket eine enthält; sonst verwendet er die Hochformat-Szene.
 Das Paketformat und ein vollständiges Wetterbeispiel stehen in
 [`display-plugins.md`](display-plugins.md).
+## 12. EchoDesk Performance Protocol v1
+
+The Windows companion remains the only owner of the COM port. Its bundled
+LibreHardwareMonitor helper has no serial access; it writes one bounded NDJSON
+sample per second to the companion, which coalesces samples and sends the newest
+one through the existing serial thread.
+
+Performance frames use AIM1 framing, schema-independent `frameId` receipt IDs,
+and are sent only when `get_info` reported `performanceProtocol: 1`. The JSON
+payload is limited to 1024 bytes:
+
+```json
+{
+  "type": "performance",
+  "version": 1,
+  "frameId": 42,
+  "timestamp": 1793333400,
+  "cpuPct": 23.1,
+  "gpuPct": null,
+  "ramPct": 61.0,
+  "ramUsedBytes": 17179869184,
+  "ramTotalBytes": 34359738368,
+  "network": { "downBps": 1250000, "upBps": 250000 },
+  "temperature": { "cpuC": 54.2, "gpuC": null, "motherboardC": null }
+}
+```
+
+Fields and units:
+
+| Field | Meaning |
+|---|---|
+| `version` | Performance payload version; exactly `1` for this contract. |
+| `timestamp` | UTC Unix seconds at sensor sampling time. |
+| `cpuPct`, `gpuPct`, `ramPct` | Utilisation percentage, 0–100. `null` means unavailable. |
+| `ramUsedBytes`, `ramTotalBytes` | Optional paired byte counts. Both are `null` when unavailable. |
+| `network.downBps`, `network.upBps` | Bytes per second from all reporting adapters. Either may be `null`; the display converts to bit/s units. |
+| `temperature.*C` | Degrees Celsius. `null` means that sensor was not reliably identified. |
+
+The firmware rejects unsupported versions, non-finite/out-of-range values,
+unpaired RAM byte fields, malformed objects, and oversized rates. A valid frame
+adds one item to the fixed 60-sample ring and receives the normal ACK. Unknown
+or missing sensors remain `N/A`; they are never converted to zero.
+
+Freshness is based on receipt time, not the host clock. Up to 3 seconds is
+`LIVE`, 3–15 seconds is `STALE`, and more than 15 seconds is `OFFLINE`. The
+display stops presenting frozen current values once offline. Clean companion
+shutdown also marks performance data disconnected immediately.
+
+Temperature Pressure is an informational estimate, not a throttling detector.
+It takes the highest normalised pressure among available CPU, ordinary GPU and
+motherboard sensors, then applies asymmetric smoothing and status hysteresis.
+Compile-time defaults are CPU 70/85/95 °C, GPU 75/85/95 °C and motherboard
+55/70/85 °C for warm/hot/critical. They may be overridden with
+`PERF_{CPU,GPU,BOARD}_{WARM,HOT,CRITICAL}_C` build definitions. The UI maps the
+smoothed score to GOOD, MODERATE and HIGH and identifies the component that
+contributes the highest current pressure.
+
+## 13. EchoDesk Music Protocol v1
+
+The Windows companion is the only serial-port owner. A dedicated GSMTC worker
+polls Windows media sessions at approximately one second, coalesces the newest
+snapshot, and gives it to the existing serial service. Frames are sent only
+when `get_info` reports `musicProtocol:1` and AIM1 framing.
+
+Metadata is a bounded JSON object (maximum 1536 bytes):
+
+```json
+{
+  "type": "music",
+  "version": 1,
+  "frameId": 81,
+  "timestamp": 1793333400,
+  "generation": 7,
+  "state": "playing",
+  "title": "Track title",
+  "artist": "Artist",
+  "album": "Album",
+  "application": "Spotify",
+  "positionMs": 42000,
+  "durationMs": 231000,
+  "canPlayPause": true,
+  "canPrevious": true,
+  "canNext": true,
+  "artId": "0123456789abcdef"
+}
+```
+
+Strings are copied into fixed firmware buffers: title 96 UTF-8 bytes and
+artist, album and application 64 bytes each. Empty strings mean unavailable;
+the firmware never invents metadata. Position and duration are milliseconds;
+zero duration means unavailable. `generation` changes with the selected media
+session and prevents a delayed touch from controlling a replacement session.
+Freshness is based on firmware receipt time: live through 5 seconds, stale
+through 15 seconds, then offline. Progress advances locally only while the
+confirmed state is `playing` and is clamped to a known duration.
+
+The companion selects a confirmed playing session over every paused or stopped
+session, retains the previous selection as a tie-breaker, then uses Windows'
+current-session hint and stable application ordering. A paused browser tab can
+therefore never replace an actively playing music client.
+
+Artwork is decoded, cropped and resized to 96×96 on Windows, then encoded as a
+baseline JFIF JPEG. The final bytes are SHA-256 hashed; the first 16 hex digits
+form `artId`. JPEG size is capped at 12,288 bytes and original thumbnails are
+rejected above 8 MiB or 40 megapixels. A changed image is sent as no more than
+eight independently acknowledged chunks of at most 1536 decoded bytes:
+
+```json
+{
+  "type": "music_art",
+  "version": 1,
+  "frameId": 82,
+  "id": "0123456789abcdef",
+  "width": 96,
+  "height": 96,
+  "index": 0,
+  "chunks": 4,
+  "offset": 0,
+  "totalBytes": 5900,
+  "crc32": 305419896,
+  "data": "...base64..."
+}
+```
+
+Only one artwork chunk is attempted per serial-service iteration, so Codex and
+Performance traffic can interleave. A newer `artId` cancels the pending old
+transfer. Firmware requires version 1, 96×96 dimensions, a safe ID, in-order
+indices and offsets, strict base64, maximum sizes, an IEEE CRC32 match, the
+JFIF signature and JPEG end marker. It assembles into a second bounded buffer
+and swaps atomically only after validation. A corrupt or incomplete transfer
+leaves the previous valid buffer intact, and the UI shows it only when its ID
+matches current metadata. Identical art is not retransmitted during a serial
+connection; reconnect resets the transfer cache.
+
+### 13.1 Display-ready background
+
+Firmware advertising `musicBackgroundProtocol:1` can request the current
+background with a reverse newline-delimited message:
+
+```json
+{"type":"music_background_request","version":1,"enabled":true}
+```
+
+`false` cancels an incomplete transfer; `true` permits the companion to send
+the cached image. The firmware repeats the active request every two seconds so
+a serial reconnect recovers without resetting the user's preference.
+
+Windows crops the source artwork to the panel's 4:3 aspect ratio, resizes it to
+320×240, applies a 14-pixel blur, and encodes a baseline JFIF JPEG capped at
+32,768 bytes. It is transferred as acknowledged 1,536-byte decoded chunks:
+
+```json
+{"type":"music_background","version":1,"frameId":91,"id":"0123456789abcdef","width":320,"height":240,"index":0,"chunks":8,"offset":0,"totalBytes":11000,"crc32":305419896,"data":"...base64..."}
+```
+
+The ID must equal the current foreground `artId`. Firmware uses strict bounds,
+ordering, base64, CRC32 and JFIF checks, including a baseline SOF0 encoded-size
+check for exactly 320×240 rather than trusting only the JSON dimensions. Two
+exact-size pointer slots preserve the active LVGL source while a replacement is
+assembled. After a commit, the retired slot stays pinned until the UI has
+dropped the old LVGL cache entry and moved its descriptor; a rapid later
+transfer is rejected and can be retried instead of reclaiming referenced
+memory. Corrupt or incomplete data cannot replace the active image. A short
+opacity animation reveals a newly committed background beneath the fixed dark
+readability overlay.
+
+### 13.2 Real-audio visualizer
+
+Firmware advertising `musicVisualizerProtocol:1` opts in and out with:
+
+```json
+{"type":"music_visualizer","version":1,"enabled":true}
+```
+
+Only `true` starts capture. `false`, leaving Now Playing, a serial disconnect,
+or process exit stops the capture worker. The companion opens WASAPI loopback
+on the current Windows default multimedia render endpoint, mixes channels to
+mono in memory, applies a Hann-windowed 1,024-point FFT, and reduces logarithmic
+45 Hz–16 kHz ranges to 16 attack/decay-smoothed bytes at approximately 20 Hz.
+It transmits band values, never PCM:
+
+```json
+{"type":"music_visualizer","version":1,"frameId":92,"enabled":true,"available":true,"sequence":1234,"bands":[4,9,18,42,91,134,166,148,111,86,64,50,32,20,11,6]}
+```
+
+An initialization or device error sends `available:false` with a bounded
+`reason`; firmware shows an unavailable state rather than synthetic bars. Band
+data becomes stale after 750 ms. Bars use fast rise, slower decay and a separate
+peak decay, but are forced toward zero unless confirmed playback is playing.
+WASAPI endpoint loopback can include every application audible on that output,
+not only the GSMTC session. Audio stays local and is never recorded or uploaded.
+
+Touch controls are reverse, newline-delimited device messages rather than AIM1
+host frames:
+
+```json
+{"type":"music_control","version":1,"generation":7,"action":"toggle"}
+```
+
+Actions are `toggle`, `previous` and `next`. The serial link keeps a bounded
+16-item queue and passes valid commands to the GSMTC worker. The worker checks
+the generation and current support flag immediately before calling the Windows
+`Try*Async` API. A returned request result never updates the display
+optimistically; only the next confirmed GSMTC snapshot changes state.
+
+## 14. EchoDesk Desktop Control v1
+
+Firmware advertises this extension only through `echoDeskControlProtocol:1` in
+`info`. Commands remain bounded newline-delimited JSON on the existing serial
+owner. They are never sent from a second process directly to the COM port.
+Every request requires `version:1` and a nonzero numeric `requestId`.
+
+```json
+{"cmd":"echodesk_get_state","version":1,"requestId":41}
+{"cmd":"echodesk_open_app","version":1,"requestId":42,"app":"nowPlaying"}
+{"cmd":"echodesk_restart","version":1,"requestId":43}
+```
+
+Supported app values are `home`, `codex`, `clock`, `performance`,
+`nowPlaying`, and `settings`. Navigation is queued and applied by the normal UI
+tick rather than running LVGL work inside the serial parser.
+
+The state response to `echodesk_get_state` includes the request ID. The same
+message without a request ID is emitted when touchscreen navigation or a
+supported setting changes:
+
+```json
+{"type":"echodesk_state","version":1,"requestId":41,"revision":7,"deviceName":"EchoDesk","hardwareModel":"Freenove FNK0114A_2P4","firmwareVersion":"2.28.0","activeApp":"home","supportedApps":["home","codex","clock","performance","nowPlaying","settings"],"settings":{"theme":"dark","brightness":80,"nowPlayingLayout":"carPlay","nowPlayingBackground":"audioBars","nowPlayingBackgroundCustomized":true},"unsupportedSettings":["defaultApp","clockFormat","timezone","codexPercentageMode","codexPreferredDisplay","performanceDefaultView"]}
+```
+
+Settings updates are partial but atomic. `baseRevision` must match the current
+device revision, preventing a stale desktop window from overwriting a newer
+touchscreen change:
+
+```json
+{"cmd":"echodesk_set_settings","version":1,"requestId":44,"baseRevision":7,"persist":true,"settings":{"theme":"light","brightness":65,"nowPlayingLayout":"echoDesk","nowPlayingBackgroundCustomized":false}}
+```
+
+Theme values are `light` and `dark`. Now Playing layout values are
+`albumCover`, `carPlay`, and `echoDesk`; backgrounds are
+`blurredAlbumCover`, `echoDesk`, and `audioBars`. Setting a background without
+the customized flag creates an explicit override. Setting
+`nowPlayingBackgroundCustomized:false` restores the selected layout's default.
+Only a brightness-only update may use `persist:false`; this supports smooth
+slider preview without writing NVS. The final debounced update uses
+`persist:true`.
+
+Successful mutating requests return:
+
+```json
+{"type":"echodesk_ack","version":1,"requestId":44,"command":"echodesk_set_settings","revision":8}
+```
+
+Failures use `echodesk_error` with `invalid_request`, `unsupported`, or
+`stale_revision`, plus the current revision. On a stale update the firmware
+also emits the current state so the desktop can reconcile and retry only after
+user intent is re-established. Restart is acknowledged first and then deferred
+for 350 ms so serial output is flushed cleanly.
+
+Feishin Web playback exposes GSMTC only when its media-session setting is
+enabled and the app is restarted. The MPV backend does not expose it, and
+Feishin may omit timeline data. The researched optional fallback is a
+loopback-only adapter to Feishin's existing Remote WebSocket in the Windows
+companion; it is deliberately not a Jellyfin or ESP32 credential flow. See
+[`feishin-windows-media-research.md`](feishin-windows-media-research.md).

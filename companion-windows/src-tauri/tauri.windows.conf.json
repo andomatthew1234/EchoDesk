@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "../tools/echodesk-performance-helper/bin/Release/net8.0/win-x64/publish/echodesk-performance-helper.exe": "performance/echodesk-performance-helper.exe",
+      "../tools/echodesk-performance-helper/THIRD-PARTY-NOTICES.md": "performance/THIRD-PARTY-NOTICES.md"
+    }
+  }
+}

@@ -1,0 +1,44 @@
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@keyframes word-out {
+  from { opacity: 1; transform: translateY(0) rotateX(0); }
+  to { opacity: 0; transform: translateY(-44%) rotateX(72deg); }
+}
+
+@keyframes word-in {
+  from { opacity: 0; transform: translateY(48%) rotateX(-72deg); }
+  to { opacity: 1; transform: translateY(0) rotateX(0); }
+}
+
+@keyframes scroll-pulse {
+  0%, 100% { opacity: .25; transform: scaleY(.5); transform-origin: top; }
+  50% { opacity: 1; transform: scaleY(1); }
+}
+
+@keyframes generate {
+  0% { width: 8%; transform: translateX(-100%); }
+  55% { width: 78%; transform: translateX(0); }
+  100% { width: 18%; transform: translateX(460%); }
+}
+
+.js .reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 760ms ease, transform 760ms var(--ease);
+}
+
+.js .reveal-delay-1 { transition-delay: 120ms; }
+.js .reveal.is-visible { opacity: 1; transform: translateY(0); }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+  .js .reveal { opacity: 1; transform: none; }
+  .flip-card-inner { transition: none; }
+  .product-orbit { transform: none !important; }
+}

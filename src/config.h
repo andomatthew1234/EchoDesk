@@ -8,7 +8,7 @@
 // ============================================================
 
 // App version
-#define APP_VERSION "2.23.0"
+#define APP_VERSION "2.28.0"
 #define APP_NAME    "AI Usage Monitor"
 
 // Display-Controller-ID (aus Build-Flags abgeleitet, Compile-Zeit).
@@ -163,6 +163,20 @@ extern uint16_t SCREEN_HEIGHT;
 #define THEME_DARK   0
 #define THEME_LIGHT  1
 
+// EchoDesk Now Playing layouts. Stored as a byte in the existing NVS config.
+#define NOW_PLAYING_LAYOUT_ALBUM_COVER 0
+#define NOW_PLAYING_LAYOUT_CARPLAY     1
+#define NOW_PLAYING_LAYOUT_ECHODESK    2
+#define NOW_PLAYING_LAYOUT_DEFAULT     NOW_PLAYING_LAYOUT_ALBUM_COVER
+
+// Now Playing backgrounds are selected independently of the layout. The
+// customized flag distinguishes an explicit user choice from per-layout
+// defaults so changing layout cannot silently discard an override.
+#define NOW_PLAYING_BACKGROUND_ALBUM_COVER 0
+#define NOW_PLAYING_BACKGROUND_ECHODESK    1
+#define NOW_PLAYING_BACKGROUND_AUDIO_BARS  2
+#define NOW_PLAYING_BACKGROUND_DEFAULT     NOW_PLAYING_BACKGROUND_ALBUM_COVER
+
 // ============================================================
 // Language options
 // ============================================================
@@ -191,6 +205,9 @@ struct AppConfig {
     uint8_t  theme;                   // THEME_DARK(0) or THEME_LIGHT(1)
     uint8_t  language;                // LANG_DE(0) or LANG_EN(1)
     uint8_t  brightness_pct;          // 5..100
+    uint8_t  now_playing_layout;       // NOW_PLAYING_LAYOUT_* (EchoDesk only)
+    uint8_t  now_playing_background;   // NOW_PLAYING_BACKGROUND_* (EchoDesk only)
+    bool     now_playing_background_customized; // Preserve explicit choice across layouts
 };
 
 // ============================================================

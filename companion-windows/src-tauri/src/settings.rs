@@ -43,6 +43,9 @@ fn default_views() -> Vec<ViewContent> {
 fn default_view_interval() -> u16 {
     10
 }
+fn default_true() -> bool {
+    true
+}
 
 impl Language {
     /// Tatsächlich zu verwendende Sprache: "de" oder "en".
@@ -89,6 +92,10 @@ pub struct Settings {
     pub language: Language,
     #[serde(default)]
     pub autostart: bool,
+    /// Whether EchoDesk may fetch and publish AI provider usage. This stays
+    /// enabled for settings files written by older companion versions.
+    #[serde(default = "default_true")]
+    pub ai_usage_enabled: bool,
     /// Fest gewählter serieller Port; `None` heißt automatische Wahl.
     #[serde(default)]
     pub manual_port: Option<String>,
@@ -104,6 +111,9 @@ pub struct Settings {
     /// Zeitpunkt der letzten erfolgreichen Release-Abfrage.
     #[serde(default)]
     pub last_update_check: Option<DateTime<Utc>>,
+    /// Show a non-intrusive notification when a newer EchoDesk OS is listed.
+    #[serde(default = "default_true")]
+    pub firmware_update_notifications: bool,
 }
 
 fn default_timezone() -> String {
@@ -127,11 +137,13 @@ impl Default for Settings {
             percent_mode: PercentMode::Used,
             language: Language::System,
             autostart: false,
+            ai_usage_enabled: true,
             manual_port: None,
             timezone: default_timezone(),
             update_channel: UpdateChannel::Stable,
             installed_firmware_version: None,
             last_update_check: None,
+            firmware_update_notifications: true,
         }
     }
 }
@@ -354,5 +366,12 @@ mod tests {
             serde_json::to_value(ViewContent::Plugin("org.example.status".into())).unwrap(),
             serde_json::json!({"kind":"plugin","provider":"org.example.status"})
         );
+    }
+
+    #[test]
+    fn old_settings_default_ai_usage_to_enabled() {
+        let settings: Settings = serde_json::from_value(json!({})).unwrap();
+        assert!(settings.ai_usage_enabled);
+        assert_eq!(serde_json::to_value(settings).unwrap()["aiUsageEnabled"], true);
     }
 }

@@ -2,9 +2,14 @@
 //! Die Fachlogik liegt in `aimonitor-core`.
 
 mod claude_code;
+mod audio_visualizer;
 mod commands;
+mod desktop_broker;
 mod flash;
+mod firmware_manager;
 mod plugins;
+mod performance;
+mod music;
 mod poll;
 mod registry;
 mod serial_service;
@@ -20,6 +25,12 @@ use aimonitor_core::Source;
 use settings::Settings;
 use state::AppState;
 use tauri::Manager;
+
+fn internal_host_mode() -> bool {
+    std::env::args_os().any(|arg| arg == "--echodesk-host")
+        || std::env::var("ECHODESK_HOST").is_ok_and(|value| value == "1")
+        || std::env::var("AIMONITOR_HEADLESS").is_ok_and(|value| value == "1")
+}
 
 /// Entwicklungsschalter AIMONITOR_DEV_ACTION (siehe README). `detect` liest
 /// den Chip am verbundenen Port aus. `flash` wartet
@@ -98,10 +109,11 @@ fn dev_action(app: tauri::AppHandle, action: String) {
 }
 
 pub fn run() {
+    let internal_host = internal_host_mode();
     tauri::Builder::default()
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        .setup(move |app| {
             // Kein Dock-Icon unter macOS, die App lebt in der Menüleiste.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -110,10 +122,11 @@ pub fn run() {
             let settings = Settings::load(&handle);
             let source = Source::new(settings.provider);
             println!(
-                "[aimonitor] Start: Provider {}, CLI {:?}, Sprache {}",
+                "[echodesk-host] Start: Provider {}, CLI {:?}, Sprache {}, internal {}",
                 settings.provider,
                 source.cli_path(),
-                settings.language.effective()
+                settings.language.effective(),
+                internal_host
             );
             let devices = registry::load(&handle);
             let manual_port = settings.manual_port.clone();
@@ -121,8 +134,11 @@ pub fn run() {
             let plugins = plugins::app_store(&handle)?;
             app.manage(AppState::new(source, settings, devices, plugins, serial_tx));
 
-            tray::build(&handle)?;
+            if !internal_host {
+                tray::build(&handle)?;
+            }
             serial_service::start(handle.clone(), serial_rx, manual_port);
+            desktop_broker::start(handle.clone());
             // Strg+C oder SIGTERM (z. B. aus `cargo tauri dev`) beenden wie
             // „Beenden" im Tray: standby ans Gerät, Port schließen, dann Exit.
             let signal_handle = handle.clone();
@@ -133,7 +149,8 @@ pub fn run() {
             }
             // Entwicklung: AIMONITOR_OPEN_SETTINGS=1 öffnet das Fenster sofort,
             // ohne den Umweg über das Tray-Menü.
-            if std::env::var("AIMONITOR_OPEN_SETTINGS")
+            if !internal_host
+                && std::env::var("AIMONITOR_OPEN_SETTINGS")
                 .map(|v| v == "1")
                 .unwrap_or(false)
             {
@@ -147,6 +164,9 @@ pub fn run() {
                 dev_action(handle.clone(), action);
             }
             claude_code::start(handle.clone());
+            performance::start(handle.clone());
+            music::start(handle.clone());
+            audio_visualizer::start(handle.clone());
             poll::start_timer(handle);
             Ok(())
         })

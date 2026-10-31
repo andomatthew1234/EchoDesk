@@ -9,10 +9,12 @@ $checksumFile = "$outputBin.sha256"
 $platformioHome = Join-Path $env:USERPROFILE ".platformio"
 $esptool = Join-Path $platformioHome "packages\tool-esptoolpy\esptool.py"
 $bootApp = Join-Path $platformioHome "packages\framework-arduinoespressif32\tools\partitions\boot_app0.bin"
+$python = (Get-Command py.exe -ErrorAction SilentlyContinue).Source
+if (-not $python) { $python = (Get-Command python.exe -ErrorAction Stop).Source }
 
 Push-Location $projectDir
 try {
-    py -m platformio run -e $environmentName
+    & $python -m platformio run -e $environmentName
     if ($LASTEXITCODE -ne 0) {
         throw "PlatformIO build failed with exit code $LASTEXITCODE"
     }
@@ -31,7 +33,7 @@ try {
     }
 
     New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
-    py $esptool --chip esp32 merge_bin `
+    & $python $esptool --chip esp32 merge_bin `
         -o $outputBin `
         --flash_mode dio `
         --flash_freq 40m `

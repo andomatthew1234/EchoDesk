@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>EchoDesk Desktop</AssemblyName>
+    <RootNamespace>EchoDesk.Desktop</RootNamespace>
+    <ApplicationIcon>Assets\echodesk.ico</ApplicationIcon>
+    <Version>0.2.2</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\EchoDesk.Desktop.Core\EchoDesk.Desktop.Core.csproj" />
+    <Resource Include="Assets\echodesk-logo.png" />
+    <Resource Include="Assets\echodesk.ico" />
+  </ItemGroup>
+</Project>

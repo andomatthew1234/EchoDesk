@@ -8,6 +8,12 @@
 //! Zugriff hinweg.
 
 use crate::flash;
+use crate::audio_visualizer::VisualizerSnapshot;
+use crate::music::{
+    art_chunk_payload, background_chunk_payload, Artwork, MusicAction, MusicBackground,
+    MusicCommand, MusicSnapshot, MUSIC_ART_CHUNK_BYTES, MUSIC_BACKGROUND_CHUNK_BYTES,
+};
+use crate::performance::PerformanceSample;
 use crate::poll;
 use crate::registry;
 use crate::settings::{ViewContent, ViewMode};
@@ -70,6 +76,21 @@ pub enum Job {
     SmartUsage(aimonitor_core::Provider, Vec<UsageSignal>),
     SmartPlugin(String, BTreeMap<String, bool>),
     SmartClaudeCode(Vec<(String, aimonitor_core::claude_code::Waiting, i64)>),
+    /// A coalesced helper sample is ready in `AppState::performance`.
+    PerformanceReady,
+    /// A coalesced Windows media-session snapshot is ready.
+    MusicReady,
+    /// A coalesced, PCM-free WASAPI band snapshot is ready.
+    AudioVisualizerReady,
+    /// Allowlisted EchoDesk Desktop request. The named-pipe broker never gets
+    /// access to the raw serial link.
+    EchoDeskControl {
+        method: String,
+        params: Value,
+        reply: Sender<Result<Value, Value>>,
+    },
+    /// Close and immediately rescan without changing the saved port choice.
+    EchoDeskReconnect,
     SendDiagnostic,
     Wifi { action: WifiAction, reply: Sender<Result<Value, String>> },
     /// Nur die geänderten Werte sind `Some`; das Profil selbst liegt in der Registry.
@@ -186,12 +207,14 @@ pub fn start(app: AppHandle, rx: Receiver<Job>, manual_port: Option<String>) {
 fn notice_text(key: &str, language: Language) -> &'static str {
     match (language, key) {
         (Language::De, "dsp.notice.climissing") => "CodexBar-CLI fehlt",
+        (Language::De, "dsp.notice.auth") => "Bei Codex anmelden",
         (Language::De, "dsp.notice.failed") => "Abruf fehlgeschlagen",
         (Language::De, "dsp.notice.loading") => "Lade Provider ...",
         (Language::De, "dsp.notice.parse") => "Datenfehler",
         (Language::De, "dsp.notice.stale") => "Daten veraltet",
         (Language::De, "dsp.notice.startapp") => "Bitte App starten",
         (Language::En, "dsp.notice.climissing") => "CodexBar CLI missing",
+        (Language::En, "dsp.notice.auth") => "Sign in to Codex",
         (Language::En, "dsp.notice.failed") => "Fetch failed",
         (Language::En, "dsp.notice.loading") => "Loading provider ...",
         (Language::En, "dsp.notice.parse") => "Data error",
@@ -215,6 +238,16 @@ enum LinkState {
     Probing,
     Connected(DeviceInfo),
     ForeignFirmware,
+}
+
+struct PendingMusicArt {
+    art: Artwork,
+    next_chunk: usize,
+}
+
+struct PendingMusicBackground {
+    background: MusicBackground,
+    next_chunk: usize,
 }
 
 struct Service {
@@ -250,6 +283,13 @@ struct Service {
     frames_acked: u64,
     log: VecDeque<String>,
     smart: SmartSwitch,
+    pending_music_art: Option<PendingMusicArt>,
+    last_music_art_id: Option<String>,
+    pending_music_background: Option<PendingMusicBackground>,
+    last_music_background_id: Option<String>,
+    music_background_requested: bool,
+    music_visualizer_requested: bool,
+    desktop_request_id: u32,
 }
 
 impl Service {
@@ -283,6 +323,13 @@ impl Service {
                 smart.reset(Instant::now());
                 smart
             },
+            pending_music_art: None,
+            last_music_art_id: None,
+            pending_music_background: None,
+            last_music_background_id: None,
+            music_background_requested: false,
+            music_visualizer_requested: false,
+            desktop_request_id: 0,
         }
     }
 
@@ -369,7 +416,20 @@ impl Service {
     fn publish(&mut self) {
         self.absorb_link_log();
         let snap = self.snapshot();
-        *self.app.state::<AppState>().connection.lock().unwrap() = snap.clone();
+        let app_state = self.app.state::<AppState>();
+        let broker_changed = {
+            let mut previous = app_state.connection.lock().unwrap();
+            let changed = previous.state != snap.state
+                || previous.port != snap.port
+                || previous.info != snap.info;
+            *previous = snap.clone();
+            changed
+        };
+        if broker_changed {
+            app_state
+                .desktop_broker_revision
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
         if let Err(e) = self.app.emit(CONNECTION_EVENT, &snap) {
             eprintln!("[aimonitor] Verbindungs-Event nicht gesendet: {e}");
         }
@@ -464,6 +524,11 @@ impl Service {
                     self.send_data_frame("Heartbeat");
                 }
             }
+        }
+        if self.pending_music_art.is_some() {
+            self.send_pending_music_art();
+        } else {
+            self.send_pending_music_background();
         }
     }
 
@@ -621,6 +686,12 @@ impl Service {
         self.state = LinkState::Connected(info);
         self.profile = Some(profile.clone());
         self.unacked = 0;
+        self.pending_music_art = None;
+        self.last_music_art_id = None;
+        self.pending_music_background = None;
+        self.last_music_background_id = None;
+        self.music_background_requested = false;
+        self.music_visualizer_requested = false;
         self.late_info_until = None;
         self.diagnostic_until = None;
         if self.diagnostic_after_connect {
@@ -638,15 +709,33 @@ impl Service {
 
         // Spec 6.1: vier set_*-Kommandos ohne Antwortauswertung, dann ein Frame.
         let theme = profile.theme.resolve(system_is_dark());
-        let commands = [
-            Command::set_theme(theme),
+        // EchoDesk-control firmware is the source of truth for its persistent
+        // theme/brightness. Replaying an older AI Monitor profile here would
+        // overwrite a newer touchscreen change before the v1 state handshake.
+        let mut commands = vec![
             Command::set_language(profile.language),
             Command::set_orientation(profile.orientation),
-            Command::set_brightness(profile.brightness, true),
         ];
+        if !connected_info.supports_echo_desk_control() {
+            commands.insert(0, Command::set_theme(theme));
+            commands.push(Command::set_brightness(profile.brightness, true));
+        }
         for cmd in commands {
             if !self.send_command(&cmd) {
                 return;
+            }
+        }
+        if connected_info.supports_echo_desk_control() {
+            if let Err(error) = self.refresh_echo_desk_state() {
+                self.log_event(format!(
+                    "EchoDesk Desktop state unavailable: {}",
+                    error
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown error")
+                ));
+            } else {
+                self.sync_profile_from_echo_state(false);
             }
         }
         self.restore_touch_selection();
@@ -675,6 +764,12 @@ impl Service {
     }
 
     fn close_port(&mut self) {
+        // Capture is opt-in for a currently connected device. A disconnect
+        // revokes that request until firmware explicitly sends it again.
+        self.app
+            .state::<AppState>()
+            .audio_visualizer
+            .set_enabled(false);
         self.absorb_link_log();
         self.link = None;
     }
@@ -693,6 +788,19 @@ impl Service {
         self.diagnostic_until = None;
         self.diagnostic_due = None;
         self.unacked = 0;
+        self.pending_music_art = None;
+        self.last_music_art_id = None;
+        self.pending_music_background = None;
+        self.last_music_background_id = None;
+        self.music_background_requested = false;
+        self.music_visualizer_requested = false;
+        let app_state = self.app.state::<AppState>();
+        let had_echo_desk_state = app_state.echo_desk_state.lock().unwrap().take().is_some();
+        if had_echo_desk_state {
+            app_state
+                .desktop_broker_revision
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
         {
             let state = self.app.state::<AppState>();
             let mut registry = state.registry.lock().unwrap();
@@ -728,7 +836,8 @@ impl Service {
     ) -> Option<(String, &'static str, i64)> {
         let ctx = self.frame_context(&snap);
         let frame_id = self.frame_ids.next();
-        let (payload, kind) = if let Some(entry) = &snap.entry {
+        let (payload, kind) = if snap.status.is_ok() {
+            let entry = snap.entry.as_ref()?;
             (
                 usage_envelope(entry, snap.percent_mode, &ctx, frame_id),
                 "usage",
@@ -832,9 +941,84 @@ impl Service {
         };
         link.poll_input();
         let events = link.take_view_events();
+        let music_controls = link.take_music_controls();
+        let echo_desk_events = link.take_echo_desk_events();
         self.absorb_link_log();
         for view in events {
             self.apply_device_selection(view);
+        }
+        for message in music_controls {
+            match message {
+                DeviceMessage::MusicControl { generation, action, .. } => {
+                    let action = match action.as_str() {
+                        "toggle" => MusicAction::Toggle,
+                        "previous" => MusicAction::Previous,
+                        "next" => MusicAction::Next,
+                        _ => continue,
+                    };
+                    self.app.state::<AppState>().music.command(MusicCommand { generation, action });
+                }
+                DeviceMessage::MusicVisualizer { enabled, .. } => {
+                    let supported = matches!(
+                        &self.state,
+                        LinkState::Connected(info) if info.supports_music_visualizer()
+                    );
+                    let capture_enabled = enabled && supported;
+                    let changed = self.music_visualizer_requested != capture_enabled;
+                    self.music_visualizer_requested = capture_enabled;
+                    self.app
+                        .state::<AppState>()
+                        .audio_visualizer
+                        .set_enabled(capture_enabled);
+                    if changed || (enabled && !supported) {
+                        self.log_event(if capture_enabled {
+                            "Audio Bars enabled by device (local output loopback may include all system audio)"
+                        } else if enabled {
+                            "Audio Bars request ignored: firmware capability was not negotiated"
+                        } else {
+                            "Audio Bars disabled by device"
+                        });
+                    }
+                }
+                DeviceMessage::MusicBackgroundRequest { enabled, .. } => {
+                    let supported = matches!(
+                        &self.state,
+                        LinkState::Connected(info) if info.supports_music_background()
+                    );
+                    let requested = enabled && supported;
+                    let changed = self.music_background_requested != requested;
+                    self.music_background_requested = requested;
+                    if !self.music_background_requested {
+                        self.pending_music_background = None;
+                    }
+                    if changed || (enabled && !supported) {
+                        self.log_event(if self.music_background_requested {
+                            "Now Playing display background requested by device"
+                        } else if enabled {
+                            "Display background request ignored: firmware capability was not negotiated"
+                        } else {
+                            "Now Playing display background disabled by device"
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut echo_desk_changed = false;
+        for message in echo_desk_events {
+            if let DeviceMessage::EchoDeskState(value) = message {
+                if self.store_echo_desk_state(value).is_ok() {
+                    // Device-originated events include both persistent touch
+                    // changes and host brightness previews. Update the live
+                    // profile but never write devices.json from an event;
+                    // confirmed persistent broker requests save explicitly.
+                    self.sync_profile_from_echo_state(false);
+                    echo_desk_changed = true;
+                }
+            }
+        }
+        if echo_desk_changed {
+            self.publish();
         }
         if self.link.as_ref().is_some_and(Link::is_lost) {
             self.disconnect("Lesefehler beim Fensterereignis");
@@ -901,26 +1085,353 @@ impl Service {
         }
     }
 
+    fn desktop_error(code: &str, message: impl Into<String>) -> Value {
+        json!({"code": code, "message": message.into()})
+    }
+
+    fn next_desktop_request_id(&mut self) -> u32 {
+        self.desktop_request_id = self.desktop_request_id.wrapping_add(1);
+        if self.desktop_request_id == 0 {
+            self.desktop_request_id = 1;
+        }
+        self.desktop_request_id
+    }
+
+    fn validate_echo_desk_settings(settings: &Value, partial: bool) -> Result<(), Value> {
+        let Some(object) = settings.as_object() else {
+            return Err(Self::desktop_error("invalid_request", "settings must be an object"));
+        };
+        const ALLOWED: [&str; 5] = [
+            "theme",
+            "brightness",
+            "nowPlayingLayout",
+            "nowPlayingBackground",
+            "nowPlayingBackgroundCustomized",
+        ];
+        if object.keys().any(|key| !ALLOWED.contains(&key.as_str())) {
+            return Err(Self::desktop_error("unsupported", "settings contains an unsupported field"));
+        }
+        if !partial && object.len() != ALLOWED.len() {
+            return Err(Self::desktop_error("invalid_state", "firmware settings are incomplete"));
+        }
+        if let Some(value) = object.get("theme") {
+            if !matches!(value.as_str(), Some("light" | "dark")) {
+                return Err(Self::desktop_error("invalid_request", "theme must be light or dark"));
+            }
+        }
+        if let Some(value) = object.get("brightness") {
+            if !value.as_u64().is_some_and(|value| (10..=100).contains(&value)) {
+                return Err(Self::desktop_error("invalid_request", "brightness must be 10..100"));
+            }
+        }
+        if let Some(value) = object.get("nowPlayingLayout") {
+            if !matches!(value.as_str(), Some("albumCover" | "carPlay" | "echoDesk")) {
+                return Err(Self::desktop_error("invalid_request", "invalid Now Playing layout"));
+            }
+        }
+        if let Some(value) = object.get("nowPlayingBackground") {
+            if !matches!(
+                value.as_str(),
+                Some("blurredAlbumCover" | "echoDesk" | "audioBars")
+            ) {
+                return Err(Self::desktop_error("invalid_request", "invalid Now Playing background"));
+            }
+        }
+        if object
+            .get("nowPlayingBackgroundCustomized")
+            .is_some_and(|value| !value.is_boolean())
+        {
+            return Err(Self::desktop_error("invalid_request", "customized must be boolean"));
+        }
+        Ok(())
+    }
+
+    fn store_echo_desk_state(&mut self, mut value: Value) -> Result<Value, Value> {
+        if value.to_string().len() > 8192
+            || value.get("version").and_then(Value::as_u64) != Some(1)
+        {
+            return Err(Self::desktop_error("invalid_state", "invalid EchoDesk state version or size"));
+        }
+        let revision = value
+            .get("revision")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| Self::desktop_error("invalid_state", "state revision is missing"))?;
+        let active = value
+            .get("activeApp")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Self::desktop_error("invalid_state", "active app is missing"))?;
+        const APPS: [&str; 6] = ["home", "codex", "clock", "performance", "nowPlaying", "settings"];
+        if !APPS.contains(&active) {
+            return Err(Self::desktop_error("invalid_state", "active app is invalid"));
+        }
+        let supported = value
+            .get("supportedApps")
+            .and_then(Value::as_array)
+            .filter(|apps| {
+                !apps.is_empty()
+                    && apps.len() <= APPS.len()
+                    && apps
+                        .iter()
+                        .all(|app| app.as_str().is_some_and(|app| APPS.contains(&app)))
+            })
+            .ok_or_else(|| Self::desktop_error("invalid_state", "supported apps are invalid"))?;
+        let _ = supported;
+        for field in ["deviceName", "hardwareModel", "firmwareVersion"] {
+            if !value
+                .get(field)
+                .and_then(Value::as_str)
+                .is_some_and(|text| !text.is_empty() && text.len() <= 80)
+            {
+                return Err(Self::desktop_error("invalid_state", format!("{field} is invalid")));
+            }
+        }
+        Self::validate_echo_desk_settings(
+            value.get("settings").unwrap_or(&Value::Null),
+            false,
+        )?;
+        if !value
+            .get("unsupportedSettings")
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items.len() <= 16
+                    && items.iter().all(|item| {
+                        item.as_str()
+                            .is_some_and(|text| !text.is_empty() && text.len() <= 64)
+                    })
+            })
+        {
+            return Err(Self::desktop_error("invalid_state", "unsupported settings list is invalid"));
+        }
+
+        let state = self.app.state::<AppState>();
+        let mut cached = state.echo_desk_state.lock().unwrap();
+        if cached
+            .as_ref()
+            .and_then(|current| current.get("revision"))
+            .and_then(Value::as_u64)
+            .is_some_and(|current| revision < current)
+        {
+            return Err(Self::desktop_error("stale_state", "older device state ignored"));
+        }
+        if let Some(object) = value.as_object_mut() {
+            object.remove("type");
+            object.remove("version");
+            object.remove("requestId");
+        }
+        let changed = cached.as_ref() != Some(&value);
+        *cached = Some(value.clone());
+        if changed {
+            state
+                .desktop_broker_revision
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
+        Ok(value)
+    }
+
+    fn sync_profile_from_echo_state(&mut self, persist: bool) {
+        let app_state = self.app.state::<AppState>();
+        let state = app_state.echo_desk_state.lock().unwrap().clone();
+        let Some(settings) = state.as_ref().and_then(|state| state.get("settings")) else {
+            return;
+        };
+        let Some(theme) = settings.get("theme").and_then(Value::as_str) else {
+            return;
+        };
+        let Some(brightness) = settings.get("brightness").and_then(Value::as_i64) else {
+            return;
+        };
+        let theme = match theme {
+            "dark" => ThemeSetting::Dark,
+            "light" => ThemeSetting::Light,
+            _ => return,
+        };
+        let profile = {
+            let mut registry = app_state.registry.lock().unwrap();
+            let Some(profile) = registry.current_profile_mut() else {
+                return;
+            };
+            profile.theme = theme;
+            profile.brightness = brightness;
+            let profile = profile.clone();
+            if persist {
+                registry::save(&self.app, &registry);
+            }
+            profile
+        };
+        self.profile = Some(profile);
+    }
+
+    fn exchange_echo_desk(
+        &mut self,
+        command: &str,
+        mut fields: serde_json::Map<String, Value>,
+        expected: &[&str],
+    ) -> Result<DeviceMessage, Value> {
+        let supported = matches!(
+            &self.state,
+            LinkState::Connected(info) if info.supports_echo_desk_control()
+        );
+        if !supported {
+            return Err(Self::desktop_error(
+                "unsupported",
+                "Connected firmware does not support EchoDesk Desktop control",
+            ));
+        }
+        let request_id = self.next_desktop_request_id();
+        fields.insert("cmd".into(), Value::String(command.into()));
+        fields.insert("version".into(), json!(1));
+        fields.insert("requestId".into(), json!(request_id));
+        let mut line = Value::Object(fields).to_string();
+        if line.len() > 2048 {
+            return Err(Self::desktop_error("invalid_request", "device command is too large"));
+        }
+        line.push('\n');
+        self.log_event(format!("-> {command} requestId={request_id}"));
+        let result = self
+            .link
+            .as_mut()
+            .ok_or_else(|| Self::desktop_error("disconnected", "EchoDesk is not connected"))?
+            .command_with_responses(&line, expected, Duration::from_secs(2));
+        self.absorb_link_log();
+        let response = result
+            .map_err(|error| Self::desktop_error("serial_error", error.to_string()))?
+            .ok_or_else(|| Self::desktop_error("timeout", "EchoDesk command timed out"))?;
+        let value = match &response {
+            DeviceMessage::EchoDeskState(value)
+            | DeviceMessage::EchoDeskAck(value)
+            | DeviceMessage::EchoDeskError(value) => value,
+            _ => return Err(Self::desktop_error("invalid_response", "unexpected device response")),
+        };
+        if value.get("version").and_then(Value::as_u64) != Some(1)
+            || value.get("requestId").and_then(Value::as_u64) != Some(request_id as u64)
+        {
+            return Err(Self::desktop_error("invalid_response", "device response id/version mismatch"));
+        }
+        Ok(response)
+    }
+
+    fn refresh_echo_desk_state(&mut self) -> Result<Value, Value> {
+        let response = self.exchange_echo_desk(
+            "echodesk_get_state",
+            serde_json::Map::new(),
+            &["echodesk_state", "echodesk_error"],
+        )?;
+        match response {
+            DeviceMessage::EchoDeskState(value) => self.store_echo_desk_state(value),
+            DeviceMessage::EchoDeskError(value) => Err(value),
+            _ => Err(Self::desktop_error("invalid_response", "state response expected")),
+        }
+    }
+
+    fn echo_desk_control(&mut self, method: &str, params: Value) -> Result<Value, Value> {
+        let mut fields = serde_json::Map::new();
+        let mut persist_profile = false;
+        let command = match method {
+            "get_state" => return self.refresh_echo_desk_state(),
+            "open_app" => {
+                let object = params
+                    .as_object()
+                    .ok_or_else(|| Self::desktop_error("invalid_request", "params must be an object"))?;
+                if object.len() != 1 {
+                    return Err(Self::desktop_error("invalid_request", "open_app accepts only app"));
+                }
+                let app = object
+                    .get("app")
+                    .and_then(Value::as_str)
+                    .filter(|app| {
+                        matches!(*app, "home" | "codex" | "clock" | "performance" | "nowPlaying" | "settings")
+                    })
+                    .ok_or_else(|| Self::desktop_error("invalid_request", "app is invalid"))?;
+                fields.insert("app".into(), Value::String(app.into()));
+                "echodesk_open_app"
+            }
+            "set_settings" => {
+                let object = params
+                    .as_object()
+                    .ok_or_else(|| Self::desktop_error("invalid_request", "params must be an object"))?;
+                if object.keys().any(|key| !matches!(key.as_str(), "baseRevision" | "persist" | "settings"))
+                    || object.len() != 3
+                {
+                    return Err(Self::desktop_error("invalid_request", "set_settings fields are invalid"));
+                }
+                let base_revision = object
+                    .get("baseRevision")
+                    .and_then(Value::as_u64)
+                    .ok_or_else(|| Self::desktop_error("invalid_request", "baseRevision is required"))?;
+                let persist = object
+                    .get("persist")
+                    .and_then(Value::as_bool)
+                    .ok_or_else(|| Self::desktop_error("invalid_request", "persist is required"))?;
+                persist_profile = persist;
+                let settings = object.get("settings").cloned().unwrap_or(Value::Null);
+                Self::validate_echo_desk_settings(&settings, true)?;
+                if settings.as_object().is_some_and(|settings| settings.is_empty()) {
+                    return Err(Self::desktop_error("invalid_request", "settings cannot be empty"));
+                }
+                if !persist
+                    && settings
+                        .as_object()
+                        .is_some_and(|settings| settings.len() != 1 || !settings.contains_key("brightness"))
+                {
+                    return Err(Self::desktop_error(
+                        "invalid_request",
+                        "non-persistent preview is brightness-only",
+                    ));
+                }
+                fields.insert("baseRevision".into(), json!(base_revision));
+                fields.insert("persist".into(), json!(persist));
+                fields.insert("settings".into(), settings);
+                "echodesk_set_settings"
+            }
+            "restart" => {
+                if !(params.is_null() || params.as_object().is_some_and(|params| params.is_empty())) {
+                    return Err(Self::desktop_error("invalid_request", "restart takes no parameters"));
+                }
+                "echodesk_restart"
+            }
+            _ => return Err(Self::desktop_error("unsupported", "desktop method is not allowlisted")),
+        };
+
+        let response = self.exchange_echo_desk(
+            command,
+            fields,
+            &["echodesk_ack", "echodesk_error"],
+        )?;
+        match response {
+            DeviceMessage::EchoDeskError(value) => Err(value),
+            DeviceMessage::EchoDeskAck(value) if method == "restart" => Ok(value),
+            DeviceMessage::EchoDeskAck(_) => {
+                let state = self.refresh_echo_desk_state()?;
+                self.sync_profile_from_echo_state(persist_profile);
+                Ok(state)
+            }
+            _ => Err(Self::desktop_error("invalid_response", "acknowledgement expected")),
+        }
+    }
+
     fn send_data_frame(&mut self, trigger: &str) {
         let LinkState::Connected(info) = &self.state else {
             return;
         };
         let info = info.clone();
         let selected = current_snapshot(&self.app);
-        if !info.supports_views() {
-            if let Some((payload, kind, frame_id)) = self.build_payload(&info, selected, None) {
-                self.transmit(&info, payload, frame_id, kind, trigger);
-            }
-            return;
-        }
-        let views = self
+        let settings = self
             .app
             .state::<AppState>()
             .settings
             .lock()
             .unwrap()
-            .views
             .clone();
+        if !info.supports_views() {
+            if !settings.ai_usage_enabled {
+                return;
+            }
+            if let Some((payload, kind, frame_id)) = self.build_payload(&info, selected, None) {
+                self.transmit(&info, payload, frame_id, kind, trigger);
+            }
+            return;
+        }
+        let views = settings.views.clone();
         if views.iter().any(|v| matches!(v, ViewContent::Plugin(_)))
             && !info.supports_plugin_scenes()
         {
@@ -994,6 +1505,9 @@ impl Service {
             let ViewContent::Provider(provider) = view else {
                 continue;
             };
+            if !settings.ai_usage_enabled {
+                continue;
+            }
             // Nach einem Wechsel lädt die Haupt-Source noch; bis dahin den
             // Fensterstand senden, damit die angezeigten Werte stehen bleiben.
             let loading =
@@ -1027,6 +1541,198 @@ impl Service {
         self.send_due = None;
         self.diagnostic_until = Some(Instant::now() + DIAGNOSTIC_RESTORE);
         self.transmit(&info, payload, frame_id, "diagnostic", "Testframe");
+    }
+
+    fn send_performance_frame(&mut self, sample: PerformanceSample) {
+        let LinkState::Connected(info) = &self.state else {
+            return;
+        };
+        if !info.supports_performance() || !info.supports_framed() {
+            return;
+        }
+        let info = info.clone();
+        let frame_id = self.frame_ids.next();
+        match sample.payload(frame_id) {
+            Ok(payload) => self.transmit(&info, payload, frame_id, "performance", "Hardware helper"),
+            Err(e) => self.log_event(format!("Performance frame rejected: {e}")),
+        }
+    }
+
+    fn send_music_frame(&mut self, snapshot: MusicSnapshot) {
+        let LinkState::Connected(info) = &self.state else {
+            return;
+        };
+        if !info.supports_music() || !info.supports_framed() {
+            return;
+        }
+        let info = info.clone();
+        let frame_id = self.frame_ids.next();
+        match snapshot.payload(frame_id) {
+            Ok(payload) => {
+                self.transmit(&info, payload, frame_id, "music", "Windows GSMTC");
+                match snapshot.artwork {
+                    Some(art)
+                        if self.last_music_art_id.as_deref() != Some(art.id.as_str())
+                            && self.pending_music_art.as_ref().is_none_or(|pending| pending.art.id != art.id) =>
+                    {
+                        self.pending_music_art = Some(PendingMusicArt { art, next_chunk: 0 });
+                    }
+                    None => self.pending_music_art = None,
+                    _ => {}
+                }
+                if info.supports_music_background() && self.music_background_requested {
+                    match snapshot.background {
+                        Some(background)
+                            if self.last_music_background_id.as_deref()
+                                != Some(background.id.as_str())
+                                && self
+                                    .pending_music_background
+                                    .as_ref()
+                                    .is_none_or(|pending| pending.background.id != background.id) =>
+                        {
+                            self.pending_music_background = Some(PendingMusicBackground {
+                                background,
+                                next_chunk: 0,
+                            });
+                        }
+                        None => self.pending_music_background = None,
+                        _ => {}
+                    }
+                } else {
+                    self.pending_music_background = None;
+                }
+            }
+            Err(error) => self.log_event(format!("Music frame rejected: {error}")),
+        }
+    }
+
+    fn send_audio_visualizer_frame(&mut self, snapshot: VisualizerSnapshot) {
+        let LinkState::Connected(info) = &self.state else {
+            return;
+        };
+        if !info.supports_music_visualizer() || !info.supports_framed() {
+            self.app.state::<AppState>().audio_visualizer.set_enabled(false);
+            return;
+        }
+        let info = info.clone();
+        let frame_id = self.frame_ids.next();
+        match snapshot.payload(frame_id) {
+            Ok(payload) => self.transmit(&info, payload, frame_id, "music-visualizer", "WASAPI loopback"),
+            Err(error) => self.log_event(format!("Audio visualizer frame rejected: {error}")),
+        }
+    }
+
+    /// Transmit at most one chunk per service iteration so normal usage and
+    /// performance jobs remain responsive while artwork is in flight.
+    fn send_pending_music_art(&mut self) {
+        let LinkState::Connected(info) = &self.state else {
+            return;
+        };
+        if !info.supports_music() || !info.supports_framed() {
+            self.pending_music_art = None;
+            return;
+        }
+        let Some(pending) = self.pending_music_art.as_ref() else {
+            return;
+        };
+        let chunks = pending.art.bytes.len().div_ceil(MUSIC_ART_CHUNK_BYTES);
+        let art_id = pending.art.id.clone();
+        let chunk_index = pending.next_chunk;
+        let art = pending.art.clone();
+        let info = info.clone();
+        let frame_id = self.frame_ids.next();
+        let payload = match art_chunk_payload(&art, frame_id, chunk_index) {
+            Ok(payload) => payload,
+            Err(error) => {
+                self.log_event(format!("Music artwork rejected: {error}"));
+                self.pending_music_art = None;
+                return;
+            }
+        };
+        self.transmit(&info, payload, frame_id, "music-art", "Windows GSMTC");
+        match &self.last_receipt {
+            Some(FrameReceipt::Ack { frame_id: id, .. }) if *id == frame_id => {}
+            Some(FrameReceipt::Error { frame_id: id, .. }) if *id == frame_id => {
+                self.pending_music_art = None;
+                return;
+            }
+            _ => return,
+        }
+        if let Some(pending) = self.pending_music_art.as_mut() {
+            if pending.art.id != art_id {
+                return;
+            }
+            pending.next_chunk += 1;
+            if pending.next_chunk >= chunks {
+                self.last_music_art_id = Some(art_id);
+                self.pending_music_art = None;
+            }
+        }
+    }
+
+    /// Backgrounds are already cropped, resized and blurred by the companion.
+    /// They follow foreground artwork and still send at most one bounded chunk
+    /// per service iteration, so higher-priority telemetry can interleave.
+    fn send_pending_music_background(&mut self) {
+        if self.pending_music_art.is_some() {
+            return;
+        }
+        let LinkState::Connected(info) = &self.state else {
+            return;
+        };
+        if !self.music_background_requested
+            || !info.supports_music_background()
+            || !info.supports_framed()
+        {
+            self.pending_music_background = None;
+            return;
+        }
+        let Some(pending) = self.pending_music_background.as_ref() else {
+            return;
+        };
+        let chunks = pending
+            .background
+            .bytes
+            .len()
+            .div_ceil(MUSIC_BACKGROUND_CHUNK_BYTES);
+        let background_id = pending.background.id.clone();
+        let chunk_index = pending.next_chunk;
+        let background = pending.background.clone();
+        let info = info.clone();
+        let frame_id = self.frame_ids.next();
+        let payload = match background_chunk_payload(&background, frame_id, chunk_index) {
+            Ok(payload) => payload,
+            Err(error) => {
+                self.log_event(format!("Music background rejected: {error}"));
+                self.pending_music_background = None;
+                return;
+            }
+        };
+        self.transmit(
+            &info,
+            payload,
+            frame_id,
+            "music-background",
+            "Windows GSMTC artwork",
+        );
+        match &self.last_receipt {
+            Some(FrameReceipt::Ack { frame_id: id, .. }) if *id == frame_id => {}
+            Some(FrameReceipt::Error { frame_id: id, .. }) if *id == frame_id => {
+                self.pending_music_background = None;
+                return;
+            }
+            _ => return,
+        }
+        if let Some(pending) = self.pending_music_background.as_mut() {
+            if pending.background.id != background_id {
+                return;
+            }
+            pending.next_chunk += 1;
+            if pending.next_chunk >= chunks {
+                self.last_music_background_id = Some(background_id);
+                self.pending_music_background = None;
+            }
+        }
     }
 
     fn transmit(
@@ -1168,19 +1874,22 @@ impl Service {
                     !snapshot.fetching && recent_sample(snapshot.fetched_at.as_ref(), POLL_INTERVAL * 2)
                 };
                 let selected = current_snapshot(&self.app);
-                if providers.contains(&Some(selected.provider))
+                if settings.ai_usage_enabled
+                    && providers.contains(&Some(selected.provider))
                     && selected.status.is_ok() && recent_usage(&selected) {
                     if let Some(entry) = &selected.entry {
                         self.smart.observe_usage(selected.provider, usage_signals(entry), &providers, now);
                     }
                 }
-                for (provider, snap) in state.view_sources.lock().unwrap().iter() {
-                    if *provider == selected.provider || !providers.contains(&Some(*provider)) {
-                        continue;
-                    }
-                    if snap.status.is_ok() && recent_usage(snap) {
-                        if let Some(entry) = &snap.entry {
-                            self.smart.observe_usage(*provider, usage_signals(entry), &providers, now);
+                if settings.ai_usage_enabled {
+                    for (provider, snap) in state.view_sources.lock().unwrap().iter() {
+                        if *provider == selected.provider || !providers.contains(&Some(*provider)) {
+                            continue;
+                        }
+                        if snap.status.is_ok() && recent_usage(snap) {
+                            if let Some(entry) = &snap.entry {
+                                self.smart.observe_usage(*provider, usage_signals(entry), &providers, now);
+                            }
                         }
                     }
                 }
@@ -1217,7 +1926,7 @@ impl Service {
             }
             Job::SmartUsage(provider, sample) => {
                 let settings = self.app.state::<AppState>().settings.lock().unwrap().clone();
-                if settings.view_mode == ViewMode::Intelligent {
+                if settings.ai_usage_enabled && settings.view_mode == ViewMode::Intelligent {
                     let views: Vec<_> = settings.views.iter().map(|view| match view {
                         ViewContent::Provider(p) => Some(*p), _ => None,
                     }).collect();
@@ -1259,6 +1968,41 @@ impl Service {
                     }).collect();
                     self.smart.observe_claude_code(waiting, &views, Instant::now());
                 }
+            }
+            Job::PerformanceReady => {
+                let sample = self.app.state::<AppState>().performance.take();
+                if let Some(sample) = sample {
+                    self.send_performance_frame(sample);
+                }
+            }
+            Job::MusicReady => {
+                let snapshot = self.app.state::<AppState>().music.take();
+                if let Some(snapshot) = snapshot {
+                    self.send_music_frame(snapshot);
+                }
+            }
+            Job::AudioVisualizerReady => {
+                let snapshot = self.app.state::<AppState>().audio_visualizer.take();
+                if let Some(snapshot) = snapshot {
+                    self.send_audio_visualizer_frame(snapshot);
+                }
+            }
+            Job::EchoDeskControl {
+                method,
+                params,
+                reply,
+            } => {
+                let result = self.echo_desk_control(&method, params);
+                if result.is_ok() {
+                    self.publish();
+                }
+                let _ = reply.send(result);
+            }
+            Job::EchoDeskReconnect => {
+                self.disconnect("EchoDesk Desktop requested reconnect");
+                self.last_disconnect = None;
+                self.next_scan = Instant::now();
+                self.publish();
             }
             Job::SendDiagnostic => self.send_diagnostic_frame(),
             Job::ApplyProfile {
@@ -1403,6 +2147,7 @@ mod tests {
     #[test]
     fn notice_texts_exist_in_both_languages() {
         for key in [
+            "dsp.notice.auth",
             "dsp.notice.climissing",
             "dsp.notice.failed",
             "dsp.notice.loading",
@@ -1418,5 +2163,35 @@ mod tests {
             );
         }
         assert_eq!(notice_text("dsp.notice.nope", Language::De), "");
+    }
+
+    #[test]
+    fn desktop_setting_validation_is_allowlisted() {
+        assert!(Service::validate_echo_desk_settings(
+            &json!({"brightness": 55}),
+            true
+        )
+        .is_ok());
+        assert!(Service::validate_echo_desk_settings(
+            &json!({
+                "theme": "dark",
+                "brightness": 80,
+                "nowPlayingLayout": "carPlay",
+                "nowPlayingBackground": "audioBars",
+                "nowPlayingBackgroundCustomized": true
+            }),
+            false
+        )
+        .is_ok());
+        assert!(Service::validate_echo_desk_settings(
+            &json!({"brightness": 101}),
+            true
+        )
+        .is_err());
+        assert!(Service::validate_echo_desk_settings(
+            &json!({"rawSerial": "restart"}),
+            true
+        )
+        .is_err());
     }
 }

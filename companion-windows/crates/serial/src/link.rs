@@ -6,6 +6,7 @@
 
 use aimonitor_core::protocol::{self, Command, DeviceInfo, DeviceMessage, ViewState};
 use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
@@ -47,6 +48,8 @@ pub struct Link {
     name: String,
     pending: Vec<u8>,
     view_events: Vec<ViewState>,
+    music_controls: VecDeque<DeviceMessage>,
+    echo_desk_events: Vec<DeviceMessage>,
     /// Alle empfangenen JSON-Zeilen, die nicht an einen Wartenden gingen, für die Diagnose.
     pub log: Vec<String>,
     /// Erster Lesefehler außer Timeout; danach gilt der Port als verloren.
@@ -69,13 +72,13 @@ impl Link {
             .timeout(protocol::READ_SLICE)
             .open()
             .map_err(|e| LinkError::Open(e.to_string()))?;
-        Ok(Self { port, name: name.to_string(), pending: Vec::new(), view_events: Vec::new(), log: Vec::new(), lost: None, last_get_info: None })
+        Ok(Self { port, name: name.to_string(), pending: Vec::new(), view_events: Vec::new(), music_controls: VecDeque::new(), echo_desk_events: Vec::new(), log: Vec::new(), lost: None, last_get_info: None })
     }
 
     /// Bereits geöffneten Port übernehmen (Tests mit Pseudo-Terminal).
     #[cfg(test)]
     fn from_port(port: Box<dyn SerialPort>, name: &str) -> Self {
-        Self { port, name: name.to_string(), pending: Vec::new(), view_events: Vec::new(), log: Vec::new(), lost: None, last_get_info: None }
+        Self { port, name: name.to_string(), pending: Vec::new(), view_events: Vec::new(), music_controls: VecDeque::new(), echo_desk_events: Vec::new(), log: Vec::new(), lost: None, last_get_info: None }
     }
 
     pub fn name(&self) -> &str {
@@ -136,6 +139,14 @@ impl Link {
 
     pub fn take_view_events(&mut self) -> Vec<ViewState> {
         std::mem::take(&mut self.view_events)
+    }
+
+    pub fn take_music_controls(&mut self) -> Vec<DeviceMessage> {
+        self.music_controls.drain(..).collect()
+    }
+
+    pub fn take_echo_desk_events(&mut self) -> Vec<DeviceMessage> {
+        std::mem::take(&mut self.echo_desk_events)
     }
 
     /// Kommando ohne Antwortauswertung (Spec 6.3).
@@ -209,12 +220,19 @@ impl Link {
 
     /// Kommando senden und auf die erste Nachricht des erwarteten Typs warten.
     pub fn command_with_response(&mut self, line: &str, expect_type: &str, timeout: Duration) -> Result<Option<DeviceMessage>, LinkError> {
+        self.command_with_responses(line, &[expect_type], timeout)
+    }
+
+    /// Kommando senden und auf einen aus mehreren Antworttypen warten.
+    /// EchoDesk-Steuerbefehle nutzen dies, damit Gerätefehler sofort statt
+    /// erst nach einem Timeout an den lokalen Broker zurückgegeben werden.
+    pub fn command_with_responses(&mut self, line: &str, expect_types: &[&str], timeout: Duration) -> Result<Option<DeviceMessage>, LinkError> {
         self.drain();
         self.write_all(line.as_bytes())?;
         let deadline = Instant::now() + timeout;
         while let Some(text) = self.read_line(deadline) {
             if let Some(msg) = DeviceMessage::parse_line(&text) {
-                if msg.type_name() == expect_type {
+                if expect_types.contains(&msg.type_name()) {
                     return Ok(Some(msg));
                 }
                 self.remember(&text);
@@ -227,8 +245,34 @@ impl Link {
     }
 
     fn remember(&mut self, line: &str) {
-        if let Some(DeviceMessage::ViewState(state)) = DeviceMessage::parse_line(line) {
-            self.view_events.push(state);
+        if let Some(message) = DeviceMessage::parse_line(line) {
+            match message {
+                DeviceMessage::ViewState(state) => self.view_events.push(state),
+                control @ DeviceMessage::MusicControl { .. } => {
+                    if self.music_controls.len() >= 16 {
+                        self.music_controls.pop_front();
+                    }
+                    self.music_controls.push_back(control);
+                }
+                control @ (DeviceMessage::MusicVisualizer { .. }
+                | DeviceMessage::MusicBackgroundRequest { .. }) => {
+                    if self.music_controls.len() >= 16 {
+                        self.music_controls.pop_front();
+                    }
+                    self.music_controls.push_back(control);
+                    // These are two-second recovery heartbeats while Now
+                    // Playing is open. Keep the state event, but do not roll
+                    // the bounded diagnostic log with identical raw lines.
+                    return;
+                }
+                event @ DeviceMessage::EchoDeskState(_) => {
+                    if self.echo_desk_events.len() >= 8 {
+                        self.echo_desk_events.remove(0);
+                    }
+                    self.echo_desk_events.push(event);
+                }
+                _ => {}
+            }
         }
         if self.log.len() >= 200 {
             self.log.remove(0);

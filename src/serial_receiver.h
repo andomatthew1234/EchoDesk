@@ -44,6 +44,10 @@ void serial_request_ui_rebuild();
 bool serial_ui_rebuild_requested();
 void serial_ui_rebuild_clear();
 
+// Marks the versioned EchoDesk control snapshot dirty after a touchscreen or
+// legacy-command change. The snapshot is emitted from serial_receiver_tick().
+void serial_echodesk_state_changed();
+
 // C3: True once the Mac companion sent a TZ offset. wifi_time uses this to
 // avoid overwriting the host-selected timezone with its fixed NTP TZ.
 bool host_timezone_is_set();

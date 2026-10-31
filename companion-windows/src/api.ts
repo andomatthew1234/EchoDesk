@@ -181,6 +181,8 @@ export interface DeviceInfo {
   serialTransport: string | null;
   maxFrameBytes: number | null;
   sceneProtocol: number | null;
+  performanceProtocol: number | null;
+  musicProtocol: number | null;
   wifiConfigured: boolean | null;
   wifiConnected: boolean | null;
   timeSynced: boolean | null;

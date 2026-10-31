@@ -19,6 +19,13 @@
 #include "config.h"
 #include "providers.h"
 #include "plugin_scene.h"
+#if defined(ECHODESK_OS)
+#include "echodesk_control.h"
+#include "performance_data.h"
+#include "music_data.h"
+#include "now_playing_layout.h"
+#include "ui_echodesk.h"
+#endif
 #include "config_store.h"
 #include "localization.h"
 #include "ui_common.h"
@@ -95,6 +102,11 @@ static bool ui_rebuild_pending = false;
 // not overwrite the TZ env var with its fixed NTP timezone — only sync UTC.
 static bool host_tz_set = false;
 
+#if defined(ECHODESK_OS)
+static uint32_t echodesk_settings_revision = 1;
+static bool echodesk_state_dirty = false;
+#endif
+
 static void print_view_state();
 static void persist_touch_view();
 
@@ -130,6 +142,14 @@ void serial_previous_view() {
 
 void serial_request_ui_rebuild() {
     ui_rebuild_pending = true;
+}
+
+void serial_echodesk_state_changed() {
+#if defined(ECHODESK_OS)
+    ++echodesk_settings_revision;
+    if (echodesk_settings_revision == 0) echodesk_settings_revision = 1;
+    echodesk_state_dirty = true;
+#endif
 }
 
 // ============================================================
@@ -340,11 +360,15 @@ static void handle_set_brightness(JsonDocument &doc) {
 #endif
     if (val > BRIGHTNESS_MAX_PERCENT) val = BRIGHTNESS_MAX_PERCENT;
     bool persist = doc["persist"] | true;
+    const bool changed = g_config.brightness_pct != static_cast<uint8_t>(val);
     g_config.brightness_pct = (uint8_t)val;
     backlight_apply_percent(g_config.brightness_pct);
     if (persist) {
         config_save(g_config);
     }
+#if defined(ECHODESK_OS)
+    if (changed) serial_echodesk_state_changed();
+#endif
     Serial.printf("{\"type\":\"ok\",\"cmd\":\"set_brightness\",\"value\":%d,\"persist\":%s}\n",
                   val,
                   persist ? "true" : "false");
@@ -376,6 +400,10 @@ static void handle_standby() {
     // The companion is leaving intentionally, so do not wait five minutes
     // for its last data frame to expire before showing the standby clock.
     host_frame_seen = false;
+#if defined(ECHODESK_OS)
+    performance_data_mark_disconnected();
+    music_data_mark_disconnected();
+#endif
     for (uint8_t i = 0; i < view_count; ++i) {
         if (view_states[i].usage.valid && view_states[i].usage.last_fetch > 0) {
             view_states[i].usage.last_fetch = millis() - DATA_TIMEOUT_MS - 1;
@@ -403,11 +431,15 @@ static void handle_set_theme(JsonDocument &doc) {
         Serial.printf("{\"type\":\"error\",\"message\":\"set_theme: invalid value '%s'\"}\n", val);
         return;
     }
+    const bool changed = g_config.theme != new_theme;
     g_config.theme = new_theme;
     config_save(g_config);
     ui_apply_theme(new_theme);
     // Recreate dashboard with new colors (deferred to main loop — see C4)
     serial_request_ui_rebuild();
+#if defined(ECHODESK_OS)
+    if (changed) serial_echodesk_state_changed();
+#endif
     Serial.printf("{\"type\":\"ok\",\"cmd\":\"set_theme\",\"value\":\"%s\"}\n", val);
 }
 
@@ -453,6 +485,15 @@ static void handle_get_info() {
     char mac_str[18];
     snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+#if defined(ECHODESK_OS)
+    const char *echodesk_capabilities =
+        "\"performanceProtocol\":1,\"musicProtocol\":1,"
+        "\"musicBackgroundProtocol\":1,\"musicVisualizerProtocol\":1,";
+    const char *echodesk_control_capability = "\"echoDeskControlProtocol\":1,";
+#else
+    const char *echodesk_capabilities = "";
+    const char *echodesk_control_capability = "";
+#endif
     // `display` kommt aus DISPLAY_ID (config.h), Compile-Zeit-Ableitung
     // aus ILI9341_DRIVER / ST7789_DRIVER. Info-Only, keine FW-Logik.
     // Seit v2.10.1.
@@ -462,7 +503,7 @@ static void handle_get_info() {
                   "\"display\":\"%s\",\"panel\":\"%s\",\"panelId\":\"%s\","
                   "\"orientation\":\"%s\","
                   "\"theme\":\"%s\",\"language\":\"%s\",\"brightness\":%u,"
-                  "\"serialTransport\":\"%s\",\"maxFrameBytes\":%u,\"sceneProtocol\":1,"
+                  "\"serialTransport\":\"%s\",\"maxFrameBytes\":%u,%s%s\"sceneProtocol\":1,"
                   "\"wifiConfigured\":%s,\"wifiConnected\":%s,\"timeSynced\":%s,"
                   "\"uptime\":%lu,\"heap\":%u,\"frameGlitches\":%lu}\n",
                   APP_VERSION, mac_str, DISPLAY_ID, board_panel_id(), board_panel_raw(),
@@ -470,6 +511,8 @@ static void handle_get_info() {
                   (unsigned)g_config.brightness_pct,
                   SERIAL_FRAME_MAGIC,
                   (unsigned)SERIAL_FRAME_MAX_SIZE,
+                  echodesk_capabilities,
+                  echodesk_control_capability,
                   wifi_time_has_credentials() ? "true" : "false",
                   wifi_time_is_connected() ? "true" : "false",
                   wifi_time_is_synced() ? "true" : "false",
@@ -477,6 +520,212 @@ static void handle_get_info() {
                   (unsigned)ESP.getFreeHeap(),
                   (unsigned long)board_frame_glitches());
 }
+
+#if defined(ECHODESK_OS)
+static void print_echodesk_state(uint32_t request_id = 0,
+                                 bool include_request_id = false) {
+    JsonDocument response;
+    response["type"] = "echodesk_state";
+    response["version"] = ECHODESK_CONTROL_VERSION;
+    if (include_request_id) response["requestId"] = request_id;
+    response["revision"] = echodesk_settings_revision;
+    response["deviceName"] = "EchoDesk";
+    response["hardwareModel"] = "Freenove FNK0114A_2P4";
+    response["firmwareVersion"] = APP_VERSION;
+    response["activeApp"] = ui_echodesk_active_app_name();
+    JsonArray apps = response["supportedApps"].to<JsonArray>();
+    for (const char *app : {"home", "codex", "clock", "performance",
+                            "nowPlaying", "settings"}) {
+        apps.add(app);
+    }
+    JsonObject settings = response["settings"].to<JsonObject>();
+    settings["theme"] = g_config.theme == THEME_LIGHT ? "light" : "dark";
+    settings["brightness"] = g_config.brightness_pct;
+    settings["nowPlayingLayout"] =
+        echodesk_layout_name(g_config.now_playing_layout);
+    settings["nowPlayingBackground"] =
+        echodesk_background_name(g_config.now_playing_background);
+    settings["nowPlayingBackgroundCustomized"] =
+        g_config.now_playing_background_customized;
+    JsonArray unsupported = response["unsupportedSettings"].to<JsonArray>();
+    for (const char *name : {"defaultApp", "clockFormat", "timezone",
+                             "codexPercentageMode", "codexPreferredDisplay",
+                             "performanceDefaultView"}) {
+        unsupported.add(name);
+    }
+    serializeJson(response, Serial);
+    Serial.println();
+}
+
+static void print_echodesk_ack(uint32_t request_id, const char *command) {
+    JsonDocument response;
+    response["type"] = "echodesk_ack";
+    response["version"] = ECHODESK_CONTROL_VERSION;
+    response["requestId"] = request_id;
+    response["command"] = command;
+    response["revision"] = echodesk_settings_revision;
+    serializeJson(response, Serial);
+    Serial.println();
+}
+
+static void print_echodesk_error(uint32_t request_id, const char *code,
+                                 const char *message) {
+    JsonDocument response;
+    response["type"] = "echodesk_error";
+    response["version"] = ECHODESK_CONTROL_VERSION;
+    response["requestId"] = request_id;
+    response["code"] = code;
+    response["message"] = message;
+    response["revision"] = echodesk_settings_revision;
+    serializeJson(response, Serial);
+    Serial.println();
+}
+
+static bool echodesk_request_header(JsonDocument &doc, uint32_t &request_id) {
+    request_id = doc["requestId"].is<uint32_t>()
+                     ? doc["requestId"].as<uint32_t>()
+                     : 0;
+    if (!doc["version"].is<uint8_t>() ||
+        doc["version"].as<uint8_t>() != ECHODESK_CONTROL_VERSION ||
+        !doc["requestId"].is<uint32_t>() || request_id == 0) {
+        print_echodesk_error(request_id, "invalid_request",
+                             "version 1 and nonzero numeric requestId required");
+        return false;
+    }
+    return true;
+}
+
+static void handle_echodesk_get_state(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_request_header(doc, request_id)) return;
+    print_echodesk_state(request_id, true);
+}
+
+static void handle_echodesk_open_app(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_request_header(doc, request_id)) return;
+    const char *app = doc["app"];
+    if (!app || !ui_echodesk_request_open_app(app)) {
+        print_echodesk_error(request_id, "unsupported", "unsupported app");
+        return;
+    }
+    print_echodesk_ack(request_id, "echodesk_open_app");
+}
+
+static void handle_echodesk_set_settings(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_request_header(doc, request_id)) return;
+    if (!doc["baseRevision"].is<uint32_t>() ||
+        !doc["settings"].is<JsonObjectConst>() ||
+        (!doc["persist"].isNull() && !doc["persist"].is<bool>())) {
+        print_echodesk_error(request_id, "invalid_request",
+                             "baseRevision, settings and persist are invalid");
+        return;
+    }
+    JsonObjectConst settings = doc["settings"].as<JsonObjectConst>();
+    EchoDeskControlPatch patch{};
+    for (JsonPairConst pair : settings) {
+        const char *key = pair.key().c_str();
+        if (strcmp(key, "theme") == 0) {
+            if (!pair.value().is<const char*>()) {
+                print_echodesk_error(request_id, "invalid_request", "invalid theme");
+                return;
+            }
+            const char *theme = pair.value().as<const char*>();
+            if (strcmp(theme, "light") == 0) patch.values.theme = THEME_LIGHT;
+            else if (strcmp(theme, "dark") == 0) patch.values.theme = THEME_DARK;
+            else {
+                print_echodesk_error(request_id, "invalid_request", "invalid theme");
+                return;
+            }
+            patch.has_theme = true;
+        } else if (strcmp(key, "brightness") == 0) {
+            if (!pair.value().is<uint8_t>()) {
+                print_echodesk_error(request_id, "invalid_request", "invalid brightness");
+                return;
+            }
+            patch.has_brightness = true;
+            patch.values.brightness = pair.value().as<uint8_t>();
+        } else if (strcmp(key, "nowPlayingLayout") == 0) {
+            patch.has_now_playing_layout = echodesk_parse_layout(
+                pair.value().as<const char*>(), patch.values.now_playing_layout);
+            if (!patch.has_now_playing_layout) {
+                print_echodesk_error(request_id, "invalid_request", "invalid Now Playing layout");
+                return;
+            }
+        } else if (strcmp(key, "nowPlayingBackground") == 0) {
+            patch.has_now_playing_background = echodesk_parse_background(
+                pair.value().as<const char*>(), patch.values.now_playing_background);
+            if (!patch.has_now_playing_background) {
+                print_echodesk_error(request_id, "invalid_request", "invalid Now Playing background");
+                return;
+            }
+        } else if (strcmp(key, "nowPlayingBackgroundCustomized") == 0) {
+            if (!pair.value().is<bool>()) {
+                print_echodesk_error(request_id, "invalid_request", "invalid background override");
+                return;
+            }
+            patch.has_now_playing_background_customized = true;
+            patch.values.now_playing_background_customized = pair.value().as<bool>();
+        } else {
+            print_echodesk_error(request_id, "unsupported", "unsupported setting");
+            return;
+        }
+    }
+
+    EchoDeskControlSettings current{
+        g_config.theme, g_config.brightness_pct, g_config.now_playing_layout,
+        g_config.now_playing_background,
+        g_config.now_playing_background_customized};
+    EchoDeskControlSettings next{};
+    const bool persist = doc["persist"] | true;
+    const EchoDeskControlApplyResult result = echodesk_apply_settings_patch(
+        current, patch, doc["baseRevision"].as<uint32_t>(),
+        echodesk_settings_revision, persist, next);
+    if (result == EchoDeskControlApplyResult::STALE_REVISION) {
+        print_echodesk_error(request_id, "stale_revision",
+                             "settings changed on device; refresh and retry");
+        echodesk_state_dirty = true;
+        return;
+    }
+    if (result == EchoDeskControlApplyResult::PREVIEW_NOT_SUPPORTED) {
+        print_echodesk_error(request_id, "invalid_request",
+                             "persist false is supported only for brightness");
+        return;
+    }
+    if (result != EchoDeskControlApplyResult::OK) {
+        print_echodesk_error(request_id, "invalid_request", "invalid settings patch");
+        return;
+    }
+
+    const bool theme_changed = next.theme != current.theme;
+    const bool now_playing_changed =
+        next.now_playing_layout != current.now_playing_layout ||
+        next.now_playing_background != current.now_playing_background ||
+        next.now_playing_background_customized !=
+            current.now_playing_background_customized;
+    g_config.theme = next.theme;
+    g_config.brightness_pct = next.brightness;
+    g_config.now_playing_layout = next.now_playing_layout;
+    g_config.now_playing_background = next.now_playing_background;
+    g_config.now_playing_background_customized =
+        next.now_playing_background_customized;
+    backlight_apply_percent(g_config.brightness_pct);
+    if (persist) config_save(g_config);
+    if (theme_changed) ui_apply_theme(g_config.theme);
+    if (theme_changed || now_playing_changed) serial_request_ui_rebuild();
+    serial_echodesk_state_changed();
+    print_echodesk_ack(request_id, "echodesk_set_settings");
+}
+
+static void handle_echodesk_restart(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_request_header(doc, request_id)) return;
+    print_echodesk_ack(request_id, "echodesk_restart");
+    Serial.flush();
+    ui_echodesk_request_restart();
+}
+#endif
 
 // --- reboot ---
 static void handle_reboot() {
@@ -643,6 +892,16 @@ static bool parse_command(JsonDocument &doc) {
         handle_set_views(doc);
     } else if (strcmp(cmd, "get_views") == 0) {
         print_view_state();
+#if defined(ECHODESK_OS)
+    } else if (strcmp(cmd, "echodesk_get_state") == 0) {
+        handle_echodesk_get_state(doc);
+    } else if (strcmp(cmd, "echodesk_open_app") == 0) {
+        handle_echodesk_open_app(doc);
+    } else if (strcmp(cmd, "echodesk_set_settings") == 0) {
+        handle_echodesk_set_settings(doc);
+    } else if (strcmp(cmd, "echodesk_restart") == 0) {
+        handle_echodesk_restart(doc);
+#endif
     } else if (strcmp(cmd, "reboot") == 0) {
         handle_reboot();
     } else {
@@ -891,6 +1150,55 @@ static void parse_json(const char *json_str) {
         return;
     }
 
+#if defined(ECHODESK_OS)
+    // Music metadata, bounded artwork/background chunks, and compact real-audio
+    // bands use the same single-owner AIM1 transport as usage and performance
+    // frames. They are consumed before the legacy parser so existing payload
+    // behavior is unchanged.
+    const char *music_error = nullptr;
+    MusicParseResult music_result =
+        music_data_parse_json(doc.as<JsonVariantConst>(), millis(), &music_error);
+    if (music_result != MusicParseResult::NOT_MUSIC) {
+        if (music_result == MusicParseResult::REJECTED) {
+            print_frame_error(frame_id, schema_version,
+                              music_error ? music_error : "invalid music frame");
+        } else {
+            new_data_flag = true;
+            if (frame_id >= 0) {
+                Serial.printf("{\"type\":\"ack\",\"frameId\":%d,\"schemaVersion\":%d,"
+                              "\"message\":\"accepted\",\"bytes\":%u,"
+                              "\"musicVersion\":%u,\"heap\":%u}\n",
+                              frame_id, schema_version, (unsigned)frame_bytes,
+                              (unsigned)MUSIC_PROTOCOL_VERSION,
+                              (unsigned)ESP.getFreeHeap());
+            }
+        }
+        return;
+    }
+
+    // EchoDesk performance frames share the existing line/framed serial
+    // transport, but are deliberately consumed before the legacy usage parser.
+    // NOT_PERFORMANCE is the only result that falls through, preserving every
+    // existing command, Codex usage, and plugin code path unchanged.
+    const char *performance_error = nullptr;
+    PerformanceParseResult performance_result =
+        performance_data_parse_json(doc.as<JsonVariantConst>(), millis(), &performance_error);
+    if (performance_result != PerformanceParseResult::NOT_PERFORMANCE) {
+        if (performance_result == PerformanceParseResult::REJECTED) {
+            print_frame_error(frame_id, schema_version,
+                              performance_error ? performance_error : "invalid performance frame");
+        } else if (frame_id >= 0) {
+            Serial.printf("{\"type\":\"ack\",\"frameId\":%d,\"schemaVersion\":%d,"
+                          "\"message\":\"accepted\",\"bytes\":%u,"
+                          "\"performanceVersion\":%u,\"heap\":%u}\n",
+                          frame_id, schema_version, (unsigned)frame_bytes,
+                          (unsigned)PERFORMANCE_PROTOCOL_VERSION,
+                          (unsigned)ESP.getFreeHeap());
+        }
+        return;
+    }
+#endif
+
     // Check for command — if handled, skip usage-data parsing
     if (parse_command(doc)) return;
 
@@ -1030,7 +1338,17 @@ static void parse_json(const char *json_str) {
     }
 
     clear_usage_rows(state.usage);
+    // Each frame is authoritative. A missing primary/weekly object means that
+    // window is absent, not that the previous frame's aggregate should remain
+    // visible. Clearing these fields also lets EchoDesk hide an ended 5-hour
+    // session instead of rendering stale data.
+    state.usage.five_hour_utilization = 0.0f;
+    state.usage.five_hour_resets_at[0] = '\0';
+    state.usage.five_hour_reset_epoch = 0;
     state.usage.five_hour_window_minutes = 0;
+    state.usage.seven_day_utilization = 0.0f;
+    state.usage.seven_day_resets_at[0] = '\0';
+    state.usage.seven_day_reset_epoch = 0;
     state.usage.seven_day_window_minutes = 0;
     // Fehlt das Feld (aeltere Apps), zeigt der Host verbrauchte Prozent.
     const char *percent_mode = usage["percentMode"] | "used";
@@ -1075,6 +1393,10 @@ void serial_receiver_init() {
     serial_frame_expected = 0;
     serial_frame_received = 0;
     host_frame_seen = false;
+#if defined(ECHODESK_OS)
+    performance_data_init();
+    music_data_init();
+#endif
     last_host_frame_ms = 0;
     memset(&state, 0, sizeof(state));
     usage_data_clear(state.usage);
@@ -1230,6 +1552,12 @@ void serial_receiver_tick() {
             strlcpy(state.status, "No data (timeout)", sizeof(state.status));
         }
     }
+#if defined(ECHODESK_OS)
+    if (echodesk_state_dirty) {
+        echodesk_state_dirty = false;
+        print_echodesk_state();
+    }
+#endif
 }
 
 // ============================================================
