@@ -314,24 +314,13 @@ html[data-theme="dark"] .cable-visual img { filter: invert(1) drop-shadow(0 10px
 .utility-screen { position: relative; aspect-ratio: 1.35; overflow: hidden; background: #09090a; color: #fff; }
 .utility-screen > span { position: absolute; z-index: 3; top: 12px; right: 12px; padding: 5px 8px; border: 1px solid rgba(255,255,255,.3); border-radius: 999px; background: rgba(0,0,0,.55); font-size: .58rem; letter-spacing: .06em; text-transform: uppercase; backdrop-filter: blur(5px); }
 .verified-preview img { width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.os-capture img { object-fit: contain; image-rendering: pixelated; }
 .performance-centre .verified-preview img { object-fit: contain; }
 .utility-copy { display: flex; gap: 17px; padding: 24px; }
 .utility-copy h3 { margin-bottom: 8px; font-size: 1.42rem; }
 .utility-copy p { margin-bottom: 0; color: var(--muted); font-size: .89rem; }
 .utility-icon { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border: 1px solid var(--line); border-radius: 10px; font-weight: 800; }
 .concept-screen { padding: 30px; }
-.now-playing-screen { display: flex; gap: 22px; align-items: center; background: radial-gradient(circle at 30% 30%, #403462, #111118 65%); }
-.album-art { width: 42%; aspect-ratio: 1; flex: 0 0 auto; border-radius: 14px; background: linear-gradient(135deg, #d970e4, #3e50b7 52%, #101122); transform: rotate(-3deg); box-shadow: 0 20px 40px rgba(0,0,0,.35); }
-.album-art i { display: block; width: 44%; height: 44%; margin: 28%; border: 2px solid rgba(255,255,255,.65); border-radius: 50%; box-shadow: 0 0 0 12px rgba(0,0,0,.12); }
-.track-copy { min-width: 0; display: flex; flex: 1; flex-direction: column; }
-.track-copy > span { color: #aba5c7; font-size: .55rem; letter-spacing: .14em; }
-.track-copy strong { margin: 8px 0 2px; overflow: hidden; font-size: clamp(.8rem, 1.6vw, 1.25rem); text-overflow: ellipsis; white-space: nowrap; }
-.track-copy small { color: #a5a0b5; }
-.track-copy i { display: block; height: 2px; margin: 24px 0 14px; background: linear-gradient(90deg, #fff 38%, rgba(255,255,255,.22) 38%); }
-.track-copy div { font-size: .85rem; text-align: center; }
-.clock-screen { display: grid; place-content: center; text-align: center; background: #030304; }
-.clock-screen time { font-family: "Arial Narrow", "Roboto Condensed", sans-serif; font-size: clamp(3.5rem, 8vw, 6.3rem); font-stretch: condensed; font-weight: 800; letter-spacing: -.08em; line-height: .9; }
-.clock-screen small { margin-top: 18px; color: #9b9ba0; font-size: .55rem; letter-spacing: .25em; }
 .more-screen { display: grid; place-content: center; text-align: center; background: #e7e6e0; color: #09090a; }
 .more-screen > div { display: grid; grid-template-columns: 1fr 1fr; width: 100px; gap: 6px; margin: 0 auto 18px; }
 .more-screen i { display: block; height: 44px; border: 2px solid #111; border-radius: 10px; }

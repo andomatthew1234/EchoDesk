@@ -24,6 +24,21 @@ bash scripts/render_site_screens.sh
 
 Die PNGs sind echte Firmware-Layouts. In den fotografischen KI-Bildern dienen diese PNGs als Bildschirmreferenz; sie sind dort perspektivisch generiert und nicht pixelidentisch einkopiert.
 
+## EchoDesk-OS-Aufnahmen
+
+`docs/assets/os/` enthält direkt aus den produktiven EchoDesk-UI-Quellen gerenderte
+320×240-PNGs für Codex Usage, Clock und Now Playing. Das Host-Werkzeug ersetzt nur
+Hardware-I/O und serielle Eingaben durch feste, frei erfundene Beispieldaten; die
+Uhr zeigt die lokale Uhrzeit des Render-Laufs.
+Layout, Schriften, Größen und Widgets stammen unverändert aus `src/ui_echodesk.cpp`
+und `src/ui_now_playing.cpp`.
+
+Auf Windows reproduzieren (nach einem Freenove-PlatformIO-Build):
+
+```powershell
+.\scripts\render_echodesk_site_screens.ps1
+```
+
 ## Finale Prompts
 
 ### cyd-blue.jpg

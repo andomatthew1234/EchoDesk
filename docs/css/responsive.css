@@ -58,9 +58,6 @@
   .utility-card, .utility-large { grid-column: auto; }
   .utility-screen { aspect-ratio: 1.24; }
   .concept-screen { padding: 22px; }
-  .now-playing-screen { gap: 14px; }
-  .track-copy strong { font-size: .84rem; }
-  .track-copy small { font-size: .65rem; }
   .more-grid { grid-template-columns: 1fr; }
   .more-tile { min-height: 310px; }
   .ai-demo blockquote { font-size: 1.1rem; }

@@ -94,6 +94,21 @@ test("setup step uses the USB icon asset", async ({ page }) => {
   await expect(page.locator(".cable-visual i")).toHaveCount(0);
 });
 
+test("utility cards use native EchoDesk OS captures", async ({ page }) => {
+  await page.goto("./#utilities", { waitUntil: "networkidle" });
+  for (const name of ["codex", "clock", "now-playing"]) {
+    const capture = page.locator(`[data-os-capture="${name}"]`);
+    const image = capture.locator("img");
+    await expect(image).toBeVisible();
+    await expect(image).toHaveAttribute("src", `./assets/os/${name}.png`);
+    expect(await image.evaluate(element => ({
+      complete: element.complete,
+      width: element.naturalWidth,
+      height: element.naturalHeight
+    }))).toEqual({ complete: true, width: 320, height: 240 });
+  }
+});
+
 test("Professional card shows its concept image and elevated status", async ({ page }) => {
   await page.setViewportSize({ width: 920, height: 900 });
   await page.goto("./#professional", { waitUntil: "networkidle" });
