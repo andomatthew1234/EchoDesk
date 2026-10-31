@@ -46,6 +46,8 @@
   .product-card-visual { min-height: 270px; }
   .product-card-copy { grid-template-columns: 1fr; gap: 24px; }
   .product-note { grid-column: auto; }
+  .pro-visual { height: 260px; }
+  .pro-status { top: 16px; left: 16px; }
   .pro-card { min-height: 670px; }
   .flip-grid { grid-template-columns: 1fr; }
   .flip-card { min-height: 290px; }

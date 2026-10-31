@@ -85,6 +85,27 @@ test("every in-page navigation link has a target", async ({ page }) => {
   expect(missing).toEqual([]);
 });
 
+test("Professional card shows its concept image and elevated status", async ({ page }) => {
+  await page.setViewportSize({ width: 920, height: 900 });
+  await page.goto("./#professional", { waitUntil: "networkidle" });
+
+  const card = page.locator("#professional");
+  const image = card.locator(".pro-visual img");
+  const status = card.locator(".pro-status");
+  const note = card.locator(".product-note");
+  const button = card.locator(".button-disabled");
+
+  await expect(image).toBeVisible();
+  expect(await image.evaluate(element => element.complete && element.naturalWidth > 0)).toBe(true);
+
+  const imageBox = await image.boundingBox();
+  const statusBox = await status.boundingBox();
+  const noteBox = await note.boundingBox();
+  const buttonBox = await button.boundingBox();
+  expect(statusBox.y).toBeLessThan(imageBox.y + imageBox.height / 2);
+  expect(buttonBox.y - (noteBox.y + noteBox.height)).toBeLessThan(40);
+});
+
 test("core content remains visible without JavaScript", async ({ browser }) => {
   const context = await browser.newContext({
     javaScriptEnabled: false,

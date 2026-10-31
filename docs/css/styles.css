@@ -260,15 +260,17 @@ html[data-theme="dark"] .visual-note { color: #c7c7cb; }
 .tick-list li { position: relative; padding: 8px 0 8px 24px; border-bottom: 1px solid var(--line); }
 .tick-list li::before { content: "✓"; position: absolute; left: 0; color: var(--ink); font-weight: 900; }
 .product-note { grid-column: 1 / -1; max-width: 700px; margin: 0; color: var(--muted); font-size: .86rem; }
-.pro-card { display: flex; min-height: 720px; flex-direction: column; background: linear-gradient(145deg, #0c0c0e, #25252a); color: #f8f8f5; }
+.pro-card { display: flex; min-height: 720px; scroll-margin-top: calc(var(--header-h) + 20px); flex-direction: column; background: linear-gradient(145deg, #0c0c0e, #25252a); color: #f8f8f5; }
 .pro-card .product-card-copy { display: flex; flex: 1; flex-direction: column; }
-.pro-card .product-card-copy .button { margin-top: auto; }
+.pro-card .product-card-copy .button { margin-top: 6px; }
 .pro-card .muted-list, .pro-card .product-note { color: #a9a9af; }
 .pro-card .tick-list li { border-color: var(--dark-line); }
 .pro-card .tick-list li::before { color: #fff; }
-.pro-visual { position: relative; height: 250px; overflow: hidden; background: radial-gradient(circle at 50% 70%, rgba(255,255,255,.24), transparent 42%); }
-.pro-visual::before { content: ""; position: absolute; width: 72%; aspect-ratio: 1.65; left: 14%; bottom: 15px; border: 2px solid rgba(255,255,255,.5); border-radius: 18px; background: linear-gradient(140deg, #050506, #1f1f22); box-shadow: 0 22px 30px rgba(0,0,0,.5), inset 0 0 34px rgba(255,255,255,.05); transform: perspective(700px) rotateX(4deg) rotateY(-10deg); filter: blur(.2px); }
-.pro-visual::after { content: "PROFESSIONAL"; position: absolute; inset: auto 0 60px; color: rgba(255,255,255,.18); font-size: clamp(1.2rem, 2.8vw, 2.4rem); font-weight: 900; letter-spacing: .22em; text-align: center; }
+.pro-visual { position: relative; height: 300px; overflow: hidden; background: #0c0d12; }
+.pro-visual::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(0,0,0,.04) 50%, rgba(0,0,0,.38)); }
+.pro-visual img { width: 100%; height: 100%; object-fit: cover; object-position: center; transition: transform 800ms var(--ease); }
+.pro-card:hover .pro-visual img { transform: scale(1.025); }
+.pro-status { position: absolute; z-index: 1; top: 20px; left: 20px; background: rgba(7,8,12,.72); color: #fff; box-shadow: 0 8px 24px rgba(0,0,0,.24); backdrop-filter: blur(10px); }
 .status-pill { display: inline-flex; width: fit-content; padding: 8px 11px; border: 1px solid currentColor; border-radius: 999px; font-size: .68rem; font-weight: 800; letter-spacing: .08em; line-height: 1; text-transform: uppercase; }
 
 /* Feature cards */
