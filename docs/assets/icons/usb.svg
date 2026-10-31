@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">USB</title>
+  <desc id="desc">Universal Serial Bus trident symbol</desc>
+  <g fill="none" stroke="#111114" stroke-width="14" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M128 202V62"/>
+    <path d="M128 116 78 158v18"/>
+    <path d="m128 132 50 34v12"/>
+  </g>
+  <path fill="#111114" d="m128 34-28 38h56z"/>
+  <circle cx="78" cy="190" r="18" fill="#111114"/>
+  <rect x="160" y="178" width="36" height="36" rx="5" fill="#111114"/>
+  <circle cx="128" cy="210" r="17" fill="#111114"/>
+</svg>

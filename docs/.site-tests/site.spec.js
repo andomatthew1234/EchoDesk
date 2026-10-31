@@ -85,6 +85,15 @@ test("every in-page navigation link has a target", async ({ page }) => {
   expect(missing).toEqual([]);
 });
 
+test("setup step uses the USB icon asset", async ({ page }) => {
+  await page.goto("./#setup", { waitUntil: "networkidle" });
+  const icon = page.locator(".cable-visual img");
+  await expect(icon).toBeVisible();
+  await expect(icon).toHaveAttribute("src", "assets/icons/usb.svg");
+  expect(await icon.evaluate(element => element.complete && element.naturalWidth > 0)).toBe(true);
+  await expect(page.locator(".cable-visual i")).toHaveCount(0);
+});
+
 test("Professional card shows its concept image and elevated status", async ({ page }) => {
   await page.setViewportSize({ width: 920, height: 900 });
   await page.goto("./#professional", { waitUntil: "networkidle" });
