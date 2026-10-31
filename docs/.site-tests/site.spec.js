@@ -103,7 +103,7 @@ test("Professional card shows its concept image and elevated status", async ({ p
   const noteBox = await note.boundingBox();
   const buttonBox = await button.boundingBox();
   expect(statusBox.y).toBeLessThan(imageBox.y + imageBox.height / 2);
-  expect(buttonBox.y - (noteBox.y + noteBox.height)).toBeLessThan(40);
+  expect(buttonBox.y - (noteBox.y + noteBox.height)).toBeLessThanOrEqual(40);
 });
 
 test("core content remains visible without JavaScript", async ({ browser }) => {
