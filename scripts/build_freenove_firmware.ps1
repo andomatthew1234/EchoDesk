@@ -9,8 +9,12 @@ $checksumFile = "$outputBin.sha256"
 $platformioHome = Join-Path $env:USERPROFILE ".platformio"
 $esptool = Join-Path $platformioHome "packages\tool-esptoolpy\esptool.py"
 $bootApp = Join-Path $platformioHome "packages\framework-arduinoespressif32\tools\partitions\boot_app0.bin"
-$python = (Get-Command py.exe -ErrorAction SilentlyContinue).Source
+$python = $env:PLATFORMIO_PYTHON
+if (-not $python) { $python = (Get-Command py.exe -ErrorAction SilentlyContinue).Source }
 if (-not $python) { $python = (Get-Command python.exe -ErrorAction Stop).Source }
+if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+    throw "Configured PlatformIO Python executable does not exist: $python"
+}
 
 Push-Location $projectDir
 try {

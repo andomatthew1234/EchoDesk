@@ -94,6 +94,8 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --disable-pip-version-check platformio==6.1.18
+          $platformioPython = (Get-Command python.exe -ErrorAction Stop).Source
+          "PLATFORMIO_PYTHON=$platformioPython" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           choco install nsis --version=3.13.0 -y --no-progress
           $nsis = @(
             'C:\Program Files (x86)\NSIS\makensis.exe',
