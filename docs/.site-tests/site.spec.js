@@ -164,6 +164,37 @@ test("reduced motion keeps content immediately readable", async ({ page }) => {
   await expect(card).toHaveAttribute("aria-pressed", "true");
 });
 
+test("partially loaded pages stay blank and transition only after window load", async ({ page }) => {
+  let releaseImage;
+  let imageWasHeld = false;
+  const imageGate = new Promise(resolve => { releaseImage = resolve; });
+
+  await page.route("**/assets/logo/echodesk-logo.png", async route => {
+    imageWasHeld = true;
+    await imageGate;
+    await route.continue();
+  });
+
+  try {
+    const response = await page.goto("./download.html", { waitUntil: "domcontentloaded" });
+    expect(response.status()).toBe(200);
+    expect(imageWasHeld).toBe(true);
+    await expect(page.locator("html")).toHaveClass(/page-loading/);
+    await expect(page.locator("body")).toHaveCSS("opacity", "0");
+    await expect(page.locator("body")).toHaveCSS("visibility", "hidden");
+
+    releaseImage();
+    await page.waitForLoadState("load");
+    await expect(page.locator("html")).toHaveClass(/page-ready/);
+    await expect(page.locator("html")).not.toHaveClass(/page-loading/);
+    await expect(page.locator("body")).toHaveCSS("visibility", "visible");
+    await expect(page.locator("body")).toHaveCSS("opacity", "1");
+    await expect(page.locator("body")).toHaveCSS("animation-name", "page-enter");
+  } finally {
+    releaseImage?.();
+  }
+});
+
 for (const size of sizes) {
   test(`${size.name}: download page is accessible and responsive`, async ({ page }) => {
     const problems = [];

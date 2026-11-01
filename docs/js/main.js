@@ -2,7 +2,6 @@
   "use strict";
 
   const root = document.documentElement;
-  root.classList.add("js");
   const header = document.querySelector("[data-header]");
   const menu = document.querySelector("[data-mobile-menu]");
   const menuToggle = document.querySelector("[data-menu-toggle]");

@@ -5,6 +5,50 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="EchoDesk is a compact touchscreen for live metrics, useful controls and desk-ready utilities. Your desk. Upgraded.">
     <meta name="theme-color" content="#f5f4ef">
+    <style>
+      html { background: #f5f4ef; }
+      html[data-theme="dark"] { background: #0a0a0b; }
+      html.page-loading body { opacity: 0 !important; visibility: hidden !important; }
+    </style>
+    <script>
+      (function () {
+        var root = document.documentElement;
+        root.classList.add("js", "page-loading");
+        try {
+          var saved = window.localStorage.getItem("echodesk-theme");
+          if (saved === "dark" || saved === "light") {
+            root.dataset.theme = saved;
+          } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+            root.dataset.theme = "dark";
+          }
+        } catch (_error) {
+          if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) root.dataset.theme = "dark";
+        }
+
+        function revealLoadedPage() {
+          if (root.classList.contains("page-ready")) return;
+          window.requestAnimationFrame(function () {
+            window.requestAnimationFrame(function () {
+              root.classList.remove("page-loading");
+              root.classList.add("page-ready");
+              window.dispatchEvent(new Event("echodesk:page-ready"));
+            });
+          });
+        }
+
+        if (document.readyState === "complete") {
+          revealLoadedPage();
+        } else {
+          window.addEventListener("load", revealLoadedPage, { once: true });
+        }
+        window.addEventListener("pageshow", function (event) {
+          if (!event.persisted) return;
+          root.classList.remove("page-ready");
+          root.classList.add("page-loading");
+          revealLoadedPage();
+        });
+      })();
+    </script>
     <meta property="og:type" content="website">
     <meta property="og:title" content="EchoDesk — Your desk. Upgraded.">
     <meta property="og:description" content="A compact touchscreen that puts your favourite tools, metrics and controls right where you need them.">

@@ -1,5 +1,10 @@
 @keyframes spin { to { transform: rotate(360deg); } }
 
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @keyframes word-out {
   from { opacity: 1; transform: translateY(0) rotateX(0); }
   to { opacity: 0; transform: translateY(-44%) rotateX(72deg); }
@@ -19,6 +24,16 @@
   0% { width: 8%; transform: translateX(-100%); }
   55% { width: 78%; transform: translateX(0); }
   100% { width: 18%; transform: translateX(460%); }
+}
+
+.js.page-loading body {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.js.page-ready body {
+  visibility: visible;
+  animation: page-enter 420ms var(--ease) both;
 }
 
 .js .reveal {
