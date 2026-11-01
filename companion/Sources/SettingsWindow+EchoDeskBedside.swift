@@ -39,6 +39,44 @@ struct EchoDeskBedsideConfig {
     var themeStartMinute: Int
     var themeEndMinute: Int
 
+    private init(
+        clockFormat: String,
+        clockShowSeconds: Bool,
+        clockStyle: String,
+        nextAlarmWidget: Bool,
+        weatherWidget: Bool,
+        alarms: [EchoDeskBedsideAlarm],
+        scheduleEnabled: Bool,
+        manualBrightness: Int,
+        segments: [EchoDeskBedsideScheduleSegment],
+        nightScheduleEnabled: Bool,
+        nightManualEnabled: Bool,
+        nightStartMinute: Int,
+        nightEndMinute: Int,
+        themeScheduleEnabled: Bool,
+        themeManualDark: Bool,
+        themeStartMinute: Int,
+        themeEndMinute: Int
+    ) {
+        self.clockFormat = clockFormat
+        self.clockShowSeconds = clockShowSeconds
+        self.clockStyle = clockStyle
+        self.nextAlarmWidget = nextAlarmWidget
+        self.weatherWidget = weatherWidget
+        self.alarms = alarms
+        self.scheduleEnabled = scheduleEnabled
+        self.manualBrightness = manualBrightness
+        self.segments = segments
+        self.nightScheduleEnabled = nightScheduleEnabled
+        self.nightManualEnabled = nightManualEnabled
+        self.nightStartMinute = nightStartMinute
+        self.nightEndMinute = nightEndMinute
+        self.themeScheduleEnabled = themeScheduleEnabled
+        self.themeManualDark = themeManualDark
+        self.themeStartMinute = themeStartMinute
+        self.themeEndMinute = themeEndMinute
+    }
+
     private static let defaultSegments: [EchoDeskBedsideScheduleSegment] = [
         .init(startMinute: 0, brightness: 1),
         .init(startMinute: 300, brightness: 40),
