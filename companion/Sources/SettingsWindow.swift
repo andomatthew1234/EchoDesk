@@ -140,6 +140,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskConnectionDot: StatusIndicator!
     var echoDeskSidebarConnectionDot: StatusIndicator!
     var echoDeskSidebarConnectionLabel: NSTextField!
+    var echoDeskSidebarDeviceName: NSTextField!
     var echoDeskConnectionLabel: NSTextField!
     var echoDeskConnectionDetail: NSTextField!
     var echoDeskFirmwareLabel: NSTextField!
@@ -171,6 +172,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskSetupProgress: NSProgressIndicator!
     var echoDeskSetupQuickTheme: NSSegmentedControl!
     var echoDeskSetupQuickClockFormat: NSPopUpButton!
+    var echoDeskSetupQuickContinueButton: NSButton!
     var echoDeskSetupCompletionTitle: NSTextField!
     var echoDeskSetupCompletionDetail: NSTextField!
     var echoDeskGuidedWiFiContainer: NSView!
@@ -187,6 +189,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskQuickTheme: NSSegmentedControl!
     var echoDeskQuickClockFormat: NSPopUpButton!
     var echoDeskSettingControls: [String: NSControl] = [:]
+    var echoDeskPendingSettingChanges: [String: Any] = [:]
+    var echoDeskApplyingSettingChanges = false
+    var echoDeskPendingSettingPort: String?
+    var echoDeskPendingSettingMAC: String?
     var echoDeskAppButtons: [String: [NSButton]] = [:]
     var echoDeskClockWindow: NSWindow?
     var echoDeskClockSelectedMode: String?
@@ -202,6 +208,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskClockStateRequestInFlight = false
     var echoDeskPcDashboardPopups: [NSPopUpButton] = []
     var echoDeskPcDashboardRevision: Int = 0
+    var echoDeskPcDashboardAutoApplyWorkItem: DispatchWorkItem?
     var echoDeskBedsideRevision: Int = 0
     var echoDeskBedsideStatePort: String?
     var echoDeskBedsideStateRequestInFlight = false
@@ -209,6 +216,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskBedsideRuntime: [String: Any] = [:]
     var echoDeskBedsideSection = "root"
     var echoDeskBedsideStatus: NSTextField?
+    var echoDeskBedsideRetryButton: NSButton?
     var echoDeskBedsideDocument: NSStackView?
     var echoDeskBedsidePreview: EchoDeskBedsidePreviewView?
     var echoDeskBedsidePreviewTimer: Timer?
@@ -221,17 +229,37 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskBedsideAlarmRows: [EchoDeskBedsideAlarmRow] = []
     var echoDeskBedsideScheduleDrafts: [EchoDeskBedsideScheduleSegment] = []
     var echoDeskBedsideScheduleRows: [EchoDeskBedsideScheduleRow] = []
+    var echoDeskBedsideBrightnessTimeline: EchoDeskBrightnessTimelineView?
+    var echoDeskBedsideEffectiveBrightness: NSTextField?
+    var echoDeskBedsideSchedulePointPopup: NSPopUpButton?
+    var echoDeskBedsideSchedulePointTime: NSDatePicker?
+    var echoDeskBedsideSchedulePointBrightness: NSTextField?
+    var echoDeskBedsideSchedulePointStepper: NSStepper?
+    var echoDeskBedsideScheduleAddButton: NSButton?
+    var echoDeskBedsideScheduleDeleteButton: NSButton?
+    var echoDeskBedsideScheduleDetails: NSView?
+    var echoDeskBedsideManualBrightnessDetails: NSView?
     var echoDeskBedsideScheduleEnabled: NSButton?
     var echoDeskBedsideManualBrightness: NSSlider?
     var echoDeskBedsideNightScheduleEnabled: NSButton?
     var echoDeskBedsideNightManual: NSButton?
     var echoDeskBedsideNightStart: NSDatePicker?
     var echoDeskBedsideNightEnd: NSDatePicker?
+    var echoDeskBedsideNightScheduleDetails: NSView?
+    var echoDeskBedsideNightManualDetails: NSView?
     var echoDeskBedsideThemeScheduleEnabled: NSButton?
-    var echoDeskBedsideThemeManualDark: NSButton?
+    var echoDeskBedsideThemeManualDark: NSSegmentedControl?
+    var echoDeskBedsideThemeEffective: NSTextField?
     var echoDeskBedsideThemeStart: NSDatePicker?
     var echoDeskBedsideThemeEnd: NSDatePicker?
+    var echoDeskBedsideThemeScheduleDetails: NSView?
+    var echoDeskBedsideThemeManualDetails: NSView?
     var echoDeskBedsideSaveInFlight = false
+    var echoDeskBedsidePendingConfig: EchoDeskBedsideConfig?
+    var echoDeskBedsideInFlightConfig: EchoDeskBedsideConfig?
+    var echoDeskBedsideAutoApplyWorkItem: DispatchWorkItem?
+    var echoDeskBedsideRetryAfterRefresh = false
+    var echoDeskBedsideDidRetryStaleRevision = false
     var echoDeskLastState: [String: Any]?
     var echoDeskLastStatePort: String?
     var echoDeskLastStateMAC: String?
@@ -245,6 +273,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskSetupWaitingForFlash = false
     var echoDeskSetupFlashSucceeded = false
     var echoDeskApplyingDeferredSettings = false
+    var echoDeskApplyingSetupQuickSettings = false
+    var echoDeskPendingSetupQuickTheme: String?
+    var echoDeskPendingSetupQuickClock: String?
+    var echoDeskPendingSetupQuickPort: String?
+    var echoDeskPendingSetupQuickMAC: String?
     var echoDeskPendingRecoveryPort: String?
     var echoDeskPendingRecoveryDeviceMAC: String?
     var echoDeskPendingRecoveryAction: Int?
@@ -430,6 +463,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         brightnessPersistTimer = nil
         echoDeskBedsidePreviewTimer?.invalidate()
         echoDeskBedsidePreviewTimer = nil
+        echoDeskBedsideAutoApplyWorkItem?.cancel()
+        echoDeskBedsideAutoApplyWorkItem = nil
+        echoDeskPcDashboardAutoApplyWorkItem?.cancel()
+        echoDeskPcDashboardAutoApplyWorkItem = nil
     }
 
     private func startRefreshTimer() {

@@ -161,4 +161,24 @@ Require-SourcePattern `
     -Pattern 'Background="\{DynamicResource WarningSurfaceBrush\}"' `
     -Message 'The recovery warning still uses hard-coded light-only colours.'
 
+Require-SourcePattern `
+    -Path 'desktop\src\EchoDesk.Desktop\MainWindow.xaml' `
+    -Pattern 'Text="GENERAL"[\s\S]{0,4000}Text="DEVICE MANAGEMENT"' `
+    -Message 'The Desktop sidebar is missing its grouped navigation hierarchy.'
+
+Require-SourcePattern `
+    -Path 'desktop\src\EchoDesk.Desktop\MainWindow.xaml' `
+    -Pattern 'BedsideBrightnessTimeline[\s\S]{0,800}BedsideContinuousEdit_Begin[\s\S]{0,800}BedsideContinuousEdit_End' `
+    -Message 'Bedside Mode is missing the direct-manipulation timeline or continuous-edit commit boundary.'
+
+Require-SourcePattern `
+    -Path 'desktop\src\EchoDesk.Desktop\Infrastructure\LatestSnapshotWriteQueue.cs' `
+    -Pattern 'latest = \(value, generation\)[\s\S]{0,1000}await writer' `
+    -Message 'Whole-config auto-apply no longer coalesces to a single latest snapshot writer.'
+
+$mainWindow = Get-Content -LiteralPath (Join-Path $repoRoot 'desktop\src\EchoDesk.Desktop\MainWindow.xaml') -Raw
+if ($mainWindow -match 'Content="Apply dashboard"' -or $mainWindow -match 'Content="Save to EchoDesk"') {
+    throw 'Redundant settings persistence buttons returned even though these surfaces auto-apply.'
+}
+
 Write-Output 'validate-windows-host: PASS'

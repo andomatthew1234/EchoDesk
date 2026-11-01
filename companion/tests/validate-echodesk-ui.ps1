@@ -34,7 +34,7 @@ foreach ($copy in @(
     'Setup EchoDesk Now',
     'Welcome to the EchoDesk Desktop app', 'Setup your first EchoDesk now?',
     'Continue', 'Yes', 'Not now', 'My device', 'Notification Stack',
-    'Set up notifications', 'APP NOTIFICATIONS ONLY'
+    'Not available on macOS'
 )) { Assert-Contains $source $copy }
 
 foreach ($stateFeature in @(
@@ -60,9 +60,7 @@ foreach ($stateFeature in @(
     'sendEchoDeskCommand("echodesk_clock_control"',
     '"durationSeconds": minutes * 60',
     '"focusMinutes": focus', '"breakMinutes": pause', '"rounds": rounds',
-    'UNUserNotificationCenter.current().getDeliveredNotifications',
-    "macOS has no public API for reading other apps’ Notification Centre history.",
-    'sendEchoDeskCommand("echodesk_notifications_push"'
+    'UNUserNotificationCenter.current().getDeliveredNotifications'
 )) { Assert-Contains $source $stateFeature }
 
 foreach ($clockBridge in @(
@@ -89,6 +87,79 @@ foreach ($polishContract in @(
     'view.widthAnchor.constraint(equalTo: stack.widthAnchor)',
     'NSImage.SymbolConfiguration(pointSize: 16, weight: .medium)'
 )) { Assert-Contains $source $polishContract }
+
+foreach ($redesignContract in @(
+    'final class EchoDeskSidebarButton: NSButton',
+    'navigationGroup("General", generalButtons)',
+    'navigationGroup("Device Management", managementButtons)',
+    'echoDeskSidebarDeviceName',
+    'EchoDeskDesign.sidebarWidth',
+    'let components = echoDeskAdaptiveColumns([component, notificationCard]',
+    'let deviceBasics = echoDeskAdaptiveColumns([quick, general]',
+    'popup.action = #selector(echoDeskApplyPcDashboard)',
+    'echoDeskPendingSetupQuickTheme = theme',
+    'retryPendingEchoDeskSetupQuickSettingsIfReady()',
+    'echoDeskLastStatePort == expectedPort',
+    'echoDeskLastStateMAC == expectedMAC',
+    'echoDeskApplyingSetupQuickSettings = true'
+)) { Assert-Contains $source $redesignContract }
+
+if ($source.Contains('NSButton(title: "Apply dashboard"')) {
+    throw 'PC Dashboard still exposes a redundant Apply button instead of auto-applying changes.'
+}
+
+$overviewStart = $source.IndexOf('private func buildEchoDeskOverviewPage()')
+$overviewEnd = $source.IndexOf('private func buildEchoDeskDeviceControlPage()', $overviewStart)
+if ($overviewStart -lt 0 -or $overviewEnd -le $overviewStart) {
+    throw 'Overview page implementation could not be isolated.'
+}
+$overviewPage = $source.Substring($overviewStart, $overviewEnd - $overviewStart)
+foreach ($forbiddenMacNotificationControl in @('Set up notifications', 'Send test', 'Disable')) {
+    if ($overviewPage.Contains($forbiddenMacNotificationControl)) {
+        throw "Notification Stack must be non-interactive on macOS: $forbiddenMacNotificationControl"
+    }
+}
+if (-not $overviewPage.Contains('notificationCard.alphaValue = 0.62')) {
+    throw 'Unavailable macOS Notification Stack card is not visibly greyed out.'
+}
+
+# Regression seam for the previously inert Quick Settings Continue button.
+# Continue must retain the user's choices, invalidate any pre-restart revision,
+# request a state tied to the current USB identity, and resume from that exact
+# state callback instead of requiring a second click.
+$quickApplyStart = $source.IndexOf('@objc private func echoDeskApplySetupQuickSettings()')
+$quickRetryStart = $source.IndexOf('private func retryPendingEchoDeskSetupQuickSettingsIfReady()', $quickApplyStart)
+$deferredStart = $source.IndexOf('private func applyDeferredEchoDeskQuickSettingsIfNeeded()', $quickRetryStart)
+if ($quickApplyStart -lt 0 -or $quickRetryStart -le $quickApplyStart -or $deferredStart -le $quickRetryStart) {
+    throw 'Guided setup Quick Settings implementation could not be isolated.'
+}
+$quickApply = $source.Substring($quickApplyStart, $quickRetryStart - $quickApplyStart)
+$quickRetry = $source.Substring($quickRetryStart, $deferredStart - $quickRetryStart)
+foreach ($needle in @(
+    'echoDeskPendingSetupQuickTheme = theme',
+    'echoDeskPendingSetupQuickClock = clock',
+    'echoDeskPendingSetupQuickPort = port',
+    'echoDeskPendingSetupQuickMAC = profile.mac',
+    'echoDeskLastState = nil',
+    'requestEchoDeskState()'
+)) {
+    if (-not $quickApply.Contains($needle)) { throw "Quick Settings Continue can become inert: missing $needle" }
+}
+foreach ($needle in @(
+    'monitor.serialPort.connectedPort == expectedPort',
+    'DeviceRegistry.shared.currentProfile()?.mac == expectedMAC',
+    'echoDeskLastStatePort == expectedPort',
+    'echoDeskLastStateMAC == expectedMAC',
+    'let revision = echoDeskLastState?["revision"] as? Int',
+    'self.completeEchoDeskGuidedSetup()'
+)) {
+    if (-not $quickRetry.Contains($needle)) { throw "Quick Settings retry is not identity/revision safe: missing $needle" }
+}
+$stateApply = $source.IndexOf('self.echoDeskLastState = json')
+$retryCall = $source.IndexOf('self.retryPendingEchoDeskSetupQuickSettingsIfReady()', $stateApply)
+if ($stateApply -lt 0 -or $retryCall -le $stateApply) {
+    throw 'A fresh EchoDesk state does not automatically resume Quick Settings Continue.'
+}
 
 if ($source.Contains('let content = echoDeskPageStack([heading, detail, stopwatch, countdown, focus])')) {
     throw 'The macOS Clock window still renders every mode at once.'

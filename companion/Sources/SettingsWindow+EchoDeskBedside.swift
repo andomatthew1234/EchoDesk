@@ -95,7 +95,7 @@ struct EchoDeskBedsideConfig {
         segments: defaultSegments,
         nightScheduleEnabled: true, nightManualEnabled: false,
         nightStartMinute: 1140, nightEndMinute: 420,
-        themeScheduleEnabled: true, themeManualDark: true,
+        themeScheduleEnabled: true, themeManualDark: false,
         themeStartMinute: 1140, themeEndMinute: 420)
 
     init?(json: [String: Any]) {
@@ -189,9 +189,12 @@ final class EchoDeskBedsideAlarmRow {
     let time: NSDatePicker
     let days: NSPopUpButton
     let label: NSTextField
+    let remove: NSButton
 
-    init(id: Int, enabled: NSButton, time: NSDatePicker, days: NSPopUpButton, label: NSTextField) {
-        self.id = id; self.enabled = enabled; self.time = time; self.days = days; self.label = label
+    init(id: Int, enabled: NSButton, time: NSDatePicker, days: NSPopUpButton,
+         label: NSTextField, remove: NSButton) {
+        self.id = id; self.enabled = enabled; self.time = time; self.days = days
+        self.label = label; self.remove = remove
     }
 }
 
@@ -201,6 +204,228 @@ final class EchoDeskBedsideScheduleRow {
     let brightness: NSTextField
     init(index: Int, time: NSDatePicker, brightness: NSTextField) {
         self.index = index; self.time = time; self.brightness = brightness
+    }
+}
+
+final class EchoDeskCommitTextField: NSTextField {
+    override func textDidEndEditing(_ notification: Notification) {
+        super.textDidEndEditing(notification)
+        if let action { NSApp.sendAction(action, to: target, from: self) }
+    }
+}
+
+/// A discrete representation of the schedule evaluated by EchoDesk OS. The
+/// firmware keeps the last point at or before the current minute (wrapping to
+/// the final point overnight), so the path intentionally contains hard steps.
+final class EchoDeskBrightnessTimelineView: NSView {
+    var isEnabled = true { didSet { alphaValue = isEnabled ? 1 : 0.55 } }
+    var segments: [EchoDeskBedsideScheduleSegment] = [] {
+        didSet {
+            if let selectedIndex, !segments.indices.contains(selectedIndex) {
+                self.selectedIndex = segments.isEmpty ? nil : segments.count - 1
+            }
+            updateAccessibilitySummary()
+            needsDisplay = true
+        }
+    }
+    private(set) var selectedIndex: Int?
+    var onSelectionChanged: ((Int?) -> Void)?
+    var onSegmentsPreview: (([EchoDeskBedsideScheduleSegment]) -> Void)?
+    var onSegmentsCommitted: (([EchoDeskBedsideScheduleSegment]) -> Void)?
+    private var isDraggingPoint = false
+
+    override var acceptsFirstResponder: Bool { true }
+    override var intrinsicContentSize: NSSize { NSSize(width: 620, height: 226) }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.cornerCurve = .continuous
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("Brightness schedule")
+        setAccessibilityHelp("Select a point, then use the arrow keys or the exact time and brightness controls below the graph.")
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private var plotRect: NSRect {
+        NSRect(x: 48, y: 30, width: max(1, bounds.width - 66), height: max(1, bounds.height - 48))
+    }
+
+    private func point(for segment: EchoDeskBedsideScheduleSegment) -> NSPoint {
+        let plot = plotRect
+        return NSPoint(x: plot.minX + CGFloat(segment.startMinute) / 1439 * plot.width,
+                       y: plot.minY + CGFloat(segment.brightness) / 100 * plot.height)
+    }
+
+    func select(index: Int?) {
+        selectedIndex = index.flatMap { segments.indices.contains($0) ? $0 : nil }
+        updateAccessibilitySummary()
+        needsDisplay = true
+        onSelectionChanged?(selectedIndex)
+    }
+
+    func updateSelected(minute: Int? = nil, brightness: Int? = nil, commit: Bool) {
+        guard let index = selectedIndex, segments.indices.contains(index) else { return }
+        let lower = index == 0 ? 0 : segments[index - 1].startMinute + 1
+        let upper = index == segments.count - 1 ? 1439 : segments[index + 1].startMinute - 1
+        if let minute { segments[index].startMinute = min(upper, max(lower, minute)) }
+        if let brightness { segments[index].brightness = min(100, max(1, brightness)) }
+        updateAccessibilitySummary()
+        needsDisplay = true
+        onSegmentsPreview?(segments)
+        if commit { onSegmentsCommitted?(segments) }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { NSSound.beep(); return }
+        window?.makeFirstResponder(self)
+        let location = convert(event.locationInWindow, from: nil)
+        let nearest = segments.indices.min { lhs, rhs in
+            hypot(point(for: segments[lhs]).x - location.x, point(for: segments[lhs]).y - location.y)
+                < hypot(point(for: segments[rhs]).x - location.x, point(for: segments[rhs]).y - location.y)
+        }
+        guard let nearest,
+              hypot(point(for: segments[nearest]).x - location.x,
+                    point(for: segments[nearest]).y - location.y) <= 14 else {
+            select(index: nil)
+            return
+        }
+        select(index: nearest)
+        isDraggingPoint = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isDraggingPoint, selectedIndex != nil else { return }
+        let location = convert(event.locationInWindow, from: nil)
+        let plot = plotRect
+        let minute = Int((((location.x - plot.minX) / plot.width) * 1439).rounded())
+        let brightness = Int((((location.y - plot.minY) / plot.height) * 100).rounded())
+        updateSelected(minute: minute, brightness: brightness, commit: false)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isDraggingPoint else { return }
+        isDraggingPoint = false
+        onSegmentsCommitted?(segments)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard isEnabled else { NSSound.beep(); return }
+        guard selectedIndex != nil else { super.keyDown(with: event); return }
+        switch event.keyCode {
+        case 123: updateSelected(minute: (selectedSegment?.startMinute ?? 0) - 5, commit: true)
+        case 124: updateSelected(minute: (selectedSegment?.startMinute ?? 0) + 5, commit: true)
+        case 125: updateSelected(brightness: (selectedSegment?.brightness ?? 1) - 1, commit: true)
+        case 126: updateSelected(brightness: (selectedSegment?.brightness ?? 1) + 1, commit: true)
+        default: super.keyDown(with: event)
+        }
+    }
+
+    private var selectedSegment: EchoDeskBedsideScheduleSegment? {
+        guard let selectedIndex, segments.indices.contains(selectedIndex) else { return nil }
+        return segments[selectedIndex]
+    }
+
+    private func updateAccessibilitySummary() {
+        guard let selectedSegment else {
+            setAccessibilityValue("No schedule point selected")
+            return
+        }
+        let hour = selectedSegment.startMinute / 60
+        let minute = selectedSegment.startMinute % 60
+        setAccessibilityValue(String(format: "Selected point %02d:%02d, %d percent brightness",
+                                     hour, minute, selectedSegment.brightness))
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let plot = plotRect
+        NSColor.controlBackgroundColor.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 10, yRadius: 10).fill()
+
+        let grid = NSColor.separatorColor.withAlphaComponent(0.55)
+        let axisAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]
+        for hour in stride(from: 0, through: 24, by: 6) {
+            let x = plot.minX + CGFloat(hour) / 24 * plot.width
+            let line = NSBezierPath(); line.move(to: NSPoint(x: x, y: plot.minY)); line.line(to: NSPoint(x: x, y: plot.maxY))
+            grid.setStroke(); line.lineWidth = 0.5; line.stroke()
+            let label = String(format: "%02d", hour)
+            label.draw(at: NSPoint(x: x - 7, y: 9), withAttributes: axisAttributes)
+        }
+        for value in stride(from: 0, through: 100, by: 25) {
+            let y = plot.minY + CGFloat(value) / 100 * plot.height
+            let line = NSBezierPath(); line.move(to: NSPoint(x: plot.minX, y: y)); line.line(to: NSPoint(x: plot.maxX, y: y))
+            grid.setStroke(); line.lineWidth = 0.5; line.stroke()
+            String(value).draw(at: NSPoint(x: 12, y: y - 6), withAttributes: axisAttributes)
+        }
+
+        let ordered = segments.sorted { $0.startMinute < $1.startMinute }
+        if let last = ordered.last {
+            let path = NSBezierPath()
+            var y = point(for: last).y
+            path.move(to: NSPoint(x: plot.minX, y: y))
+            for segment in ordered {
+                let next = point(for: segment)
+                path.line(to: NSPoint(x: next.x, y: y))
+                path.line(to: next)
+                y = next.y
+            }
+            path.line(to: NSPoint(x: plot.maxX, y: y))
+            NSColor.controlAccentColor.setStroke()
+            path.lineWidth = 2.5
+            path.lineJoinStyle = .round
+            path.stroke()
+        }
+
+        for (index, segment) in segments.enumerated() {
+            let center = point(for: segment)
+            let selected = index == selectedIndex
+            let handle = NSBezierPath(ovalIn: NSRect(x: center.x - (selected ? 7 : 5),
+                                                     y: center.y - (selected ? 7 : 5),
+                                                     width: selected ? 14 : 10, height: selected ? 14 : 10))
+            (selected ? NSColor.controlAccentColor : NSColor.windowBackgroundColor).setFill()
+            handle.fill()
+            NSColor.controlAccentColor.setStroke(); handle.lineWidth = selected ? 3 : 2; handle.stroke()
+        }
+
+        if window?.firstResponder === self {
+            NSColor.keyboardFocusIndicatorColor.setStroke()
+            let focus = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 9, yRadius: 9)
+            focus.lineWidth = 3; focus.stroke()
+        }
+    }
+}
+
+final class EchoDeskBedsideTemperatureStrip: NSView {
+    override var intrinsicContentSize: NSSize { NSSize(width: 180, height: 16) }
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let gradient = NSGradient(starting: NSColor(calibratedRed: 1, green: 0.43, blue: 0.12, alpha: 1),
+                                  ending: NSColor(calibratedRed: 1, green: 0.88, blue: 0.62, alpha: 1))
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
+        gradient?.draw(in: path, angle: 0)
+    }
+}
+
+final class EchoDeskBedsideAppearancePreview: NSView {
+    let dark: Bool
+    init(dark: Bool) { self.dark = dark; super.init(frame: .zero); setAccessibilityHidden(true) }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override var intrinsicContentSize: NSSize { NSSize(width: 116, height: 58) }
+    override func draw(_ dirtyRect: NSRect) {
+        let background = dark ? NSColor(calibratedWhite: 0.08, alpha: 1) : NSColor(calibratedWhite: 0.96, alpha: 1)
+        let foreground = dark ? NSColor.white : NSColor.black
+        background.setFill(); NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
+        foreground.withAlphaComponent(0.25).setFill()
+        NSBezierPath(roundedRect: NSRect(x: 10, y: 12, width: bounds.width - 20, height: 8), xRadius: 4, yRadius: 4).fill()
+        NSBezierPath(roundedRect: NSRect(x: 10, y: 28, width: bounds.width * 0.55, height: 16), xRadius: 5, yRadius: 5).fill()
+        NSColor.separatorColor.setStroke(); NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8).stroke()
     }
 }
 
@@ -360,7 +585,9 @@ extension SettingsWindowController {
         let preview = EchoDeskBedsidePreviewView()
         preview.config = echoDeskBedsideConfig
         preview.translatesAutoresizingMaskIntoConstraints = false
-        preview.widthAnchor.constraint(lessThanOrEqualToConstant: 416).isActive = true
+        let previewMaximumWidth = preview.widthAnchor.constraint(lessThanOrEqualToConstant: 416)
+        previewMaximumWidth.priority = .defaultHigh
+        previewMaximumWidth.isActive = true
         let previewMinimumWidth = preview.widthAnchor.constraint(greaterThanOrEqualToConstant: 240)
         previewMinimumWidth.priority = .defaultHigh
         previewMinimumWidth.isActive = true
@@ -374,11 +601,9 @@ extension SettingsWindowController {
         let intro = bedsideCard(bedsideStack([
             bedsideLabel("Bedside Mode", size: 22, weight: .semibold),
             bedsideMuted("A calm, standalone clock with alarms and a display schedule separate from the rest of EchoDesk OS."),
-            echoDeskBedsideStatus!, open,
+            bedsideStatusRow(), open,
         ], spacing: 12))
-        let hero = NSStackView(views: [preview, intro])
-        hero.orientation = .horizontal; hero.alignment = .top; hero.spacing = 16
-        hero.distribution = .fill
+        let hero = EchoDeskAdaptiveStackView(views: [preview, intro], collapseBelow: 640, equalColumns: false)
         let previewShare = preview.widthAnchor.constraint(equalTo: hero.widthAnchor, multiplier: 0.5, constant: -8)
         previewShare.priority = .defaultHigh
         previewShare.isActive = true
@@ -392,28 +617,27 @@ extension SettingsWindowController {
         echoDeskBedsideShowSeconds = NSButton(checkboxWithTitle: "Show seconds", target: self,
                                                action: #selector(echoDeskBedsidePreviewChanged))
         echoDeskBedsideShowSeconds?.state = echoDeskBedsideConfig.clockShowSeconds ? .on : .off
-        let saveClock = bedsidePrimaryButton("Save Clock", #selector(echoDeskBedsideSaveClock))
-        saveClock.isEnabled = bedsideStateReady
+        [echoDeskBedsideClockFormat, echoDeskBedsideClockStyle].forEach { $0?.isEnabled = bedsideStateReady }
+        echoDeskBedsideShowSeconds?.isEnabled = bedsideStateReady
         let clock = bedsideCard(bedsideStack([
             bedsideSectionTitle("Clock"),
-            bedsideMuted("Choose the clock appearance used only inside Bedside Mode."),
+            bedsideMuted("Choose the clock appearance used only inside Bedside Mode. Changes apply automatically."),
             bedsideControlRow("Time format", echoDeskBedsideClockFormat!),
             bedsideControlRow("Appearance", echoDeskBedsideClockStyle!),
-            echoDeskBedsideShowSeconds!, saveClock,
+            echoDeskBedsideShowSeconds!,
         ], spacing: 11))
 
         echoDeskBedsideNextAlarmWidget = NSButton(checkboxWithTitle: "Next alarm", target: self,
                                                    action: #selector(echoDeskBedsidePreviewChanged))
         echoDeskBedsideNextAlarmWidget?.state = echoDeskBedsideConfig.nextAlarmWidget ? .on : .off
+        echoDeskBedsideNextAlarmWidget?.isEnabled = bedsideStateReady
         echoDeskBedsideWeatherWidget = NSButton(checkboxWithTitle: "Weather — Coming soon", target: nil, action: nil)
         echoDeskBedsideWeatherWidget?.state = .off
         echoDeskBedsideWeatherWidget?.isEnabled = false
-        let saveWidgets = bedsidePrimaryButton("Save Widgets", #selector(echoDeskBedsideSaveWidgets))
-        saveWidgets.isEnabled = bedsideStateReady
         let widgets = bedsideCard(bedsideStack([
             bedsideSectionTitle("Widgets"),
-            bedsideMuted("Widgets live in the lower half. Weather is designed here but intentionally unavailable until its data source ships."),
-            echoDeskBedsideNextAlarmWidget!, echoDeskBedsideWeatherWidget!, saveWidgets,
+            bedsideMuted("Widgets live in the lower half and save automatically. Weather is designed here but intentionally unavailable until its data source ships."),
+            echoDeskBedsideNextAlarmWidget!, echoDeskBedsideWeatherWidget!,
         ], spacing: 11))
         let choices = EchoDeskAdaptiveStackView(views: [clock, widgets], collapseBelow: 660)
 
@@ -441,35 +665,41 @@ extension SettingsWindowController {
         }
         let add = NSButton(title: "Add alarm", target: self, action: #selector(echoDeskBedsideAddAlarm))
         add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
-        add.isEnabled = echoDeskBedsideAlarmDrafts.count < 8
-        let save = bedsidePrimaryButton("Save alarms", #selector(echoDeskBedsideSaveAlarms))
-        save.isEnabled = bedsideStateReady
-        let actions = NSStackView(views: [add, NSView(), save])
+        add.isEnabled = bedsideStateReady && echoDeskBedsideAlarmDrafts.count < 8
+        let autoSave = bedsideMuted("Changes save automatically on EchoDesk.")
+        let actions = NSStackView(views: [autoSave, NSView(), add])
         actions.orientation = .horizontal; actions.alignment = .centerY
-        views.append(echoDeskBedsideStatus!)
+        views.append(bedsideStatusRow())
         views.append(actions)
         return views
     }
 
     private func buildEchoDeskBedsideAlarmRow(_ alarm: EchoDeskBedsideAlarm) -> NSView {
-        let enabled = NSButton(checkboxWithTitle: "Enabled", target: nil, action: nil)
+        let enabled = NSButton(checkboxWithTitle: "Enabled", target: self,
+                               action: #selector(echoDeskBedsideAlarmChanged))
         enabled.state = alarm.enabled ? .on : .off
         let time = bedsideTimePicker(alarm.minuteOfDay)
+        time.target = self; time.action = #selector(echoDeskBedsideAlarmChanged)
         var repeatChoices = [("Every day", "127"), ("Weekdays", "62"), ("Weekends", "65")]
         if ![127, 62, 65].contains(alarm.weekdays) {
             repeatChoices.append(("Custom days (\(alarm.weekdays))", String(alarm.weekdays)))
         }
-        let days = bedsidePopup(repeatChoices, selected: String(alarm.weekdays), action: nil)
-        let label = NSTextField(string: alarm.label)
+        let days = bedsidePopup(repeatChoices, selected: String(alarm.weekdays),
+                                action: #selector(echoDeskBedsideAlarmChanged))
+        let label = EchoDeskCommitTextField(frame: .zero)
+        label.stringValue = alarm.label
         label.placeholderString = "Alarm label"
+        label.target = self; label.action = #selector(echoDeskBedsideAlarmChanged)
         let remove = NSButton(title: "Delete", target: self, action: #selector(echoDeskBedsideDeleteAlarm(_:)))
         remove.tag = alarm.id; remove.contentTintColor = .systemRed
+        [enabled, time, days, label, remove].forEach { $0.isEnabled = bedsideStateReady }
         let top = NSStackView(views: [bedsideSectionTitle(alarm.label.isEmpty ? "Alarm \(alarm.id)" : alarm.label), NSView(), enabled, remove])
         top.orientation = .horizontal; top.alignment = .centerY; top.spacing = 10
         let controls = NSStackView(views: [bedsideControlRow("Time", time), bedsideControlRow("Repeats", days),
                                            bedsideControlRow("Label", label)])
         controls.orientation = .vertical; controls.alignment = .leading; controls.spacing = 9
-        echoDeskBedsideAlarmRows.append(.init(id: alarm.id, enabled: enabled, time: time, days: days, label: label))
+        echoDeskBedsideAlarmRows.append(.init(id: alarm.id, enabled: enabled, time: time,
+                                               days: days, label: label, remove: remove))
         return bedsideCard(bedsideStack([top, controls], spacing: 12))
     }
 
@@ -481,98 +711,338 @@ extension SettingsWindowController {
         echoDeskBedsideAlarmDrafts.append(.init(id: id, enabled: true, minuteOfDay: 420,
                                                 weekdays: 127, label: "Alarm"))
         renderEchoDeskBedsideSection("alarms")
+        queueEchoDeskBedsideAutoApply(bedsideConfigWithCurrentAlarms())
     }
 
     @objc private func echoDeskBedsideDeleteAlarm(_ sender: NSButton) {
         captureEchoDeskBedsideAlarmDrafts()
         echoDeskBedsideAlarmDrafts.removeAll { $0.id == sender.tag }
         renderEchoDeskBedsideSection("alarms")
+        queueEchoDeskBedsideAutoApply(bedsideConfigWithCurrentAlarms())
+    }
+
+    @objc private func echoDeskBedsideAlarmChanged() {
+        captureEchoDeskBedsideAlarmDrafts()
+        queueEchoDeskBedsideAutoApply(bedsideConfigWithCurrentAlarms())
     }
 
     private func buildEchoDeskBedsideDisplaySection() -> [NSView] {
         echoDeskBedsideScheduleRows.removeAll()
         echoDeskBedsideStatus = bedsideMuted(bedsideStatusText)
-        echoDeskBedsideScheduleEnabled = NSButton(checkboxWithTitle: "Use brightness schedule", target: nil, action: nil)
+        echoDeskBedsideScheduleEnabled = NSButton(checkboxWithTitle: "Use brightness schedule", target: self,
+                                                   action: #selector(echoDeskBedsideDisplayModeChanged))
         echoDeskBedsideScheduleEnabled?.state = echoDeskBedsideConfig.scheduleEnabled ? .on : .off
         echoDeskBedsideManualBrightness = NSSlider(value: Double(echoDeskBedsideConfig.manualBrightness),
-                                                    minValue: 1, maxValue: 100, target: nil, action: nil)
-        var scheduleViews: [NSView] = [bedsideSectionTitle("Auto-brightness"),
-                                      bedsideMuted("The schedule repeats every day and affects Bedside Mode only."),
-                                      echoDeskBedsideScheduleEnabled!,
-                                      bedsideControlRow("Manual brightness", echoDeskBedsideManualBrightness!)]
-        for (index, segment) in echoDeskBedsideScheduleDrafts.enumerated() {
-            let time = bedsideTimePicker(segment.startMinute)
-            let brightness = NSTextField(string: String(segment.brightness))
-            brightness.alignment = .right
-            brightness.placeholderString = "1–100"
-            echoDeskBedsideScheduleRows.append(.init(index: index, time: time, brightness: brightness))
-            let remove = NSButton(image: NSImage(systemSymbolName: "minus.circle", accessibilityDescription: "Remove time")!,
-                                  target: self, action: #selector(echoDeskBedsideDeleteSchedule(_:)))
-            remove.tag = index; remove.isBordered = false
-            remove.contentTintColor = .systemRed
-            remove.isEnabled = echoDeskBedsideScheduleDrafts.count > 1
-            let row = NSStackView(views: [bedsideControlRow("From", time),
-                                          bedsideControlRow("Brightness %", brightness), remove])
-            row.orientation = .horizontal; row.alignment = .centerY; row.distribution = .fillEqually; row.spacing = 12
-            scheduleViews.append(row)
-        }
-        let addTime = NSButton(title: "Add time", target: self, action: #selector(echoDeskBedsideAddSchedule))
-        addTime.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
-        addTime.isEnabled = echoDeskBedsideScheduleDrafts.count < 8
-        scheduleViews.append(addTime)
-        let schedule = bedsideCard(bedsideStack(scheduleViews, spacing: 10))
+                                                    minValue: 1, maxValue: 100, target: self,
+                                                    action: #selector(echoDeskBedsideDisplayChanged))
+        echoDeskBedsideManualBrightness?.isContinuous = false
+        echoDeskBedsideEffectiveBrightness = bedsideMuted("")
 
-        echoDeskBedsideNightScheduleEnabled = NSButton(checkboxWithTitle: "Use Night Shift schedule", target: nil, action: nil)
+        let timeline = EchoDeskBrightnessTimelineView(frame: .zero)
+        timeline.segments = echoDeskBedsideScheduleDrafts
+        timeline.onSelectionChanged = { [weak self] index in
+            self?.refreshEchoDeskBedsideTimelineEditor(selection: index)
+        }
+        timeline.onSegmentsPreview = { [weak self] segments in
+            guard let self else { return }
+            self.echoDeskBedsideScheduleDrafts = segments
+            self.refreshEchoDeskBedsideTimelineEditor(selection: self.echoDeskBedsideBrightnessTimeline?.selectedIndex)
+            self.refreshEchoDeskBedsideEffectiveBrightness()
+        }
+        timeline.onSegmentsCommitted = { [weak self] segments in
+            guard let self else { return }
+            self.echoDeskBedsideScheduleDrafts = segments
+            self.queueEchoDeskBedsideAutoApply(self.bedsideConfigWithCurrentDisplay())
+        }
+        echoDeskBedsideBrightnessTimeline = timeline
+
+        echoDeskBedsideSchedulePointPopup = bedsidePopup([], selected: "",
+            action: #selector(echoDeskBedsideTimelinePointSelected(_:)))
+        echoDeskBedsideSchedulePointTime = bedsideTimePicker(echoDeskBedsideScheduleDrafts.first?.startMinute ?? 0)
+        echoDeskBedsideSchedulePointTime?.target = self
+        echoDeskBedsideSchedulePointTime?.action = #selector(echoDeskBedsideTimelineExactChanged)
+        let formatter = NumberFormatter()
+        formatter.minimum = NSNumber(value: 1); formatter.maximum = NSNumber(value: 100)
+        formatter.allowsFloats = false
+        echoDeskBedsideSchedulePointBrightness = EchoDeskCommitTextField(frame: .zero)
+        echoDeskBedsideSchedulePointBrightness?.stringValue = String(echoDeskBedsideScheduleDrafts.first?.brightness ?? 40)
+        echoDeskBedsideSchedulePointBrightness?.formatter = formatter
+        echoDeskBedsideSchedulePointBrightness?.alignment = .right
+        echoDeskBedsideSchedulePointBrightness?.target = self
+        echoDeskBedsideSchedulePointBrightness?.action = #selector(echoDeskBedsideTimelineExactChanged)
+        echoDeskBedsideSchedulePointStepper = NSStepper()
+        echoDeskBedsideSchedulePointStepper?.minValue = 1
+        echoDeskBedsideSchedulePointStepper?.maxValue = 100
+        echoDeskBedsideSchedulePointStepper?.increment = 1
+        echoDeskBedsideSchedulePointStepper?.target = self
+        echoDeskBedsideSchedulePointStepper?.action = #selector(echoDeskBedsideTimelineStepperChanged)
+        let brightnessExact = NSStackView(views: [echoDeskBedsideSchedulePointBrightness!,
+                                                   echoDeskBedsideSchedulePointStepper!])
+        brightnessExact.orientation = .horizontal; brightnessExact.alignment = .centerY; brightnessExact.spacing = 5
+        let deletePoint = NSButton(title: "Remove point", target: self,
+                                   action: #selector(echoDeskBedsideDeleteSelectedSchedule))
+        deletePoint.contentTintColor = .systemRed
+        echoDeskBedsideScheduleDeleteButton = deletePoint
+        let exactEditor = bedsideStack([
+            bedsideMuted("Selected point — use these controls for exact keyboard-accessible values."),
+            bedsideControlRow("Point", echoDeskBedsideSchedulePointPopup!),
+            bedsideControlRow("Starts at", echoDeskBedsideSchedulePointTime!),
+            bedsideControlRow("Brightness", brightnessExact), deletePoint,
+        ], spacing: 8)
+        let addTime = NSButton(title: "Add schedule point", target: self, action: #selector(echoDeskBedsideAddSchedule))
+        addTime.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+        addTime.isEnabled = bedsideStateReady && echoDeskBedsideScheduleDrafts.count < 8
+        echoDeskBedsideScheduleAddButton = addTime
+        echoDeskBedsideScheduleDetails = bedsideStack([timeline, exactEditor, addTime], spacing: 10)
+        echoDeskBedsideManualBrightnessDetails = bedsideControlRow("Manual brightness",
+                                                                    echoDeskBedsideManualBrightness!)
+        let schedule = bedsideCard(bedsideStack([
+            bedsideSectionTitle("Auto-brightness"),
+            bedsideMuted("EchoDesk applies discrete changes at each point; the schedule repeats every 24 hours."),
+            echoDeskBedsideScheduleEnabled!, echoDeskBedsideEffectiveBrightness!,
+            echoDeskBedsideScheduleDetails!, echoDeskBedsideManualBrightnessDetails!,
+        ], spacing: 10))
+
+        echoDeskBedsideNightScheduleEnabled = NSButton(checkboxWithTitle: "Use Night Shift schedule", target: self,
+                                                        action: #selector(echoDeskBedsideDisplayModeChanged))
         echoDeskBedsideNightScheduleEnabled?.state = echoDeskBedsideConfig.nightScheduleEnabled ? .on : .off
-        echoDeskBedsideNightManual = NSButton(checkboxWithTitle: "Night Shift on manually", target: nil, action: nil)
+        echoDeskBedsideNightManual = NSButton(checkboxWithTitle: "Night Shift on", target: self,
+                                               action: #selector(echoDeskBedsideDisplayChanged))
         echoDeskBedsideNightManual?.state = echoDeskBedsideConfig.nightManualEnabled ? .on : .off
         echoDeskBedsideNightStart = bedsideTimePicker(echoDeskBedsideConfig.nightStartMinute)
         echoDeskBedsideNightEnd = bedsideTimePicker(echoDeskBedsideConfig.nightEndMinute)
+        [echoDeskBedsideNightStart, echoDeskBedsideNightEnd].forEach {
+            $0?.target = self; $0?.action = #selector(echoDeskBedsideDisplayChanged)
+        }
         let nightTimes = NSStackView(views: [bedsideControlRow("From", echoDeskBedsideNightStart!),
                                              bedsideControlRow("Until", echoDeskBedsideNightEnd!)])
         nightTimes.orientation = .horizontal; nightTimes.distribution = .fillEqually; nightTimes.spacing = 12
+        echoDeskBedsideNightScheduleDetails = nightTimes
+        echoDeskBedsideNightManualDetails = echoDeskBedsideNightManual
+        let warmth = EchoDeskBedsideTemperatureStrip()
+        warmth.setAccessibilityHidden(true)
         let night = bedsideCard(bedsideStack([
             bedsideSectionTitle("Night Shift"), bedsideMuted("Warms the display for a calmer bedside appearance."),
-            echoDeskBedsideNightScheduleEnabled!, echoDeskBedsideNightManual!, nightTimes,
+            warmth, echoDeskBedsideNightScheduleEnabled!, echoDeskBedsideNightScheduleDetails!,
+            echoDeskBedsideNightManualDetails!,
         ], spacing: 10))
 
-        echoDeskBedsideThemeScheduleEnabled = NSButton(checkboxWithTitle: "Use appearance schedule", target: nil, action: nil)
+        echoDeskBedsideThemeScheduleEnabled = NSButton(checkboxWithTitle: "Use appearance schedule", target: self,
+                                                        action: #selector(echoDeskBedsideDisplayModeChanged))
         echoDeskBedsideThemeScheduleEnabled?.state = echoDeskBedsideConfig.themeScheduleEnabled ? .on : .off
-        echoDeskBedsideThemeManualDark = NSButton(checkboxWithTitle: "Dark appearance manually", target: nil, action: nil)
-        echoDeskBedsideThemeManualDark?.state = echoDeskBedsideConfig.themeManualDark ? .on : .off
+        echoDeskBedsideThemeManualDark = NSSegmentedControl(labels: ["Light", "Dark"], trackingMode: .selectOne,
+                                                            target: self, action: #selector(echoDeskBedsideDisplayChanged))
+        echoDeskBedsideThemeManualDark?.selectedSegment = echoDeskBedsideConfig.themeManualDark ? 1 : 0
         echoDeskBedsideThemeStart = bedsideTimePicker(echoDeskBedsideConfig.themeStartMinute)
         echoDeskBedsideThemeEnd = bedsideTimePicker(echoDeskBedsideConfig.themeEndMinute)
+        [echoDeskBedsideThemeStart, echoDeskBedsideThemeEnd].forEach {
+            $0?.target = self; $0?.action = #selector(echoDeskBedsideDisplayChanged)
+        }
         let themeTimes = NSStackView(views: [bedsideControlRow("Dark from", echoDeskBedsideThemeStart!),
                                              bedsideControlRow("Light from", echoDeskBedsideThemeEnd!)])
         themeTimes.orientation = .horizontal; themeTimes.distribution = .fillEqually; themeTimes.spacing = 12
+        echoDeskBedsideThemeScheduleDetails = themeTimes
+        echoDeskBedsideThemeManualDetails = bedsideControlRow("Appearance", echoDeskBedsideThemeManualDark!)
+        echoDeskBedsideThemeEffective = bedsideMuted("")
+        let appearancePreviews = NSStackView(views: [EchoDeskBedsideAppearancePreview(dark: false),
+                                                     EchoDeskBedsideAppearancePreview(dark: true)])
+        appearancePreviews.orientation = .horizontal; appearancePreviews.distribution = .fillEqually; appearancePreviews.spacing = 10
         let theme = bedsideCard(bedsideStack([
             bedsideSectionTitle("Dark and Light appearance"),
             bedsideMuted("Bedside appearance is separate from the rest of EchoDesk OS."),
-            echoDeskBedsideThemeScheduleEnabled!, echoDeskBedsideThemeManualDark!, themeTimes,
+            appearancePreviews, echoDeskBedsideThemeEffective!, echoDeskBedsideThemeScheduleEnabled!,
+            echoDeskBedsideThemeScheduleDetails!,
+            echoDeskBedsideThemeManualDetails!,
         ], spacing: 10))
-        let save = bedsidePrimaryButton("Save display settings", #selector(echoDeskBedsideSaveDisplay))
-        save.isEnabled = bedsideStateReady
-        let actions = NSStackView(views: [NSView(), save]); actions.orientation = .horizontal
+        let interactiveControls: [NSControl?] = [
+            echoDeskBedsideScheduleEnabled, echoDeskBedsideManualBrightness,
+            echoDeskBedsideSchedulePointPopup, echoDeskBedsideSchedulePointTime,
+            echoDeskBedsideSchedulePointBrightness, echoDeskBedsideSchedulePointStepper,
+            echoDeskBedsideNightScheduleEnabled, echoDeskBedsideNightManual,
+            echoDeskBedsideNightStart, echoDeskBedsideNightEnd,
+            echoDeskBedsideThemeScheduleEnabled, echoDeskBedsideThemeManualDark,
+            echoDeskBedsideThemeStart, echoDeskBedsideThemeEnd,
+        ]
+        interactiveControls.forEach { $0?.isEnabled = bedsideStateReady }
+        timeline.isEnabled = bedsideStateReady
+        refreshEchoDeskBedsideTimelineEditor(selection: echoDeskBedsideScheduleDrafts.isEmpty ? nil : 0)
+        refreshEchoDeskBedsideEffectiveBrightness()
+        updateEchoDeskBedsideDisplayDisclosure()
         return [bedsideHeader("Auto-brightness and display", "Schedules repeat locally without EchoDesk Desktop."),
-                schedule, night, theme, echoDeskBedsideStatus!, actions]
+                schedule, night, theme, bedsideStatusRow()]
     }
 
     @objc private func echoDeskBedsideAddSchedule() {
-        captureEchoDeskBedsideScheduleDrafts()
         guard echoDeskBedsideScheduleDrafts.count < 8 else { return }
         let used = Set(echoDeskBedsideScheduleDrafts.map(\.startMinute))
         let minute = stride(from: 0, through: 1380, by: 60).first(where: { !used.contains($0) }) ?? 0
         echoDeskBedsideScheduleDrafts.append(.init(startMinute: minute, brightness: 40))
         echoDeskBedsideScheduleDrafts.sort { $0.startMinute < $1.startMinute }
-        renderEchoDeskBedsideSection("display")
+        echoDeskBedsideBrightnessTimeline?.segments = echoDeskBedsideScheduleDrafts
+        let index = echoDeskBedsideScheduleDrafts.firstIndex { $0.startMinute == minute }
+        echoDeskBedsideBrightnessTimeline?.select(index: index)
+        refreshEchoDeskBedsideTimelineEditor(selection: index)
+        refreshEchoDeskBedsideEffectiveBrightness()
+        queueEchoDeskBedsideAutoApply(bedsideConfigWithCurrentDisplay())
     }
 
     @objc private func echoDeskBedsideDeleteSchedule(_ sender: NSButton) {
-        captureEchoDeskBedsideScheduleDrafts()
         guard echoDeskBedsideScheduleDrafts.count > 1,
               echoDeskBedsideScheduleDrafts.indices.contains(sender.tag) else { return }
         echoDeskBedsideScheduleDrafts.remove(at: sender.tag)
-        renderEchoDeskBedsideSection("display")
+        echoDeskBedsideBrightnessTimeline?.segments = echoDeskBedsideScheduleDrafts
+        echoDeskBedsideBrightnessTimeline?.select(index: min(sender.tag, echoDeskBedsideScheduleDrafts.count - 1))
+        refreshEchoDeskBedsideEffectiveBrightness()
+        queueEchoDeskBedsideAutoApply(bedsideConfigWithCurrentDisplay())
+    }
+
+    @objc private func echoDeskBedsideDeleteSelectedSchedule() {
+        guard let index = echoDeskBedsideBrightnessTimeline?.selectedIndex else { return }
+        let button = NSButton(); button.tag = index
+        echoDeskBedsideDeleteSchedule(button)
+    }
+
+    @objc private func echoDeskBedsideTimelinePointSelected(_ sender: NSPopUpButton) {
+        let index = sender.selectedItem?.representedObject as? Int
+        echoDeskBedsideBrightnessTimeline?.select(index: index)
+    }
+
+    @objc private func echoDeskBedsideTimelineExactChanged() {
+        guard let timeline = echoDeskBedsideBrightnessTimeline else { return }
+        let minute = bedsideMinute(echoDeskBedsideSchedulePointTime?.dateValue ?? Date())
+        let brightness = min(100, max(1, echoDeskBedsideSchedulePointBrightness?.integerValue ?? 40))
+        timeline.updateSelected(minute: minute, brightness: brightness, commit: true)
+        refreshEchoDeskBedsideTimelineEditor(selection: timeline.selectedIndex)
+    }
+
+    @objc private func echoDeskBedsideTimelineStepperChanged() {
+        let brightness = min(100, max(1, Int(echoDeskBedsideSchedulePointStepper?.doubleValue ?? 40)))
+        echoDeskBedsideSchedulePointBrightness?.integerValue = brightness
+        echoDeskBedsideTimelineExactChanged()
+    }
+
+    private func refreshEchoDeskBedsideTimelineEditor(selection: Int?) {
+        guard let timeline = echoDeskBedsideBrightnessTimeline else { return }
+        if timeline.selectedIndex != selection {
+            timeline.select(index: selection)
+            return
+        }
+        let popup = echoDeskBedsideSchedulePointPopup
+        popup?.removeAllItems()
+        for (index, segment) in timeline.segments.enumerated() {
+            let title = "\(bedsideClockText(segment.startMinute))  ·  \(segment.brightness)%"
+            popup?.addItem(withTitle: title)
+            popup?.lastItem?.representedObject = index
+        }
+        guard let selection, timeline.segments.indices.contains(selection) else {
+            [echoDeskBedsideSchedulePointPopup, echoDeskBedsideSchedulePointTime,
+             echoDeskBedsideSchedulePointBrightness, echoDeskBedsideSchedulePointStepper,
+             echoDeskBedsideScheduleDeleteButton].forEach { $0?.isEnabled = false }
+            return
+        }
+        popup?.selectItem(at: selection)
+        let segment = timeline.segments[selection]
+        echoDeskBedsideSchedulePointTime?.dateValue = bedsideDate(segment.startMinute)
+        echoDeskBedsideSchedulePointBrightness?.integerValue = segment.brightness
+        echoDeskBedsideSchedulePointStepper?.integerValue = segment.brightness
+        let enabled = bedsideStateReady
+        [echoDeskBedsideSchedulePointPopup, echoDeskBedsideSchedulePointTime,
+         echoDeskBedsideSchedulePointBrightness, echoDeskBedsideSchedulePointStepper].forEach {
+            $0?.isEnabled = enabled
+        }
+        echoDeskBedsideScheduleDeleteButton?.isEnabled = enabled && timeline.segments.count > 1
+        echoDeskBedsideScheduleAddButton?.isEnabled = enabled && timeline.segments.count < 8
+    }
+
+    private func refreshEchoDeskBedsideEffectiveBrightness() {
+        guard let label = echoDeskBedsideEffectiveBrightness else { return }
+        if echoDeskBedsideScheduleEnabled?.state != .on {
+            label.stringValue = "Manual brightness: \(Int(echoDeskBedsideManualBrightness?.doubleValue ?? 40))%"
+            return
+        }
+        if echoDeskBedsideRuntime["timeValid"] as? Bool != true {
+            label.stringValue = "Waiting for a valid clock; manual fallback is \(Int(echoDeskBedsideManualBrightness?.doubleValue ?? 40))%."
+            return
+        }
+        let now = Date()
+        let minute = Calendar.current.component(.hour, from: now) * 60
+            + Calendar.current.component(.minute, from: now)
+        let ordered = echoDeskBedsideScheduleDrafts.sorted { $0.startMinute < $1.startMinute }
+        let effective = ordered.last(where: { $0.startMinute <= minute }) ?? ordered.last
+        if let effective {
+            label.stringValue = "Currently effective: \(effective.brightness)% since \(bedsideClockText(effective.startMinute))"
+        } else {
+            label.stringValue = "No brightness point is available."
+        }
+    }
+
+    private func bedsideClockText(_ minute: Int) -> String {
+        let hour = minute / 60, value = minute % 60
+        if echoDeskBedsideConfig.clockFormat == "24h" { return String(format: "%02d:%02d", hour, value) }
+        let suffix = hour >= 12 ? "PM" : "AM"
+        let displayHour = hour % 12 == 0 ? 12 : hour % 12
+        return String(format: "%d:%02d %@", displayHour, value, suffix)
+    }
+
+    @objc private func echoDeskBedsideDisplayModeChanged() {
+        updateEchoDeskBedsideDisplayDisclosure()
+        echoDeskBedsideDisplayChanged()
+    }
+
+    private func updateEchoDeskBedsideDisplayDisclosure() {
+        let brightnessScheduled = echoDeskBedsideScheduleEnabled?.state == .on
+        echoDeskBedsideScheduleDetails?.isHidden = !brightnessScheduled
+        echoDeskBedsideManualBrightnessDetails?.isHidden = brightnessScheduled
+        let nightScheduled = echoDeskBedsideNightScheduleEnabled?.state == .on
+        echoDeskBedsideNightScheduleDetails?.isHidden = !nightScheduled
+        echoDeskBedsideNightManualDetails?.isHidden = nightScheduled
+        let themeScheduled = echoDeskBedsideThemeScheduleEnabled?.state == .on
+        echoDeskBedsideThemeScheduleDetails?.isHidden = !themeScheduled
+        echoDeskBedsideThemeManualDetails?.isHidden = themeScheduled
+        refreshEchoDeskBedsideEffectiveBrightness()
+        refreshEchoDeskBedsideEffectiveAppearance()
+    }
+
+    @objc private func echoDeskBedsideDisplayChanged() {
+        refreshEchoDeskBedsideEffectiveBrightness()
+        refreshEchoDeskBedsideEffectiveAppearance()
+        queueEchoDeskBedsideAutoApply(bedsideConfigWithCurrentDisplay())
+    }
+
+    private func refreshEchoDeskBedsideEffectiveAppearance() {
+        guard let label = echoDeskBedsideThemeEffective else { return }
+        guard echoDeskBedsideThemeScheduleEnabled?.state == .on else {
+            label.stringValue = echoDeskBedsideThemeManualDark?.selectedSegment == 1
+                ? "Currently: Dark" : "Currently: Light"
+            return
+        }
+        guard echoDeskBedsideRuntime["timeValid"] as? Bool == true else {
+            label.stringValue = "Waiting for a valid clock before applying the appearance schedule."
+            return
+        }
+        let now = Date()
+        let minute = Calendar.current.component(.hour, from: now) * 60
+            + Calendar.current.component(.minute, from: now)
+        let start = bedsideMinute(echoDeskBedsideThemeStart?.dateValue ?? now)
+        let end = bedsideMinute(echoDeskBedsideThemeEnd?.dateValue ?? now)
+        label.stringValue = isMinute(minute, inside: start, and: end)
+            ? "Currently: Dark" : "Currently: Light"
+    }
+
+    private func bedsideConfigWithCurrentDisplay() -> EchoDeskBedsideConfig {
+        var next = bedsideEditingBaseConfig
+        next.scheduleEnabled = echoDeskBedsideScheduleEnabled?.state == .on
+        next.manualBrightness = min(100, max(1, Int(echoDeskBedsideManualBrightness?.doubleValue ?? 40)))
+        next.segments = echoDeskBedsideScheduleDrafts.sorted { $0.startMinute < $1.startMinute }
+        next.nightScheduleEnabled = echoDeskBedsideNightScheduleEnabled?.state == .on
+        next.nightManualEnabled = echoDeskBedsideNightManual?.state == .on
+        next.nightStartMinute = bedsideMinute(echoDeskBedsideNightStart?.dateValue ?? Date())
+        next.nightEndMinute = bedsideMinute(echoDeskBedsideNightEnd?.dateValue ?? Date())
+        next.themeScheduleEnabled = echoDeskBedsideThemeScheduleEnabled?.state == .on
+        next.themeManualDark = echoDeskBedsideThemeManualDark?.selectedSegment == 1
+        next.themeStartMinute = bedsideMinute(echoDeskBedsideThemeStart?.dateValue ?? Date())
+        next.themeEndMinute = bedsideMinute(echoDeskBedsideThemeEnd?.dateValue ?? Date())
+        return next
     }
 
     // MARK: - Bedside state and actions
@@ -593,9 +1063,41 @@ extension SettingsWindowController {
         return "Connect an EchoDesk with Bedside Mode support to customise it."
     }
 
+    func refreshEchoDeskBedsideAvailability() {
+        let enabled = bedsideStateReady
+        let controls: [NSControl?] = [
+            echoDeskBedsideClockFormat, echoDeskBedsideClockStyle, echoDeskBedsideShowSeconds,
+            echoDeskBedsideNextAlarmWidget, echoDeskBedsideScheduleEnabled,
+            echoDeskBedsideManualBrightness, echoDeskBedsideSchedulePointPopup,
+            echoDeskBedsideSchedulePointTime, echoDeskBedsideSchedulePointBrightness,
+            echoDeskBedsideSchedulePointStepper, echoDeskBedsideScheduleAddButton,
+            echoDeskBedsideScheduleDeleteButton, echoDeskBedsideNightScheduleEnabled,
+            echoDeskBedsideNightManual, echoDeskBedsideNightStart, echoDeskBedsideNightEnd,
+            echoDeskBedsideThemeScheduleEnabled, echoDeskBedsideThemeManualDark,
+            echoDeskBedsideThemeStart, echoDeskBedsideThemeEnd,
+        ]
+        controls.forEach { $0?.isEnabled = enabled }
+        echoDeskBedsideBrightnessTimeline?.isEnabled = enabled
+        for row in echoDeskBedsideAlarmRows {
+            let rowControls: [NSControl] = [row.enabled, row.time, row.days, row.label, row.remove]
+            rowControls.forEach { $0.isEnabled = enabled }
+        }
+        if !enabled {
+            echoDeskBedsideStatus?.stringValue = bedsideCapabilityAvailable
+                ? "Loading the latest Bedside settings from EchoDesk…"
+                : "EchoDesk is disconnected. Unsaved changes are kept here until you reconnect and retry."
+            echoDeskBedsideRetryButton?.isHidden = echoDeskBedsidePendingConfig == nil
+        }
+    }
+
     func requestEchoDeskBedsideState() {
         guard !echoDeskBedsideStateRequestInFlight else { return }
-        guard bedsideCapabilityAvailable, let monitor else {
+        guard let monitor, monitor.serialPort.state == .connected else {
+            echoDeskBedsideStatus?.stringValue = "EchoDesk is disconnected. Unsaved changes are kept here until you reconnect and retry."
+            echoDeskBedsideRetryButton?.isHidden = echoDeskBedsidePendingConfig == nil
+            return
+        }
+        guard (monitor.serialPort.deviceEchoDeskBedsideProtocol ?? 0) >= 1 else {
             echoDeskBedsideStatus?.stringValue = "Update EchoDesk OS to a version with Bedside Mode support."
             return
         }
@@ -621,19 +1123,25 @@ extension SettingsWindowController {
             self.echoDeskBedsideStatePort = requestedPort
             self.echoDeskBedsideConfig = config
             self.echoDeskBedsideRuntime = json["runtime"] as? [String: Any] ?? [:]
-            if self.echoDeskBedsideSection == "alarms" { self.echoDeskBedsideAlarmDrafts = config.alarms }
-            if self.echoDeskBedsideSection == "display" { self.echoDeskBedsideScheduleDrafts = config.segments }
-            self.renderEchoDeskBedsideSection(self.echoDeskBedsideSection)
+            if self.echoDeskBedsidePendingConfig == nil {
+                if self.echoDeskBedsideSection == "alarms" { self.echoDeskBedsideAlarmDrafts = config.alarms }
+                if self.echoDeskBedsideSection == "display" { self.echoDeskBedsideScheduleDrafts = config.segments }
+                self.renderEchoDeskBedsideSection(self.echoDeskBedsideSection)
+            } else if self.echoDeskBedsideRetryAfterRefresh {
+                self.echoDeskBedsideRetryAfterRefresh = false
+                self.flushEchoDeskBedsideAutoApply()
+            } else {
+                self.echoDeskBedsideStatus?.stringValue = "The last change is still pending. Select Retry to save it."
+                self.echoDeskBedsideRetryButton?.isHidden = false
+            }
         }
     }
 
     private func sendEchoDeskBedsideConfig(_ config: EchoDeskBedsideConfig) {
-        guard !echoDeskBedsideSaveInFlight, bedsideStateReady, let monitor else {
-            echoDeskBedsideStatus?.stringValue = "Wait for EchoDesk to finish loading before saving."
-            return
-        }
+        guard !echoDeskBedsideSaveInFlight, bedsideStateReady, let monitor else { return }
         echoDeskBedsideSaveInFlight = true
-        echoDeskBedsideStatus?.stringValue = "Saving to EchoDesk…"
+        echoDeskBedsideInFlightConfig = config
+        echoDeskBedsideStatus?.stringValue = "Applying changes to EchoDesk…"
         let request = bedsideNextRequest()
         monitor.serialPort.performJSONCommand([
             "cmd": "echodesk_bedside_set_config", "version": 1, "requestId": request,
@@ -644,16 +1152,79 @@ extension SettingsWindowController {
             let ok = json?["type"] as? String == "echodesk_ack"
                 && (json?["requestId"] as? NSNumber)?.uint32Value == request
                 && json?["command"] as? String == "echodesk_bedside_set_config"
-            guard ok else {
-                self.echoDeskBedsideStatus?.stringValue = "EchoDesk did not confirm the change. Nothing was saved."
+            guard ok, let revision = (json?["revision"] as? NSNumber)?.intValue, revision >= 0 else {
+                let failedConfig = self.echoDeskBedsideInFlightConfig ?? config
+                self.echoDeskBedsideInFlightConfig = nil
+                // A newer draft can be queued while this request is in flight.
+                // Keep that latest user intent instead of replacing it with the
+                // older failed payload.
+                if self.echoDeskBedsidePendingConfig == nil {
+                    self.echoDeskBedsidePendingConfig = failedConfig
+                }
+                let errorCode = json?["code"] as? String ?? json?["error"] as? String ?? ""
+                let stale = errorCode == "stale_revision"
+                if stale && !self.echoDeskBedsideDidRetryStaleRevision {
+                    self.echoDeskBedsideDidRetryStaleRevision = true
+                    self.echoDeskBedsideRetryAfterRefresh = true
+                    self.echoDeskBedsideStatus?.stringValue = "EchoDesk settings changed elsewhere. Refreshing and retrying once…"
+                } else {
+                    self.echoDeskBedsideRetryAfterRefresh = false
+                    self.echoDeskBedsideStatus?.stringValue = "The change was not saved. Check the connection, then select Retry."
+                    self.echoDeskBedsideRetryButton?.isHidden = false
+                }
                 self.echoDeskBedsideStatePort = nil
                 self.requestEchoDeskBedsideState()
                 return
             }
-            self.echoDeskBedsideStatus?.stringValue = "Saved on EchoDesk. It can now run from power alone."
-            self.echoDeskBedsideStatePort = nil
-            self.requestEchoDeskBedsideState()
+            self.echoDeskBedsideRevision = revision
+            self.echoDeskBedsideConfig = config
+            self.echoDeskBedsideInFlightConfig = nil
+            self.echoDeskBedsideDidRetryStaleRevision = false
+            self.echoDeskBedsideRetryButton?.isHidden = true
+            self.echoDeskBedsideStatus?.stringValue = "Saved on EchoDesk. Changes apply automatically."
+            if self.echoDeskBedsidePendingConfig != nil {
+                self.flushEchoDeskBedsideAutoApply()
+            } else {
+                self.echoDeskBedsideStatePort = nil
+                self.requestEchoDeskBedsideState()
+            }
         }
+    }
+
+    private var bedsideEditingBaseConfig: EchoDeskBedsideConfig {
+        echoDeskBedsidePendingConfig ?? echoDeskBedsideInFlightConfig ?? echoDeskBedsideConfig
+    }
+
+    private func queueEchoDeskBedsideAutoApply(_ config: EchoDeskBedsideConfig) {
+        guard bedsideStateReady else {
+            echoDeskBedsideStatus?.stringValue = "Connect EchoDesk and wait for its settings before making changes."
+            NSSound.beep()
+            return
+        }
+        guard (1...8).contains(config.segments.count),
+              Set(config.segments.map(\.startMinute)).count == config.segments.count else {
+            echoDeskBedsideStatus?.stringValue = "Brightness schedule points must use unique times."
+            NSSound.beep()
+            return
+        }
+        echoDeskBedsidePendingConfig = config
+        echoDeskBedsideDidRetryStaleRevision = false
+        echoDeskBedsideRetryButton?.isHidden = true
+        echoDeskBedsideStatus?.stringValue = "Changes pending…"
+        echoDeskBedsideAutoApplyWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.flushEchoDeskBedsideAutoApply() }
+        echoDeskBedsideAutoApplyWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    private func flushEchoDeskBedsideAutoApply() {
+        guard !echoDeskBedsideSaveInFlight,
+              let pending = echoDeskBedsidePendingConfig,
+              bedsideStateReady else { return }
+        echoDeskBedsideAutoApplyWorkItem?.cancel()
+        echoDeskBedsideAutoApplyWorkItem = nil
+        echoDeskBedsidePendingConfig = nil
+        sendEchoDeskBedsideConfig(pending)
     }
 
     @objc private func echoDeskBedsideOpenOnDevice() {
@@ -669,57 +1240,20 @@ extension SettingsWindowController {
     }
 
     @objc private func echoDeskBedsidePreviewChanged() {
-        var preview = echoDeskBedsideConfig
-        if let value = echoDeskBedsideClockFormat?.selectedItem?.representedObject as? String { preview.clockFormat = value }
-        if let value = echoDeskBedsideClockStyle?.selectedItem?.representedObject as? String { preview.clockStyle = value }
-        preview.clockShowSeconds = echoDeskBedsideShowSeconds?.state == .on
-        preview.nextAlarmWidget = echoDeskBedsideNextAlarmWidget?.state == .on
-        echoDeskBedsidePreview?.config = preview
-    }
-
-    @objc private func echoDeskBedsideSaveClock() {
-        var next = echoDeskBedsideConfig
+        var next = bedsideEditingBaseConfig
         next.clockFormat = echoDeskBedsideClockFormat?.selectedItem?.representedObject as? String ?? next.clockFormat
         next.clockStyle = echoDeskBedsideClockStyle?.selectedItem?.representedObject as? String ?? next.clockStyle
         next.clockShowSeconds = echoDeskBedsideShowSeconds?.state == .on
-        sendEchoDeskBedsideConfig(next)
-    }
-
-    @objc private func echoDeskBedsideSaveWidgets() {
-        var next = echoDeskBedsideConfig
         next.nextAlarmWidget = echoDeskBedsideNextAlarmWidget?.state == .on
-        // Weather remains device-schema-ready but cannot be enabled before its data source ships.
         next.weatherWidget = false
-        sendEchoDeskBedsideConfig(next)
+        echoDeskBedsidePreview?.config = next
+        queueEchoDeskBedsideAutoApply(next)
     }
 
-    @objc private func echoDeskBedsideSaveAlarms() {
-        var next = echoDeskBedsideConfig
-        captureEchoDeskBedsideAlarmDrafts()
+    private func bedsideConfigWithCurrentAlarms() -> EchoDeskBedsideConfig {
+        var next = bedsideEditingBaseConfig
         next.alarms = echoDeskBedsideAlarmDrafts.sorted { $0.id < $1.id }
-        sendEchoDeskBedsideConfig(next)
-    }
-
-    @objc private func echoDeskBedsideSaveDisplay() {
-        var next = echoDeskBedsideConfig
-        next.scheduleEnabled = echoDeskBedsideScheduleEnabled?.state == .on
-        next.manualBrightness = min(100, max(1, Int(echoDeskBedsideManualBrightness?.doubleValue ?? 40)))
-        captureEchoDeskBedsideScheduleDrafts()
-        next.segments = echoDeskBedsideScheduleDrafts.sorted { $0.startMinute < $1.startMinute }
-        // The device rejects duplicate start times; explain instead of silently overwriting.
-        guard Set(next.segments.map(\.startMinute)).count == next.segments.count else {
-            echoDeskFooterStatus?.stringValue = "Brightness schedule times must be unique."
-            NSSound.beep(); return
-        }
-        next.nightScheduleEnabled = echoDeskBedsideNightScheduleEnabled?.state == .on
-        next.nightManualEnabled = echoDeskBedsideNightManual?.state == .on
-        next.nightStartMinute = bedsideMinute(echoDeskBedsideNightStart?.dateValue ?? Date())
-        next.nightEndMinute = bedsideMinute(echoDeskBedsideNightEnd?.dateValue ?? Date())
-        next.themeScheduleEnabled = echoDeskBedsideThemeScheduleEnabled?.state == .on
-        next.themeManualDark = echoDeskBedsideThemeManualDark?.state == .on
-        next.themeStartMinute = bedsideMinute(echoDeskBedsideThemeStart?.dateValue ?? Date())
-        next.themeEndMinute = bedsideMinute(echoDeskBedsideThemeEnd?.dateValue ?? Date())
-        sendEchoDeskBedsideConfig(next)
+        return next
     }
 
     private func captureEchoDeskBedsideAlarmDrafts() {
@@ -750,11 +1284,33 @@ extension SettingsWindowController {
 
     // MARK: - Bedside native controls
 
+    private func bedsideStatusRow() -> NSView {
+        let retry = NSButton(title: "Retry", target: self, action: #selector(echoDeskBedsideRetryPendingChange))
+        retry.bezelStyle = .rounded
+        retry.isHidden = echoDeskBedsidePendingConfig == nil
+        echoDeskBedsideRetryButton = retry
+        let row = NSStackView(views: [echoDeskBedsideStatus!, NSView(), retry])
+        row.orientation = .horizontal; row.alignment = .centerY; row.spacing = 10
+        return row
+    }
+
+    @objc private func echoDeskBedsideRetryPendingChange() {
+        guard echoDeskBedsidePendingConfig != nil else { return }
+        echoDeskBedsideRetryButton?.isHidden = true
+        if bedsideStateReady {
+            flushEchoDeskBedsideAutoApply()
+        } else {
+            echoDeskBedsideRetryAfterRefresh = true
+            echoDeskBedsideStatus?.stringValue = "Reconnecting to EchoDesk…"
+            requestEchoDeskBedsideState()
+        }
+    }
+
     private func bedsideStack(_ views: [NSView], spacing: CGFloat = 14) -> NSStackView {
         let stack = NSStackView(views: views)
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = spacing
         for view in views {
-            if view is NSTextField || view is NSStackView {
+            if view is NSTextField || view is NSStackView || view is EchoDeskBrightnessTimelineView {
                 view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             }
         }

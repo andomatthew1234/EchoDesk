@@ -67,6 +67,28 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string selectedFirmwareHardwareModel = BrokerProtocol.EchoDeskMiniHardwareModel;
     private bool firmwareBoardConfirmed;
     private CancellationTokenSource? brightnessDebounce;
+    private CancellationTokenSource? settingsAutoApplyDebounce;
+    private CancellationTokenSource? pcDashboardAutoApplyDebounce;
+    private CancellationTokenSource? bedsideAutoApplyDebounce;
+    private readonly HashSet<string> pendingAdvancedSettings = new(StringComparer.Ordinal);
+    private readonly LatestSnapshotWriteQueue<SettingsPatch> settingsWriteQueue;
+    private long settingsEditGeneration;
+    private bool settingsLocalDirty;
+    private readonly LatestSnapshotWriteQueue<string[]> pcDashboardWriteQueue;
+    private long pcDashboardEditGeneration;
+    private bool pcDashboardLocalDirty;
+    private readonly LatestSnapshotWriteQueue<BedsideConfig> bedsideWriteQueue;
+    private readonly ContinuousEditCommitGate bedsideContinuousEditGate = new();
+    private long bedsideEditGeneration;
+    private bool bedsideLocalDirty;
+    private BedsideConfig? failedBedsideConfig;
+    private long failedBedsideGeneration;
+    private string customisationApplyStatus = "Changes are applied automatically.";
+    private bool customisationApplyPending;
+    private bool customisationApplyFailed;
+    private string bedsideApplyStatus = "Bedside settings are in sync.";
+    private bool bedsideApplyPending;
+    private bool bedsideApplyFailed;
     private CancellationTokenSource? guidedDiscovery;
     private bool guidedSetupFinalizing;
     private string? guidedSetupError;
@@ -85,12 +107,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         guidedSetup = new GuidedSetupFlow();
         preferences = preferencesService.Load();
         firstRun = new FirstRunFlow(preferences.FirstRunCompleted);
+        settingsWriteQueue = new LatestSnapshotWriteQueue<SettingsPatch>(WriteAdvancedSettingsSnapshotAsync);
+        pcDashboardWriteQueue = new LatestSnapshotWriteQueue<string[]>(WritePcDashboardSnapshotAsync);
+        bedsideWriteQueue = new LatestSnapshotWriteQueue<BedsideConfig>(WriteBedsideSnapshotAsync);
         BedsideAlarms = [];
         BedsideBrightnessSegments =
         [
-            new("00:00", 1), new("05:00", 40), new("07:00", 70), new("08:00", 100),
+            new("05:00", 40), new("07:00", 70), new("08:00", 100),
             new("18:00", 60), new("19:00", 40), new("20:30", 30), new("21:30", 1),
         ];
+        foreach (var segment in BedsideBrightnessSegments) segment.PropertyChanged += BedsideBrightnessChanged;
         selectedPage = preferences.FirstRunCompleted ? "Overview" : "First run";
         broker.StateChanged += OnStateChanged;
         NavigateCommand = new RelayCommand(page => SelectedPage = page as string ?? "Overview");
@@ -106,6 +132,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         OpenBedsideModeCommand = new AsyncRelayCommand(_ => OpenBedsideModeAsync(), _ => IsConnected);
         SelectBedsideSectionCommand = new RelayCommand(section => BedsideSection = section as string ?? "Clock");
         SaveBedsideModeCommand = new AsyncRelayCommand(_ => SaveBedsideModeAsync(), _ => BedsideAvailable);
+        RetryBedsideApplyCommand = new RelayCommand(_ => RetryBedsideApply(), _ => failedBedsideConfig is not null && BedsideAvailable);
         AddBedsideAlarmCommand = new RelayCommand(_ => AddBedsideAlarm(), _ => BedsideAlarms.Count < 8);
         RemoveBedsideAlarmCommand = new RelayCommand(RemoveBedsideAlarm);
         AddBedsideBrightnessSegmentCommand = new RelayCommand(_ => AddBedsideBrightnessSegment(), _ => BedsideBrightnessSegments.Count < 8);
@@ -246,6 +273,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public AsyncRelayCommand OpenBedsideModeCommand { get; }
     public RelayCommand SelectBedsideSectionCommand { get; }
     public AsyncRelayCommand SaveBedsideModeCommand { get; }
+    public RelayCommand RetryBedsideApplyCommand { get; }
     public RelayCommand AddBedsideAlarmCommand { get; }
     public RelayCommand RemoveBedsideAlarmCommand { get; }
     public RelayCommand AddBedsideBrightnessSegmentCommand { get; }
@@ -350,6 +378,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public string ActiveApp => AppTiles.FirstOrDefault(item => item.Id == Device?.ActiveApp)?.Label ?? Device?.ActiveApp ?? "Not reported";
     public string Appearance => Device?.Theme ?? Device?.Settings.Theme ?? "Not reported";
     public string Feedback { get => feedback; private set => Set(ref feedback, value); }
+    public string CustomisationApplyStatus { get => customisationApplyStatus; private set => Set(ref customisationApplyStatus, value); }
+    public bool CustomisationApplyPending { get => customisationApplyPending; private set => Set(ref customisationApplyPending, value); }
+    public bool CustomisationApplyFailed { get => customisationApplyFailed; private set => Set(ref customisationApplyFailed, value); }
+    public string BedsideApplyStatus { get => bedsideApplyStatus; private set => Set(ref bedsideApplyStatus, value); }
+    public bool BedsideApplyPending { get => bedsideApplyPending; private set => Set(ref bedsideApplyPending, value); }
+    public bool BedsideApplyFailed { get => bedsideApplyFailed; private set => Set(ref bedsideApplyFailed, value); }
     public bool SupportsSettings => Device?.Capabilities.ControlProtocol == 1;
     public bool SupportsDefaultApp => SupportsDeviceSetting("defaultApp");
     public bool SupportsClockFormat => SupportsDeviceSetting("clockFormat");
@@ -724,7 +758,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         get => nowPlayingLayout;
         set
         {
-            if (Set(ref nowPlayingLayout, value) && !applyingState) SetNowPlayingCommand.Execute(null);
+            if (Set(ref nowPlayingLayout, value) && !applyingState) QueueAdvancedSetting("nowPlaying");
         }
     }
 
@@ -733,51 +767,51 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         get => nowPlayingBackground;
         set
         {
-            if (Set(ref nowPlayingBackground, value) && !applyingState) SetNowPlayingCommand.Execute(null);
+            if (Set(ref nowPlayingBackground, value) && !applyingState) QueueAdvancedSetting("nowPlaying");
         }
     }
 
     public string DefaultApp
     {
         get => defaultApp;
-        set { if (Set(ref defaultApp, value) && !applyingState) SetAdvancedSettingCommand.Execute("defaultApp"); }
+        set { if (Set(ref defaultApp, value) && !applyingState) QueueAdvancedSetting("defaultApp"); }
     }
 
     public string ClockFormat
     {
         get => clockFormat;
-        set { if (Set(ref clockFormat, value) && !applyingState) SetAdvancedSettingCommand.Execute("clockFormat"); }
+        set { if (Set(ref clockFormat, value) && !applyingState) QueueAdvancedSetting("clockFormat"); }
     }
 
     public string Timezone
     {
         get => timezone;
-        set { if (Set(ref timezone, value) && !applyingState) SetAdvancedSettingCommand.Execute("timezone"); }
+        set { if (Set(ref timezone, value) && !applyingState) QueueAdvancedSetting("timezone"); }
     }
 
     public string CodexPercentageMode
     {
         get => codexPercentageMode;
-        set { if (Set(ref codexPercentageMode, value) && !applyingState) SetAdvancedSettingCommand.Execute("codexPercentageMode"); }
+        set { if (Set(ref codexPercentageMode, value) && !applyingState) QueueAdvancedSetting("codexPercentageMode"); }
     }
 
     public string CodexPreferredDisplay
     {
         get => codexPreferredDisplay;
-        set { if (Set(ref codexPreferredDisplay, value) && !applyingState) SetAdvancedSettingCommand.Execute("codexPreferredDisplay"); }
+        set { if (Set(ref codexPreferredDisplay, value) && !applyingState) QueueAdvancedSetting("codexPreferredDisplay"); }
     }
 
     public string PerformanceDefaultView
     {
         get => performanceDefaultView;
-        set { if (Set(ref performanceDefaultView, value) && !applyingState) SetAdvancedSettingCommand.Execute("performanceDefaultView"); }
+        set { if (Set(ref performanceDefaultView, value) && !applyingState) QueueAdvancedSetting("performanceDefaultView"); }
     }
 
     public bool PcDashboardAvailable => IsConnected && state.PcDashboard.Available && state.PcDashboard.Protocol == 1;
-    public string PcDashboardMetric1 { get => pcDashboardMetric1; set => Set(ref pcDashboardMetric1, value); }
-    public string PcDashboardMetric2 { get => pcDashboardMetric2; set => Set(ref pcDashboardMetric2, value); }
-    public string PcDashboardMetric3 { get => pcDashboardMetric3; set => Set(ref pcDashboardMetric3, value); }
-    public string PcDashboardMetric4 { get => pcDashboardMetric4; set => Set(ref pcDashboardMetric4, value); }
+    public string PcDashboardMetric1 { get => pcDashboardMetric1; set { if (Set(ref pcDashboardMetric1, value) && !applyingState) SchedulePcDashboardAutoApply(); } }
+    public string PcDashboardMetric2 { get => pcDashboardMetric2; set { if (Set(ref pcDashboardMetric2, value) && !applyingState) SchedulePcDashboardAutoApply(); } }
+    public string PcDashboardMetric3 { get => pcDashboardMetric3; set { if (Set(ref pcDashboardMetric3, value) && !applyingState) SchedulePcDashboardAutoApply(); } }
+    public string PcDashboardMetric4 { get => pcDashboardMetric4; set { if (Set(ref pcDashboardMetric4, value) && !applyingState) SchedulePcDashboardAutoApply(); } }
 
     public bool BedsideAvailable => IsConnected && state.Bedside.Available && state.Bedside.Protocol == 1;
     public string BedsideSection
@@ -797,30 +831,30 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public string BedsideClockFormat
     {
         get => bedsideClockFormat;
-        set { if (Set(ref bedsideClockFormat, value)) { Raise(nameof(BedsidePreviewTime)); Raise(nameof(BedsidePreviewPeriod)); } }
+        set { if (Set(ref bedsideClockFormat, value)) { Raise(nameof(BedsidePreviewTime)); Raise(nameof(BedsidePreviewPeriod)); ScheduleBedsideAutoApply(); } }
     }
     public string BedsideClockStyle
     {
         get => bedsideClockStyle;
-        set { if (Set(ref bedsideClockStyle, value)) Raise(nameof(BedsideClockIsLarge)); }
+        set { if (Set(ref bedsideClockStyle, value)) { Raise(nameof(BedsideClockIsLarge)); ScheduleBedsideAutoApply(); } }
     }
     public bool BedsideClockIsLarge => BedsideClockStyle == "large";
     public bool BedsideShowSeconds
     {
         get => bedsideShowSeconds;
-        set { if (Set(ref bedsideShowSeconds, value)) Raise(nameof(BedsidePreviewTime)); }
+        set { if (Set(ref bedsideShowSeconds, value)) { Raise(nameof(BedsidePreviewTime)); ScheduleBedsideAutoApply(); } }
     }
-    public bool BedsideNextAlarmWidget { get => bedsideNextAlarmWidget; set => Set(ref bedsideNextAlarmWidget, value); }
-    public bool BedsideBrightnessScheduleEnabled { get => bedsideBrightnessScheduleEnabled; set => Set(ref bedsideBrightnessScheduleEnabled, value); }
-    public int BedsideManualBrightness { get => bedsideManualBrightness; set => Set(ref bedsideManualBrightness, Math.Clamp(value, 1, 100)); }
-    public bool BedsideNightShiftScheduleEnabled { get => bedsideNightShiftScheduleEnabled; set => Set(ref bedsideNightShiftScheduleEnabled, value); }
-    public bool BedsideNightShiftManualEnabled { get => bedsideNightShiftManualEnabled; set => Set(ref bedsideNightShiftManualEnabled, value); }
-    public string BedsideNightShiftStart { get => bedsideNightShiftStart; set => Set(ref bedsideNightShiftStart, value); }
-    public string BedsideNightShiftEnd { get => bedsideNightShiftEnd; set => Set(ref bedsideNightShiftEnd, value); }
-    public bool BedsideThemeScheduleEnabled { get => bedsideThemeScheduleEnabled; set => Set(ref bedsideThemeScheduleEnabled, value); }
-    public bool BedsideThemeManualDark { get => bedsideThemeManualDark; set => Set(ref bedsideThemeManualDark, value); }
-    public string BedsideThemeStart { get => bedsideThemeStart; set => Set(ref bedsideThemeStart, value); }
-    public string BedsideThemeEnd { get => bedsideThemeEnd; set => Set(ref bedsideThemeEnd, value); }
+    public bool BedsideNextAlarmWidget { get => bedsideNextAlarmWidget; set { if (Set(ref bedsideNextAlarmWidget, value)) ScheduleBedsideAutoApply(); } }
+    public bool BedsideBrightnessScheduleEnabled { get => bedsideBrightnessScheduleEnabled; set { if (Set(ref bedsideBrightnessScheduleEnabled, value)) ScheduleBedsideAutoApply(); } }
+    public int BedsideManualBrightness { get => bedsideManualBrightness; set { if (Set(ref bedsideManualBrightness, Math.Clamp(value, 1, 100))) ScheduleBedsideAutoApply(); } }
+    public bool BedsideNightShiftScheduleEnabled { get => bedsideNightShiftScheduleEnabled; set { if (Set(ref bedsideNightShiftScheduleEnabled, value)) ScheduleBedsideAutoApply(); } }
+    public bool BedsideNightShiftManualEnabled { get => bedsideNightShiftManualEnabled; set { if (Set(ref bedsideNightShiftManualEnabled, value)) ScheduleBedsideAutoApply(); } }
+    public string BedsideNightShiftStart { get => bedsideNightShiftStart; set { if (Set(ref bedsideNightShiftStart, value)) ScheduleBedsideAutoApply(); } }
+    public string BedsideNightShiftEnd { get => bedsideNightShiftEnd; set { if (Set(ref bedsideNightShiftEnd, value)) ScheduleBedsideAutoApply(); } }
+    public bool BedsideThemeScheduleEnabled { get => bedsideThemeScheduleEnabled; set { if (Set(ref bedsideThemeScheduleEnabled, value)) ScheduleBedsideAutoApply(); } }
+    public bool BedsideThemeManualDark { get => bedsideThemeManualDark; set { if (Set(ref bedsideThemeManualDark, value)) ScheduleBedsideAutoApply(); } }
+    public string BedsideThemeStart { get => bedsideThemeStart; set { if (Set(ref bedsideThemeStart, value)) ScheduleBedsideAutoApply(); } }
+    public string BedsideThemeEnd { get => bedsideThemeEnd; set { if (Set(ref bedsideThemeEnd, value)) ScheduleBedsideAutoApply(); } }
     public string BedsidePreviewTime => BedsideClockFormat == "24h"
         ? (BedsideShowSeconds ? "22:09:41" : "22:09")
         : (BedsideShowSeconds ? "10:09:41" : "10:09");
@@ -828,9 +862,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public string BedsidePreviewAlarm => BedsideAlarms.FirstOrDefault(alarm => alarm.Enabled) is { } alarm
         ? $"Next alarm  {alarm.Time}"
         : "No alarm scheduled";
-    public string BedsideRuntimeSummary => state.Bedside.Runtime.AlarmRinging
-        ? "Alarm is ringing"
-        : state.Bedside.Runtime.DisplaySleeping ? "Display is sleeping" : "Bedside Mode is ready";
+    public string BedsideRuntimeSummary => !state.Bedside.Runtime.TimeValid
+        ? "Waiting for a valid clock"
+        : state.Bedside.Runtime.AlarmRinging
+            ? "Alarm is ringing"
+            : state.Bedside.Runtime.DisplaySleeping ? "Display is sleeping" : "Bedside Mode is ready";
+    public string BedsideBrightnessRuntimeGuidance => state.Bedside.Runtime.TimeValid
+        ? "Schedule timing is active on EchoDesk."
+        : "EchoDesk has no valid time yet, so manual brightness remains effective until its clock is synchronised.";
 
     public string DesktopAppearance
     {
@@ -901,23 +940,52 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         () => broker.SetAiUsageEnabledAsync(enabled),
         enabled ? "AI Usage Monitor enabled." : "AI Usage Monitor disabled. Background polling has stopped.");
 
-    private async Task SavePcDashboardAsync()
+    private Task SavePcDashboardAsync()
     {
         var metrics = new[] { PcDashboardMetric1, PcDashboardMetric2, PcDashboardMetric3, PcDashboardMetric4 }
             .Where(value => !string.IsNullOrWhiteSpace(value)).ToArray();
         if (metrics.Length is < 1 or > 4 || metrics.Distinct(StringComparer.Ordinal).Count() != metrics.Length)
         {
+            SetCustomisationApplyState("Choose one to four different dashboard metrics.", failed: true);
             Feedback = "Choose between one and four different PC Dashboard metrics.";
-            return;
+            return Task.CompletedTask;
         }
-        var baseRevision = state.PcDashboard.Revision;
-        if (baseRevision == 0)
+        pcDashboardWriteQueue.Enqueue(metrics, pcDashboardEditGeneration);
+        return Task.CompletedTask;
+    }
+
+    private async Task WritePcDashboardSnapshotAsync(string[] metrics, long generation)
+    {
+        SetCustomisationApplyState("Applying dashboard…", pending: true);
+        try
         {
-            var refreshed = await broker.GetPcDashboardStateAsync();
-            baseRevision = refreshed.PcDashboard.Revision;
+            var baseRevision = state.PcDashboard.Revision;
+            if (baseRevision == 0)
+            {
+                var refreshed = await broker.GetPcDashboardStateAsync();
+                ApplyState(refreshed);
+                baseRevision = refreshed.PcDashboard.Revision;
+            }
+            var next = await broker.SetPcDashboardMetricsAsync(baseRevision, metrics);
+            if (generation == pcDashboardEditGeneration)
+            {
+                pcDashboardLocalDirty = false;
+                ApplyState(next);
+                SetCustomisationApplyState("Dashboard saved just now.");
+            }
+            else
+            {
+                ApplyState(next);
+                SetCustomisationApplyState("Finishing newer dashboard changes…", pending: true);
+            }
+            Feedback = "PC Dashboard layout saved to EchoDesk.";
         }
-        await ExecuteAsync(() => broker.SetPcDashboardMetricsAsync(baseRevision, metrics),
-            "PC Dashboard layout saved to EchoDesk.");
+        catch (Exception error)
+        {
+            var message = Friendly(error);
+            SetCustomisationApplyState(message, failed: true);
+            Feedback = message;
+        }
     }
 
     private async Task OpenBedsideModeAsync()
@@ -936,6 +1004,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         BedsideAlarms.Add(alarm);
         Raise(nameof(BedsidePreviewAlarm));
         AddBedsideAlarmCommand.Refresh(); RemoveBedsideAlarmCommand.Refresh();
+        ScheduleBedsideAutoApply();
     }
 
     private void RemoveBedsideAlarm(object? parameter)
@@ -947,6 +1016,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
         Raise(nameof(BedsidePreviewAlarm));
         AddBedsideAlarmCommand.Refresh(); RemoveBedsideAlarmCommand.Refresh();
+        ScheduleBedsideAutoApply();
     }
 
     private void AddBedsideBrightnessSegment()
@@ -958,37 +1028,106 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         minute = (minute + 60) % 1440;
         while (BedsideBrightnessSegments.Any(segment => TryParseMinute(segment.Time, out var value) && value == minute))
             minute = (minute + 30) % 1440;
-        BedsideBrightnessSegments.Add(new BedsideBrightnessSegmentEditor(MinuteText(minute), 40));
+        var segment = new BedsideBrightnessSegmentEditor(MinuteText(minute), 40);
+        segment.PropertyChanged += BedsideBrightnessChanged;
+        BedsideBrightnessSegments.Add(segment);
         AddBedsideBrightnessSegmentCommand.Refresh(); RemoveBedsideBrightnessSegmentCommand.Refresh();
+        ScheduleBedsideAutoApply();
     }
 
     private void RemoveBedsideBrightnessSegment(object? parameter)
     {
         if (parameter is BedsideBrightnessSegmentEditor segment && BedsideBrightnessSegments.Count > 1)
+        {
+            segment.PropertyChanged -= BedsideBrightnessChanged;
             BedsideBrightnessSegments.Remove(segment);
+        }
         AddBedsideBrightnessSegmentCommand.Refresh(); RemoveBedsideBrightnessSegmentCommand.Refresh();
+        ScheduleBedsideAutoApply();
     }
 
-    private async Task SaveBedsideModeAsync()
+    private Task SaveBedsideModeAsync()
+    {
+        CommitBedsideSnapshot();
+        return Task.CompletedTask;
+    }
+
+    private void CommitBedsideSnapshot()
     {
         if (!TryBuildBedsideConfig(out var config, out var error))
         {
+            SetBedsideApplyState(error, failed: true);
             Feedback = error;
             return;
         }
+        bedsideWriteQueue.Enqueue(config!, bedsideEditGeneration);
+    }
+
+    private async Task WriteBedsideSnapshotAsync(BedsideConfig config, long generation)
+    {
+        SetBedsideApplyState("Applying changes…", pending: true);
         try
         {
-            // Always base the write on a just-read authoritative revision.
-            var refreshed = await broker.GetBedsideStateAsync();
-            ApplyState(refreshed);
-            var next = await broker.SetBedsideConfigAsync(refreshed.Bedside.Revision, config!);
-            ApplyState(next);
+            var next = await WriteBedsideSnapshotWithSingleStaleRetryAsync(config);
+            failedBedsideConfig = null;
+            RetryBedsideApplyCommand.Refresh();
+            if (generation == bedsideEditGeneration)
+            {
+                bedsideLocalDirty = false;
+                ApplyState(next);
+                SetBedsideApplyState("Saved to EchoDesk just now.");
+            }
+            else
+            {
+                ApplyState(next);
+                SetBedsideApplyState("Finishing newer changes…", pending: true);
+            }
             Feedback = "Bedside Mode settings saved to EchoDesk.";
         }
         catch (Exception exception)
         {
-            Feedback = Friendly(exception);
+            // Keep the exact desired snapshot available for an explicit retry.
+            // Never silently fall back to the older ACKed device state.
+            failedBedsideConfig = config;
+            failedBedsideGeneration = generation;
+            bedsideLocalDirty = true;
+            RetryBedsideApplyCommand.Refresh();
+            var message = Friendly(exception);
+            SetBedsideApplyState(message, failed: true);
+            Feedback = message;
         }
+    }
+
+    private async Task<BrokerState> WriteBedsideSnapshotWithSingleStaleRetryAsync(BedsideConfig config)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            // A single writer always obtains the latest authoritative
+            // revision. ApplyState deliberately preserves editors while a
+            // local generation remains unacknowledged.
+            var refreshed = await broker.GetBedsideStateAsync();
+            ApplyState(refreshed);
+            try
+            {
+                return await broker.SetBedsideConfigAsync(refreshed.Bedside.Revision, config);
+            }
+            catch (BrokerException error) when (attempt == 0
+                && (error.Code == "stale_revision" || error.Code == "stale_settings"))
+            {
+                // One bounded refetch/retry handles a simultaneous touchscreen
+                // write without creating an unbounded persistence loop.
+            }
+        }
+    }
+
+    private void RetryBedsideApply()
+    {
+        if (failedBedsideConfig is null) return;
+        SetBedsideApplyState("Retrying the last change…", pending: true);
+        if (failedBedsideGeneration == bedsideEditGeneration)
+            bedsideWriteQueue.Enqueue(failedBedsideConfig, failedBedsideGeneration);
+        else
+            CommitBedsideSnapshot();
     }
 
     private bool TryBuildBedsideConfig(out BedsideConfig? config, out string error)
@@ -1113,17 +1252,27 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             editor.PropertyChanged += BedsideAlarmChanged;
             BedsideAlarms.Add(editor);
         }
+        foreach (var current in BedsideBrightnessSegments) current.PropertyChanged -= BedsideBrightnessChanged;
         BedsideBrightnessSegments.Clear();
         foreach (var segment in config.Display.Segments)
-            BedsideBrightnessSegments.Add(new BedsideBrightnessSegmentEditor(MinuteText(segment.StartMinute), segment.Brightness));
+        {
+            var editor = new BedsideBrightnessSegmentEditor(MinuteText(segment.StartMinute), segment.Brightness);
+            editor.PropertyChanged += BedsideBrightnessChanged;
+            BedsideBrightnessSegments.Add(editor);
+        }
         Raise(nameof(BedsidePreviewTime)); Raise(nameof(BedsidePreviewPeriod));
-        Raise(nameof(BedsidePreviewAlarm)); Raise(nameof(BedsideRuntimeSummary));
+        Raise(nameof(BedsidePreviewAlarm)); Raise(nameof(BedsideRuntimeSummary)); Raise(nameof(BedsideBrightnessRuntimeGuidance));
         AddBedsideAlarmCommand.Refresh(); RemoveBedsideAlarmCommand.Refresh();
         AddBedsideBrightnessSegmentCommand.Refresh(); RemoveBedsideBrightnessSegmentCommand.Refresh();
     }
 
-    private void BedsideAlarmChanged(object? sender, PropertyChangedEventArgs args) =>
+    private void BedsideAlarmChanged(object? sender, PropertyChangedEventArgs args)
+    {
         Raise(nameof(BedsidePreviewAlarm));
+        ScheduleBedsideAutoApply();
+    }
+
+    private void BedsideBrightnessChanged(object? sender, PropertyChangedEventArgs args) => ScheduleBedsideAutoApply();
 
     private void OnStateChanged(object? sender, BrokerState next) =>
         uiContext.Post(_ => ApplyState(next), null);
@@ -1138,7 +1287,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         applyingState = true;
         try
         {
-            if (next.Device?.Settings is { } settings)
+            if (!settingsLocalDirty && next.Device?.Settings is { } settings)
             {
                 Brightness = settings.Brightness ?? next.Device.Brightness ?? Brightness;
                 DeviceTheme = settings.Theme ?? next.Device.Theme ?? DeviceTheme;
@@ -1167,14 +1316,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 NotificationExcludedSourcesText = string.Join(", ", next.NotificationStack.ExcludedSources);
                 notificationFiltersInitialized = true;
             }
-            if (next.PcDashboard.Available && next.PcDashboard.Metrics.Count is >= 1 and <= 4)
+            if (!pcDashboardLocalDirty && next.PcDashboard.Available && next.PcDashboard.Metrics.Count is >= 1 and <= 4)
             {
                 PcDashboardMetric1 = next.PcDashboard.Metrics.ElementAtOrDefault(0) ?? "cpu";
                 PcDashboardMetric2 = next.PcDashboard.Metrics.ElementAtOrDefault(1) ?? "";
                 PcDashboardMetric3 = next.PcDashboard.Metrics.ElementAtOrDefault(2) ?? "";
                 PcDashboardMetric4 = next.PcDashboard.Metrics.ElementAtOrDefault(3) ?? "";
             }
-            SyncBedsideEditor(next.Bedside);
+            if (!bedsideLocalDirty) SyncBedsideEditor(next.Bedside);
         }
         finally { applyingState = false; }
 
@@ -1239,7 +1388,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                      nameof(NotificationStack), nameof(NotificationStackEnabled), nameof(NotificationStackStatus),
                      nameof(NotificationStackGuidance), nameof(NotificationStackSourceSummary),
                      nameof(PcDashboardAvailable),
-                     nameof(BedsideAvailable), nameof(BedsideRuntimeSummary),
+                     nameof(BedsideAvailable), nameof(BedsideRuntimeSummary), nameof(BedsideBrightnessRuntimeGuidance),
                      nameof(FirmwareManager), nameof(FirmwareDevices), nameof(SelectedFirmwarePort), nameof(SelectedFirmwareDevice),
                      nameof(WifiSetup), nameof(GuidedWifiDevices), nameof(GuidedWifiHasDevices),
                      nameof(GuidedPairedWifiDevices), nameof(GuidedWifiHasPairedDevice),
@@ -1730,30 +1879,175 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private Task SetNowPlayingAsync() => SetSettingsAsync(
-        new SettingsPatch
-        {
-            NowPlayingLayout = NowPlayingLayout,
-            NowPlayingBackground = NowPlayingBackground,
-            NowPlayingBackgroundCustomized = true,
-        }, true, "Now Playing customisation updated.");
+    private Task SetNowPlayingAsync()
+    {
+        QueueAdvancedSetting("nowPlaying");
+        return Task.CompletedTask;
+    }
 
     private Task SetAdvancedSettingAsync(object? parameter)
     {
-        if (parameter is not string setting || !SupportsDeviceSetting(setting)) return Task.CompletedTask;
-        var patch = setting switch
+        if (parameter is string setting) QueueAdvancedSetting(setting);
+        return Task.CompletedTask;
+    }
+
+    private void QueueAdvancedSetting(string setting)
+    {
+        if (applyingState || !IsConnected || !SupportsSettings) return;
+        if (setting != "nowPlaying" && !SupportsDeviceSetting(setting)) return;
+        settingsEditGeneration++;
+        settingsLocalDirty = true;
+        pendingAdvancedSettings.Add(setting);
+        settingsAutoApplyDebounce?.Cancel();
+        settingsAutoApplyDebounce?.Dispose();
+        settingsAutoApplyDebounce = new CancellationTokenSource();
+        SetCustomisationApplyState("Waiting for changes…", pending: true);
+        _ = ApplyQueuedAdvancedSettingsAsync(settingsAutoApplyDebounce.Token);
+    }
+
+    private async Task ApplyQueuedAdvancedSettingsAsync(CancellationToken cancellationToken)
+    {
+        try
         {
-            "defaultApp" => new SettingsPatch { DefaultApp = DefaultApp },
-            "clockFormat" => new SettingsPatch { ClockFormat = ClockFormat },
-            "timezone" => new SettingsPatch { Timezone = Timezone },
-            "codexPercentageMode" => new SettingsPatch { CodexPercentageMode = CodexPercentageMode },
-            "codexPreferredDisplay" => new SettingsPatch { CodexPreferredDisplay = CodexPreferredDisplay },
-            "performanceDefaultView" => new SettingsPatch { PerformanceDefaultView = PerformanceDefaultView },
-            _ => null,
-        };
-        return patch is null
-            ? Task.CompletedTask
-            : SetSettingsAsync(patch, true, "Device customisation updated.");
+            await Task.Delay(260, cancellationToken);
+            var queued = pendingAdvancedSettings.ToArray();
+            foreach (var setting in queued) pendingAdvancedSettings.Remove(setting);
+            var patch = new SettingsPatch
+            {
+                NowPlayingLayout = queued.Contains("nowPlaying") ? NowPlayingLayout : null,
+                NowPlayingBackground = queued.Contains("nowPlaying") ? NowPlayingBackground : null,
+                NowPlayingBackgroundCustomized = queued.Contains("nowPlaying") ? true : null,
+                DefaultApp = queued.Contains("defaultApp") ? DefaultApp : null,
+                ClockFormat = queued.Contains("clockFormat") ? ClockFormat : null,
+                Timezone = queued.Contains("timezone") ? Timezone : null,
+                CodexPercentageMode = queued.Contains("codexPercentageMode") ? CodexPercentageMode : null,
+                CodexPreferredDisplay = queued.Contains("codexPreferredDisplay") ? CodexPreferredDisplay : null,
+                PerformanceDefaultView = queued.Contains("performanceDefaultView") ? PerformanceDefaultView : null,
+            };
+            settingsWriteQueue.Enqueue(patch, settingsEditGeneration);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+    }
+
+    private async Task WriteAdvancedSettingsSnapshotAsync(SettingsPatch patch, long generation)
+    {
+        SetCustomisationApplyState("Applying changes…", pending: true);
+        try
+        {
+            BrokerState next;
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    next = await broker.SetSettingsAsync(Device?.SettingsRevision ?? 0, patch, true);
+                    break;
+                }
+                catch (BrokerException error) when (attempt == 0
+                    && (error.Code == "stale_revision" || error.Code == "stale_settings"))
+                {
+                    var refreshed = await broker.RefreshAsync();
+                    ApplyState(refreshed);
+                }
+            }
+            if (generation == settingsEditGeneration)
+            {
+                settingsLocalDirty = false;
+                ApplyState(next);
+                SetCustomisationApplyState("Saved to EchoDesk just now.");
+            }
+            else
+            {
+                ApplyState(next);
+                SetCustomisationApplyState("Finishing newer changes…", pending: true);
+            }
+            Feedback = "Device customisation updated.";
+        }
+        catch (Exception error)
+        {
+            var message = Friendly(error);
+            SetCustomisationApplyState(message, failed: true);
+            Feedback = message;
+        }
+    }
+
+    private void SchedulePcDashboardAutoApply()
+    {
+        if (applyingState || !PcDashboardAvailable) return;
+        pcDashboardEditGeneration++;
+        pcDashboardLocalDirty = true;
+        pcDashboardAutoApplyDebounce?.Cancel();
+        pcDashboardAutoApplyDebounce?.Dispose();
+        pcDashboardAutoApplyDebounce = new CancellationTokenSource();
+        SetCustomisationApplyState("Waiting for dashboard changes…", pending: true);
+        _ = ApplyPcDashboardAfterDelayAsync(pcDashboardAutoApplyDebounce.Token);
+    }
+
+    private async Task ApplyPcDashboardAfterDelayAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(500, cancellationToken);
+            await SavePcDashboardAsync();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+    }
+
+    private void ScheduleBedsideAutoApply()
+    {
+        if (applyingState || !BedsideAvailable) return;
+        bedsideEditGeneration++;
+        bedsideLocalDirty = true;
+        bedsideAutoApplyDebounce?.Cancel();
+        bedsideAutoApplyDebounce?.Dispose();
+        if (!bedsideContinuousEditGate.MarkChanged())
+        {
+            bedsideAutoApplyDebounce = null;
+            SetBedsideApplyState("Editing — release to apply…", pending: true);
+            return;
+        }
+        bedsideAutoApplyDebounce = new CancellationTokenSource();
+        SetBedsideApplyState("Waiting for changes…", pending: true);
+        _ = ApplyBedsideAfterDelayAsync(bedsideAutoApplyDebounce.Token);
+    }
+
+    private async Task ApplyBedsideAfterDelayAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(650, cancellationToken);
+            CommitBedsideSnapshot();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+    }
+
+    public void BeginBedsideContinuousEdit()
+    {
+        bedsideContinuousEditGate.Begin();
+        bedsideAutoApplyDebounce?.Cancel();
+        bedsideAutoApplyDebounce?.Dispose();
+        bedsideAutoApplyDebounce = null;
+    }
+
+    public void EndBedsideContinuousEdit()
+    {
+        if (!bedsideContinuousEditGate.End() || !bedsideLocalDirty) return;
+        bedsideAutoApplyDebounce = new CancellationTokenSource();
+        SetBedsideApplyState("Applying completed edit…", pending: true);
+        _ = ApplyBedsideAfterDelayAsync(bedsideAutoApplyDebounce.Token);
+    }
+
+    private void SetCustomisationApplyState(string text, bool pending = false, bool failed = false)
+    {
+        CustomisationApplyStatus = text;
+        CustomisationApplyPending = pending;
+        CustomisationApplyFailed = failed;
+    }
+
+    private void SetBedsideApplyState(string text, bool pending = false, bool failed = false)
+    {
+        BedsideApplyStatus = text;
+        BedsideApplyPending = pending;
+        BedsideApplyFailed = failed;
     }
 
     private void ScheduleBrightnessUpdate()
@@ -1784,15 +2078,26 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         var revision = Device?.SettingsRevision ?? 0;
+        SetCustomisationApplyState(persist ? "Applying changes…" : "Previewing change…", pending: true);
         try
         {
             var next = await broker.SetSettingsAsync(revision, patch, persist, cancellationToken);
-            uiContext.Post(_ => { ApplyState(next); Feedback = success; }, null);
+            uiContext.Post(_ =>
+            {
+                ApplyState(next);
+                Feedback = success;
+                SetCustomisationApplyState(persist ? "Saved to EchoDesk just now." : "Previewing on EchoDesk…");
+            }, null);
         }
         catch (BrokerException error) when (error.Code is "stale_revision" or "stale_settings")
         {
             await broker.RefreshAsync(cancellationToken);
-            uiContext.Post(_ => Feedback = "Device settings changed on the touchscreen. Refreshed without overwriting them.", null);
+            uiContext.Post(_ =>
+            {
+                const string message = "Device settings changed on the touchscreen. Refreshed without overwriting them.";
+                Feedback = message;
+                SetCustomisationApplyState(message, failed: true);
+            }, null);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception error)
@@ -1801,6 +2106,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 ApplyState(state);
                 Feedback = Friendly(error);
+                SetCustomisationApplyState(Feedback, failed: true);
             }, null);
         }
     }
@@ -1853,7 +2159,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         RefreshCommand.Refresh(); ReconnectCommand.Refresh(); OpenAppCommand.Refresh();
         SavePcDashboardCommand.Refresh();
-        OpenBedsideModeCommand.Refresh(); SaveBedsideModeCommand.Refresh();
+        OpenBedsideModeCommand.Refresh(); SaveBedsideModeCommand.Refresh(); RetryBedsideApplyCommand.Refresh();
         AddBedsideAlarmCommand.Refresh(); RemoveBedsideAlarmCommand.Refresh();
         AddBedsideBrightnessSegmentCommand.Refresh(); RemoveBedsideBrightnessSegmentCommand.Refresh();
         ClockActionCommand.Refresh(); ConfigureCountdownCommand.Refresh(); ConfigureFocusCommand.Refresh();
@@ -2039,6 +2345,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         broker.StateChanged -= OnStateChanged;
         brightnessDebounce?.Cancel();
         brightnessDebounce?.Dispose();
+        settingsAutoApplyDebounce?.Cancel();
+        settingsAutoApplyDebounce?.Dispose();
+        pcDashboardAutoApplyDebounce?.Cancel();
+        pcDashboardAutoApplyDebounce?.Dispose();
+        bedsideAutoApplyDebounce?.Cancel();
+        bedsideAutoApplyDebounce?.Dispose();
+        foreach (var alarm in BedsideAlarms) alarm.PropertyChanged -= BedsideAlarmChanged;
+        foreach (var segment in BedsideBrightnessSegments) segment.PropertyChanged -= BedsideBrightnessChanged;
         StopGuidedDiscovery();
         await broker.DisposeAsync();
     }

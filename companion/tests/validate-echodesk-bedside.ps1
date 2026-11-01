@@ -26,8 +26,15 @@ foreach ($copy in @(
     'Clock', 'Widgets', 'Manage alarms', 'Auto-brightness and display',
     'Weather — Coming soon', 'Night Shift', 'Dark and Light appearance',
     'Use brightness schedule', 'Manual brightness', 'Use Night Shift schedule',
-    'Use appearance schedule', 'Add alarm', 'Add time', 'Save display settings'
+    'Use appearance schedule', 'Add alarm', 'Add schedule point',
+    'Currently effective:', 'Selected point', 'Remove point', 'Changes apply automatically'
 )) { Assert-Contains $bedside $copy }
+
+foreach ($removedAction in @('Save Clock', 'Save Widgets', 'Save alarms', 'Save display settings')) {
+    if ($bedside.Contains($removedAction)) {
+        throw "Bedside auto-apply regression: explicit action remains: $removedAction"
+    }
+}
 
 foreach ($schema in @(
     '"cmd": "echodesk_bedside_get_state", "version": 1, "requestId": request',
@@ -46,7 +53,7 @@ foreach ($schema in @(
 foreach ($guard in @(
     '(1...8).contains(id)', 'label.utf8.count <= 24', 'Set(parsedAlarms.map(\.id)).count == parsedAlarms.count',
     '(1...8).contains(parsedSegments.count)', '(1...100).contains(manualBrightness)',
-    '(0...1439).contains(value)', 'Set(next.segments.map(\.startMinute)).count == next.segments.count',
+    '(0...1439).contains(value)', 'Set(config.segments.map(\.startMinute)).count == config.segments.count',
     'bedsideBoundedUTF8(row.label.stringValue, bytes: 24)',
     'bedsideStateReady', 'echoDeskBedsideStatePort == port'
 )) { Assert-Contains $bedside $guard }
@@ -87,10 +94,10 @@ $sendStart = $bedside.IndexOf('private func sendEchoDeskBedsideConfig')
 $sendEnd = $bedside.IndexOf('@objc private func echoDeskBedsideOpenOnDevice', $sendStart)
 if ($sendStart -lt 0 -or $sendEnd -le $sendStart) { throw 'Bedside set-config implementation could not be isolated.' }
 $send = $bedside.Substring($sendStart, $sendEnd - $sendStart)
-if ($send.IndexOf('self.echoDeskBedsideConfig = config') -ge 0) {
+if ($send.IndexOf('self.echoDeskBedsideConfig = config') -lt $send.IndexOf('guard ok,')) {
     throw 'Bedside config is made authoritative before the device ACK.'
 }
-$ackIndex = $send.IndexOf('guard ok else')
+$ackIndex = $send.IndexOf('guard ok,')
 $refreshIndex = $send.LastIndexOf('self.requestEchoDeskBedsideState()')
 if ($ackIndex -lt 0 -or $refreshIndex -le $ackIndex) {
     throw 'Bedside config does not wait for an ACK and refresh authoritative state afterward.'
@@ -134,6 +141,55 @@ Assert-Contains $bedside 'preview.heightAnchor.constraint(equalTo: preview.width
 Assert-Contains $bedside 'icon.setAccessibilityHidden(true)'
 if ($bedside.Contains('max(0.65, min(1.0')) {
     throw 'Bedside preview drawing no longer fits the supported 240-point compact preview width.'
+}
+
+foreach ($timelineContract in @(
+    'final class EchoDeskBrightnessTimelineView: NSView',
+    'let ordered = segments.sorted { $0.startMinute < $1.startMinute }',
+    'path.line(to: NSPoint(x: next.x, y: y))',
+    'path.line(to: next)',
+    'override func mouseDragged(with event: NSEvent)',
+    'onSegmentsCommitted?(segments)',
+    'override func keyDown(with event: NSEvent)',
+    'setAccessibilityLabel("Brightness schedule")',
+    'echoDeskBedsideSchedulePointTime',
+    'echoDeskBedsideSchedulePointBrightness',
+    'queueEchoDeskBedsideAutoApply',
+    'echoDeskBedsidePendingConfig = config',
+    'echoDeskBedsidePendingConfig ?? echoDeskBedsideInFlightConfig ?? echoDeskBedsideConfig',
+    'let revision = (json?["revision"] as? NSNumber)?.intValue',
+    'errorCode == "stale_revision"',
+    'The last change is still pending. Select Retry to save it.',
+    'echoDeskBedsideRuntime["timeValid"] as? Bool != true',
+    'echoDeskBedsideRuntime["timeValid"] as? Bool == true',
+    'Waiting for a valid clock before applying the appearance schedule.',
+    'if self.echoDeskBedsidePendingConfig == nil {',
+    'themeScheduleEnabled: true, themeManualDark: false'
+)) { Assert-Contains $bedside $timelineContract }
+
+$stateConfigStart = $bedside.IndexOf('self.echoDeskBedsideConfig = config')
+$statePendingStart = $bedside.IndexOf('if self.echoDeskBedsidePendingConfig == nil {', $stateConfigStart)
+$stateRenderStart = $bedside.IndexOf('self.renderEchoDeskBedsideSection', $statePendingStart)
+if ($stateConfigStart -lt 0 -or $statePendingStart -le $stateConfigStart -or
+    $stateRenderStart -le $statePendingStart) {
+    throw 'A refreshed Bedside state can overwrite the current dirty draft.'
+}
+$failedPayloadStart = $bedside.IndexOf('let failedConfig = self.echoDeskBedsideInFlightConfig ?? config')
+$preserveNewerStart = $bedside.IndexOf('if self.echoDeskBedsidePendingConfig == nil {', $failedPayloadStart)
+if ($failedPayloadStart -lt 0 -or $preserveNewerStart -le $failedPayloadStart) {
+    throw 'A failed older Bedside write can replace a newer queued edit.'
+}
+
+$dragStart = $bedside.IndexOf('override func mouseDragged')
+$mouseUpStart = $bedside.IndexOf('override func mouseUp', $dragStart)
+$keyStart = $bedside.IndexOf('override func keyDown', $mouseUpStart)
+if ($dragStart -lt 0 -or $mouseUpStart -le $dragStart -or $keyStart -le $mouseUpStart) {
+    throw 'Timeline pointer handlers could not be isolated.'
+}
+$dragHandler = $bedside.Substring($dragStart, $mouseUpStart - $dragStart)
+$mouseUpHandler = $bedside.Substring($mouseUpStart, $keyStart - $mouseUpStart)
+if ($dragHandler.Contains('onSegmentsCommitted') -or -not $mouseUpHandler.Contains('onSegmentsCommitted?(segments)')) {
+    throw 'Timeline persistence must commit on pointer release, not during pointer drag.'
 }
 
 Write-Host 'EchoDesk macOS Bedside Mode validation passed.'

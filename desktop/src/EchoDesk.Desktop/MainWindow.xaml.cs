@@ -4,6 +4,8 @@ using System.Windows.Interop;
 using System.Windows.Automation;
 using System.Windows.Automation.Peers;
 using System.Windows.Media.Animation;
+using System.Windows.Input;
+using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 using EchoDesk.Desktop.Services;
 using EchoDesk.Desktop.ViewModels;
 
@@ -12,6 +14,7 @@ namespace EchoDesk.Desktop;
 public partial class MainWindow : Window
 {
     private ClockWindow? clockWindow;
+    private bool bedsideContinuousEditActive;
 
     public MainWindow(MainViewModel viewModel)
     {
@@ -98,8 +101,27 @@ public partial class MainWindow : Window
         Focus();
     }
 
+    private void BedsideContinuousEdit_Begin(object sender, MouseButtonEventArgs e)
+    {
+        if (bedsideContinuousEditActive || DataContext is not MainViewModel viewModel) return;
+        bedsideContinuousEditActive = true;
+        viewModel.BeginBedsideContinuousEdit();
+    }
+
+    private void BedsideContinuousEdit_End(object sender, MouseButtonEventArgs e) => EndBedsideContinuousEdit();
+
+    private void BedsideContinuousEdit_CaptureLost(object sender, MouseEventArgs e) => EndBedsideContinuousEdit();
+
+    private void EndBedsideContinuousEdit()
+    {
+        if (!bedsideContinuousEditActive || DataContext is not MainViewModel viewModel) return;
+        bedsideContinuousEditActive = false;
+        viewModel.EndBedsideContinuousEdit();
+    }
+
     private void OnLoaded(object sender, RoutedEventArgs args)
     {
+        ApplyResponsiveLayout(ActualWidth);
         Opacity = 0;
         BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)));
         ApplyWindowsBackdrop();

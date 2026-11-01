@@ -4,6 +4,8 @@ using System.Windows.Controls;
 using EchoDesk.Desktop.Core.Services;
 using EchoDesk.Desktop.Services;
 using EchoDesk.Desktop.ViewModels;
+using EchoDesk.Desktop.Controls;
+using EchoDesk.Desktop.Infrastructure;
 
 namespace EchoDesk.Desktop.LayoutTests;
 
@@ -21,6 +23,9 @@ internal static class Program
             {
                 MinimizeToTray = false,
             };
+            Assert(viewModel.BedsideBrightnessSegments.Count == 7
+                   && viewModel.BedsideBrightnessSegments.All(segment => segment.Time != "00:00"),
+                "Desktop Bedside defaults no longer match the firmware's seven-point wrap schedule.");
             var window = new MainWindow(viewModel)
             {
                 ShowActivated = false,
@@ -34,6 +39,9 @@ internal static class Program
             window.Close();
             viewModel.DisposeAsync().AsTask().GetAwaiter().GetResult();
             app.Shutdown();
+            VerifyTimelineScale();
+            VerifyContinuousEditCommitGate();
+            VerifyLatestSnapshotOrderingAsync().GetAwaiter().GetResult();
             Console.WriteLine("EchoDesk.Desktop.LayoutTests: PASS");
             return 0;
         }
@@ -42,6 +50,60 @@ internal static class Program
             Console.Error.WriteLine($"EchoDesk.Desktop.LayoutTests: FAIL\n{error}");
             return 1;
         }
+    }
+
+    private static void VerifyTimelineScale()
+    {
+        Assert(BedsideBrightnessTimeline.SnapMinute(0) == 0, "Timeline start did not map to midnight.");
+        Assert(BedsideBrightnessTimeline.SnapMinute(0.5) == 720, "Timeline midpoint did not map to noon.");
+        Assert(BedsideBrightnessTimeline.SnapMinute(1) == 1439, "Timeline end escaped the 24-hour range.");
+        Assert(BedsideBrightnessTimeline.SnapBrightness(0) == 100, "Timeline top was not 100% brightness.");
+        Assert(BedsideBrightnessTimeline.SnapBrightness(1) == 1, "Timeline bottom was not minimum brightness.");
+    }
+
+    private static async Task VerifyLatestSnapshotOrderingAsync()
+    {
+        var firstEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writes = new List<long>();
+        var active = 0;
+        var maximumActive = 0;
+        var queue = new LatestSnapshotWriteQueue<string>(async (_, generation) =>
+        {
+            var nowActive = Interlocked.Increment(ref active);
+            maximumActive = Math.Max(maximumActive, nowActive);
+            lock (writes) writes.Add(generation);
+            if (generation == 1)
+            {
+                firstEntered.TrySetResult();
+                await releaseFirst.Task;
+            }
+            Interlocked.Decrement(ref active);
+        });
+
+        queue.Enqueue("first", 1);
+        await firstEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        queue.Enqueue("superseded", 2);
+        queue.Enqueue("latest", 3);
+        releaseFirst.TrySetResult();
+        await queue.WhenIdleAsync().WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert(maximumActive == 1, "Whole-config snapshots were written concurrently.");
+        Assert(writes.SequenceEqual([1L, 3L]),
+            "An edit made during a save was lost or a superseded snapshot was persisted.");
+    }
+
+    private static void VerifyContinuousEditCommitGate()
+    {
+        var gate = new ContinuousEditCommitGate();
+        gate.Begin();
+        var writes = 0;
+        for (var index = 0; index < 100; index++)
+            if (gate.MarkChanged()) writes++;
+        Assert(writes == 0, "A long drag scheduled persistence before pointer release.");
+        if (gate.End()) writes++;
+        Assert(writes == 1, "A completed drag did not collapse to exactly one persistence request.");
+        Assert(!gate.End(), "A duplicate pointer-release scheduled another persistence request.");
     }
 
     private static void VerifyResponsivePair(MainWindow window, MainViewModel viewModel,

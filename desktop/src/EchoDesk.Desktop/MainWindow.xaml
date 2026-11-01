@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:EchoDesk.Desktop.ViewModels"
+        xmlns:controls="clr-namespace:EchoDesk.Desktop.Controls"
         Title="EchoDesk Desktop" Width="1080" Height="720" MinWidth="680" MinHeight="540"
         WindowStartupLocation="CenterScreen" Icon="Assets/echodesk-logo.png">
     <Window.Resources>
@@ -43,6 +44,13 @@
         </Style>
         <Style x:Key="NavText" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
             <Setter Property="Margin" Value="14,0,0,0"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsCompact}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="SidebarSectionText" TargetType="TextBlock" BasedOn="{StaticResource SidebarSectionLabel}">
             <Style.Triggers>
                 <DataTrigger Binding="{Binding IsCompact}" Value="True">
                     <Setter Property="Visibility" Value="Collapsed"/>
@@ -93,6 +101,7 @@
                 </StackPanel>
 
                 <StackPanel Margin="0,4">
+                    <TextBlock Style="{StaticResource SidebarSectionText}" Text="GENERAL"/>
                     <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Overview" Tag="{Binding IsOverview}" ToolTip="Overview" AutomationProperties.Name="Overview">
                         <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource NavIcon}" Text="&#xE80F;"/><TextBlock Style="{StaticResource NavText}" Text="Overview"/></StackPanel>
                     </Button>
@@ -102,6 +111,7 @@
                     <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Customisation" Tag="{Binding IsCustomisationNavigationSelected}" ToolTip="Customisation" AutomationProperties.Name="Customisation">
                         <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource NavIcon}" Text="&#xE713;"/><TextBlock Style="{StaticResource NavText}" Text="Customisation"/></StackPanel>
                     </Button>
+                    <TextBlock Style="{StaticResource SidebarSectionText}" Text="DEVICE MANAGEMENT"/>
                     <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Set up a new device" Tag="{Binding IsGuidedSetup}" ToolTip="Setup new device" AutomationProperties.Name="Setup new device">
                         <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource NavIcon}" Text="&#xE710;"/><TextBlock Style="{StaticResource NavText}" Text="Setup new device"/></StackPanel>
                     </Button>
@@ -119,6 +129,7 @@
                 <!-- Overview -->
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsOverview, Converter={StaticResource BoolVisibility}}">
                     <StackPanel MaxWidth="1050">
+                        <TextBlock Style="{StaticResource Eyebrow}" Text="GENERAL" Margin="0,0,0,7"/>
                         <TextBlock Style="{StaticResource PageTitle}" Text="Overview"/>
                         <TextBlock Style="{StaticResource Muted}" Text="Your EchoDesk, at a glance." Margin="0,0,0,24"/>
 
@@ -254,6 +265,7 @@
                 <!-- Device Control -->
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsDeviceControl, Converter={StaticResource BoolVisibility}}">
                     <StackPanel MaxWidth="1050">
+                        <TextBlock Style="{StaticResource Eyebrow}" Text="GENERAL" Margin="0,0,0,7"/>
                         <TextBlock Style="{StaticResource PageTitle}" Text="Device Control"/>
                         <TextBlock Style="{StaticResource Muted}" Text="Open an app on the physical touchscreen." Margin="0,0,0,24"/>
                         <Border Style="{StaticResource Card}" Margin="0,0,0,18">
@@ -290,6 +302,7 @@
                 <!-- Guided device setup. The selected port is pinned by the view model before any write starts. -->
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsGuidedSetup, Converter={StaticResource BoolVisibility}}">
                     <StackPanel MaxWidth="900">
+                        <TextBlock Style="{StaticResource Eyebrow}" Text="DEVICE MANAGEMENT" Margin="0,0,0,7"/>
                         <TextBlock Style="{StaticResource PageTitle}" Text="Set up a new device"/>
                         <TextBlock Style="{StaticResource Muted}" Text="A guided, verified installation for EchoDesk Mini." Margin="0,0,0,18"/>
 
@@ -457,6 +470,7 @@
                         <Grid Margin="0,0,0,24">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <StackPanel>
+                                <TextBlock Style="{StaticResource Eyebrow}" Text="DEVICE MANAGEMENT" Margin="0,0,0,7"/>
                                 <TextBlock Style="{StaticResource PageTitle}" Text="Device recovery &amp; updates"/>
                                 <TextBlock Style="{StaticResource Muted}" Text="Update, reset, repair or recover EchoDesk OS."/>
                             </StackPanel>
@@ -594,8 +608,21 @@
                 <!-- Customisation -->
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsCustomisation, Converter={StaticResource BoolVisibility}}">
                     <StackPanel MaxWidth="1050">
+                        <TextBlock Style="{StaticResource Eyebrow}" Text="GENERAL" Margin="0,0,0,7"/>
                         <TextBlock Style="{StaticResource PageTitle}" Text="Customisation"/>
                         <TextBlock Style="{StaticResource Muted}" Text="Every enabled control writes to the physical EchoDesk and waits for confirmation." Margin="0,0,0,24"/>
+
+                        <Border Style="{StaticResource InsetCard}" Margin="0,0,0,16" AutomationProperties.LiveSetting="Polite"
+                                AutomationProperties.Name="{Binding CustomisationApplyStatus}">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <Ellipse Width="9" Height="9" VerticalAlignment="Center">
+                                    <Ellipse.Style><Style TargetType="Ellipse"><Setter Property="Fill" Value="{DynamicResource SuccessBrush}"/><Style.Triggers><DataTrigger Binding="{Binding CustomisationApplyPending}" Value="True"><Setter Property="Fill" Value="{DynamicResource WarningBrush}"/></DataTrigger><DataTrigger Binding="{Binding CustomisationApplyFailed}" Value="True"><Setter Property="Fill" Value="{DynamicResource DangerBrush}"/></DataTrigger></Style.Triggers></Style></Ellipse.Style>
+                                </Ellipse>
+                                <TextBlock Grid.Column="1" Text="{Binding CustomisationApplyStatus}" Margin="10,0" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                                <ProgressBar Grid.Column="2" Width="72" Height="4" IsIndeterminate="True" Visibility="{Binding CustomisationApplyPending, Converter={StaticResource BoolVisibility}}"/>
+                            </Grid>
+                        </Border>
 
                         <Border Style="{StaticResource Card}" Margin="0,0,0,14">
                             <Grid>
@@ -682,7 +709,7 @@
                                     <StackPanel Margin="0,0,12,0"><TextBlock Text="Metric 3" FontWeight="SemiBold" Margin="0,0,0,6"/><ComboBox AutomationProperties.Name="PC Dashboard metric 3" ItemsSource="{Binding PcDashboardMetricOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding PcDashboardMetric3}"/></StackPanel>
                                     <StackPanel><TextBlock Text="Metric 4" FontWeight="SemiBold" Margin="0,0,0,6"/><ComboBox AutomationProperties.Name="PC Dashboard metric 4" ItemsSource="{Binding PcDashboardMetricOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding PcDashboardMetric4}"/></StackPanel>
                                 </UniformGrid>
-                                <Button Style="{StaticResource PrimaryButton}" Command="{Binding SavePcDashboardCommand}" Content="Apply dashboard" HorizontalAlignment="Left" Margin="0,14,0,0"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="Selections apply automatically after a short pause." FontSize="12" Margin="0,10,0,0"/>
                             </StackPanel>
                         </Border>
 
@@ -704,12 +731,26 @@
                     <StackPanel MaxWidth="1120">
                         <DockPanel Margin="0,0,0,20">
                             <Button DockPanel.Dock="Left" Command="{Binding NavigateCommand}" CommandParameter="Customisation" Content="&#xE72B;" FontFamily="Segoe Fluent Icons" Width="40" Height="40" Margin="0,0,14,0" ToolTip="Back to Customisation" AutomationProperties.Name="Back to Customisation"/>
-                            <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Command="{Binding SaveBedsideModeCommand}" Content="Save to EchoDesk" Padding="20,10"/>
                             <StackPanel>
+                                <TextBlock Style="{StaticResource Eyebrow}" Text="CUSTOMISATION" Margin="0,0,0,7"/>
                                 <TextBlock Style="{StaticResource PageTitle}" Text="Bedside Mode"/>
                                 <TextBlock Style="{StaticResource Muted}" Text="A self-contained bedside experience. Once saved, it works from power alone without EchoDesk Desktop." TextWrapping="Wrap"/>
                             </StackPanel>
                         </DockPanel>
+
+                        <Border Style="{StaticResource InsetCard}" Margin="0,0,0,18" AutomationProperties.LiveSetting="Polite"
+                                AutomationProperties.Name="{Binding BedsideApplyStatus}">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <Ellipse Width="9" Height="9" VerticalAlignment="Center">
+                                    <Ellipse.Style><Style TargetType="Ellipse"><Setter Property="Fill" Value="{DynamicResource SuccessBrush}"/><Style.Triggers><DataTrigger Binding="{Binding BedsideApplyPending}" Value="True"><Setter Property="Fill" Value="{DynamicResource WarningBrush}"/></DataTrigger><DataTrigger Binding="{Binding BedsideApplyFailed}" Value="True"><Setter Property="Fill" Value="{DynamicResource DangerBrush}"/></DataTrigger></Style.Triggers></Style></Ellipse.Style>
+                                </Ellipse>
+                                <TextBlock Grid.Column="1" Text="{Binding BedsideApplyStatus}" Margin="10,0" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                                <ProgressBar Grid.Column="2" Width="72" Height="4" IsIndeterminate="True" Visibility="{Binding BedsideApplyPending, Converter={StaticResource BoolVisibility}}"/>
+                                <Button Grid.Column="3" Command="{Binding RetryBedsideApplyCommand}" Content="Retry" Margin="12,0,0,0" Padding="12,5"
+                                        Visibility="{Binding BedsideApplyFailed, Converter={StaticResource BoolVisibility}}"/>
+                            </Grid>
+                        </Border>
 
                         <Grid x:Name="BedsideLayout">
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -829,8 +870,8 @@
                                                     <StackPanel>
                                                         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                                             <CheckBox IsChecked="{Binding Enabled}" VerticalAlignment="Center" Margin="0,0,12,0" AutomationProperties.Name="Alarm enabled"/>
-                                                            <TextBox Grid.Column="1" Text="{Binding Time, UpdateSourceTrigger=PropertyChanged}" FontSize="20" FontWeight="SemiBold" ToolTip="24-hour time, HH:mm" AutomationProperties.Name="Alarm time"/>
-                                                            <TextBox Grid.Column="2" Text="{Binding Label, UpdateSourceTrigger=PropertyChanged}" Margin="12,0" MaxLength="24" ToolTip="Alarm label" AutomationProperties.Name="Alarm label"/>
+                                                            <TextBox Grid.Column="1" Text="{Binding Time}" FontSize="20" FontWeight="SemiBold" ToolTip="24-hour time, HH:mm" AutomationProperties.Name="Alarm time"/>
+                                                            <TextBox Grid.Column="2" Text="{Binding Label}" Margin="12,0" MaxLength="24" ToolTip="Alarm label" AutomationProperties.Name="Alarm label"/>
                                                             <Button Grid.Column="3" Content="&#xE74D;" FontFamily="Segoe Fluent Icons" Command="{Binding DataContext.RemoveBedsideAlarmCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" ToolTip="Delete alarm" AutomationProperties.Name="Delete alarm"/>
                                                         </Grid>
                                                         <UniformGrid Columns="7" Margin="0,14,0,0">
@@ -848,20 +889,50 @@
                                     <TextBlock Style="{StaticResource Muted}" Text="These settings apply only inside Bedside Mode." Margin="0,0,0,18"/>
                                     <Border Style="{StaticResource Card}" Margin="0,0,0,14">
                                         <StackPanel>
-                                            <CheckBox Content="Use automatic brightness schedule" IsChecked="{Binding BedsideBrightnessScheduleEnabled}" FontWeight="SemiBold"/>
-                                            <Grid Margin="0,14,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/></Grid.ColumnDefinitions><TextBlock Text="Manual brightness"/><TextBlock Grid.Column="1" Text="{Binding BedsideManualBrightness, StringFormat={}{0}%}" HorizontalAlignment="Right"/></Grid>
-                                            <Slider Minimum="1" Maximum="100" Value="{Binding BedsideManualBrightness}"/>
-                                            <DockPanel Margin="0,18,0,8"><Button DockPanel.Dock="Right" Command="{Binding AddBedsideBrightnessSegmentCommand}" Content="Add time"/><TextBlock Text="Schedule" FontWeight="SemiBold" VerticalAlignment="Center"/></DockPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="Brightness schedule" FontSize="18" FontWeight="SemiBold"/>
+                                                    <TextBlock Style="{StaticResource Muted}" Text="EchoDesk follows this curve over a full 24-hour day." Margin="0,4,20,0"/>
+                                                </StackPanel>
+                                                <CheckBox Grid.Column="1" Content="Automatic" IsChecked="{Binding BedsideBrightnessScheduleEnabled}" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                                            </Grid>
+                                            <TextBlock Style="{StaticResource Muted}" Text="{Binding BedsideBrightnessRuntimeGuidance}"
+                                                       TextWrapping="Wrap" FontSize="12" Margin="0,10,0,0"/>
+
+                                            <controls:BedsideBrightnessTimeline Segments="{Binding BedsideBrightnessSegments}"
+                                                IsScheduleEnabled="{Binding BedsideBrightnessScheduleEnabled}" Margin="0,18,0,8"
+                                                PreviewMouseLeftButtonDown="BedsideContinuousEdit_Begin"
+                                                PreviewMouseLeftButtonUp="BedsideContinuousEdit_End"
+                                                LostMouseCapture="BedsideContinuousEdit_CaptureLost"
+                                                AutomationProperties.Name="Bedside 24-hour brightness timeline"
+                                                AutomationProperties.HelpText="Drag a point, or use arrow keys. Left and right change time by 15 minutes. Up and down change brightness by 5 percent. Page Up and Page Down select another point."/>
+
+                                            <DockPanel Margin="0,10,0,8">
+                                                <Button DockPanel.Dock="Right" Command="{Binding AddBedsideBrightnessSegmentCommand}" Content="Add schedule point"/>
+                                                <StackPanel>
+                                                    <TextBlock Text="Exact schedule points" FontWeight="SemiBold"/>
+                                                    <TextBlock Style="{StaticResource Muted}" Text="Edit time and brightness precisely. Changes apply automatically." FontSize="12" Margin="0,3,16,0"/>
+                                                </StackPanel>
+                                            </DockPanel>
                                             <ItemsControl ItemsSource="{Binding BedsideBrightnessSegments}">
                                                 <ItemsControl.ItemTemplate><DataTemplate DataType="{x:Type vm:BedsideBrightnessSegmentEditor}">
-                                                    <Grid Margin="0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                        <TextBox Text="{Binding Time, UpdateSourceTrigger=PropertyChanged}" ToolTip="24-hour time, HH:mm"/>
-                                                        <Slider Grid.Column="1" Minimum="1" Maximum="100" Value="{Binding Brightness}" Margin="12,0"/>
+                                                    <Grid Margin="0,4" Background="{DynamicResource SurfaceAltBrush}"><Grid.ColumnDefinitions><ColumnDefinition Width="104"/><ColumnDefinition Width="*"/><ColumnDefinition Width="58"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <TextBox Text="{Binding Time}" ToolTip="24-hour time, HH:mm" AutomationProperties.Name="Schedule point time"/>
+                                                        <Slider Grid.Column="1" Minimum="1" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True" Value="{Binding Brightness}" Margin="12,0"
+                                                                PreviewMouseLeftButtonDown="BedsideContinuousEdit_Begin" PreviewMouseLeftButtonUp="BedsideContinuousEdit_End" LostMouseCapture="BedsideContinuousEdit_CaptureLost"
+                                                                AutomationProperties.Name="Schedule point brightness"/>
                                                         <TextBlock Grid.Column="2" Text="{Binding Brightness, StringFormat={}{0}%}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
                                                         <Button Grid.Column="3" Content="&#xE74D;" FontFamily="Segoe Fluent Icons" Margin="10,0,0,0" Command="{Binding DataContext.RemoveBedsideBrightnessSegmentCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" ToolTip="Remove schedule time" AutomationProperties.Name="Remove brightness schedule time"/>
                                                     </Grid>
                                                 </DataTemplate></ItemsControl.ItemTemplate>
                                             </ItemsControl>
+
+                                            <Grid Margin="0,20,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/></Grid.ColumnDefinitions><TextBlock Text="Manual brightness" FontWeight="SemiBold"/><TextBlock Grid.Column="1" Text="{Binding BedsideManualBrightness, StringFormat={}{0}%}" HorizontalAlignment="Right" FontWeight="SemiBold"/></Grid>
+                                            <Slider Minimum="1" Maximum="100" TickFrequency="1" Value="{Binding BedsideManualBrightness}"
+                                                    PreviewMouseLeftButtonDown="BedsideContinuousEdit_Begin" PreviewMouseLeftButtonUp="BedsideContinuousEdit_End" LostMouseCapture="BedsideContinuousEdit_CaptureLost"
+                                                    AutomationProperties.Name="Bedside manual brightness"/>
+                                            <TextBlock Style="{StaticResource Muted}" Text="Used whenever the automatic schedule is off." FontSize="12" Margin="0,5,0,0"/>
                                         </StackPanel>
                                     </Border>
                                     <Border Style="{StaticResource Card}" Margin="0,0,0,14">

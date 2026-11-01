@@ -4,6 +4,13 @@ import UserNotifications
 
 private let echoDeskFirstRunOnboardingKey = "EchoDeskFirstRunOnboardingCompletedV1"
 
+private enum EchoDeskDesign {
+    static let sidebarWidth: CGFloat = 244
+    static let pageInset: CGFloat = 28
+    static let cardRadius: CGFloat = 14
+    static let sectionSpacing: CGFloat = 18
+}
+
 enum EchoDeskDesktopPage: Int, CaseIterable {
     case overview, deviceControl, customisation, bedside, setup, recovery
 }
@@ -32,11 +39,60 @@ final class EchoDeskSurfaceView: NSView {
         case .card:
             layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
             layer?.borderColor = NSColor.separatorColor.cgColor
-            layer?.borderWidth = 1
-            layer?.cornerRadius = 12
+            layer?.borderWidth = 0.75
+            layer?.cornerRadius = EchoDeskDesign.cardRadius
         case .canvas:
             layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         }
+    }
+}
+
+final class EchoDeskSidebarButton: NSButton {
+    private let selectionBar = CALayer()
+    private var tracking: NSTrackingArea?
+    private var hovered = false
+    var isCurrentPage = false { didSet { refreshAppearance() } }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 9
+        layer?.cornerCurve = .continuous
+        selectionBar.cornerRadius = 1.5
+        layer?.addSublayer(selectionBar)
+        isBordered = false
+        bezelStyle = .recessed
+        imagePosition = .imageLeading
+        imageScaling = .scaleProportionallyDown
+        alignment = .left
+        font = .systemFont(ofSize: 13, weight: .medium)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func updateTrackingAreas() {
+        if let tracking { removeTrackingArea(tracking) }
+        let next = NSTrackingArea(rect: bounds, options: [.activeInKeyWindow, .mouseEnteredAndExited],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(next)
+        tracking = next
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) { hovered = true; refreshAppearance() }
+    override func mouseExited(with event: NSEvent) { hovered = false; refreshAppearance() }
+    override func layout() {
+        super.layout()
+        selectionBar.frame = NSRect(x: 3, y: 9, width: 3, height: max(0, bounds.height - 18))
+    }
+
+    private func refreshAppearance() {
+        contentTintColor = isCurrentPage ? .controlAccentColor : .labelColor
+        selectionBar.backgroundColor = NSColor.controlAccentColor.cgColor
+        selectionBar.isHidden = !isCurrentPage
+        layer?.backgroundColor = isCurrentPage
+            ? NSColor.controlAccentColor.withAlphaComponent(0.13).cgColor
+            : hovered ? NSColor.labelColor.withAlphaComponent(0.055).cgColor : NSColor.clear.cgColor
     }
 }
 
@@ -106,7 +162,7 @@ extension SettingsWindowController {
             sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: root.topAnchor),
             sidebar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            sidebar.widthAnchor.constraint(equalToConstant: 232),
+            sidebar.widthAnchor.constraint(equalToConstant: EchoDeskDesign.sidebarWidth),
             canvas.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
             canvas.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             canvas.topAnchor.constraint(equalTo: root.topAnchor),
@@ -233,17 +289,17 @@ extension SettingsWindowController {
     private func buildEchoDeskSidebar(in sidebar: NSView) {
         let mark = NSImageView()
         mark.image = NSImage(systemSymbolName: "display", accessibilityDescription: "EchoDesk")
-        mark.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
+        mark.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 19, weight: .semibold)
         mark.contentTintColor = .controlAccentColor
         mark.imageScaling = .scaleProportionallyDown
         mark.translatesAutoresizingMaskIntoConstraints = false
-        mark.widthAnchor.constraint(equalToConstant: 34).isActive = true
-        mark.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        mark.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        mark.heightAnchor.constraint(equalToConstant: 30).isActive = true
 
         let brand = NSTextField(labelWithString: "EchoDesk")
-        brand.font = .systemFont(ofSize: 18, weight: .semibold)
-        let version = NSTextField(labelWithString: "DESKTOP \(kAppVersion)")
-        version.font = .systemFont(ofSize: 10, weight: .medium)
+        brand.font = .systemFont(ofSize: 17, weight: .semibold)
+        let version = NSTextField(labelWithString: "Desktop \(kAppVersion)")
+        version.font = .systemFont(ofSize: 10, weight: .regular)
         version.textColor = .secondaryLabelColor
         let brandText = NSStackView(views: [brand, version])
         brandText.orientation = .vertical
@@ -254,56 +310,81 @@ extension SettingsWindowController {
         brandRow.alignment = .centerY
         brandRow.spacing = 9
 
-        let items: [(EchoDeskDesktopPage, String, String)] = [
-            (.overview, "Overview", "house.fill"),
-            (.deviceControl, "Device Control", "switch.2"),
-            (.customisation, "Customisation", "paintbrush.fill"),
-            (.setup, "Setup new device", "display.badge.plus"),
-            (.recovery, "Device recovery & updates", "heart.text.square.fill"),
-        ]
-        echoDeskSidebarButtons = items.map { item in
+        func makeNavigationButton(_ item: (EchoDeskDesktopPage, String, String)) -> NSButton {
             let (page, title, symbol) = item
-            let button = NSButton(title: title, target: self, action: #selector(echoDeskNavigationPressed(_:)))
+            let button = EchoDeskSidebarButton(frame: .zero)
+            button.title = title
+            button.target = self
+            button.action = #selector(echoDeskNavigationPressed(_:))
             button.tag = page.rawValue
-            button.bezelStyle = .recessed
-            button.isBordered = false
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
                 .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 16, weight: .medium))
-            button.imagePosition = .imageLeading
-            button.imageScaling = .scaleProportionallyDown
-            button.alignment = .left
-            button.font = .systemFont(ofSize: 13, weight: .semibold)
-            button.contentTintColor = .labelColor
-            button.wantsLayer = true
-            button.layer?.cornerRadius = 9
-            button.layer?.cornerCurve = .continuous
             button.translatesAutoresizingMaskIntoConstraints = false
-            button.heightAnchor.constraint(equalToConstant: 40).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 38).isActive = true
             button.setAccessibilityLabel(title)
             return button
         }
-        let nav = NSStackView(views: echoDeskSidebarButtons)
+
+        let generalItems: [(EchoDeskDesktopPage, String, String)] = [
+            (.overview, "Overview", "house.fill"),
+            (.deviceControl, "Device Control", "switch.2"),
+            (.customisation, "Customisation", "paintbrush.fill"),
+        ]
+        let managementItems: [(EchoDeskDesktopPage, String, String)] = [
+            (.setup, "Set Up New Device", "display.badge.plus"),
+            (.recovery, "Recovery & Updates", "heart.text.square.fill"),
+        ]
+        let generalButtons = generalItems.map(makeNavigationButton)
+        let managementButtons = managementItems.map(makeNavigationButton)
+        echoDeskSidebarButtons = generalButtons + managementButtons
+
+        func groupLabel(_ title: String) -> NSTextField {
+            let label = NSTextField(labelWithString: title.uppercased())
+            label.font = .systemFont(ofSize: 10, weight: .semibold)
+            label.textColor = .tertiaryLabelColor
+            return label
+        }
+        func navigationGroup(_ title: String, _ buttons: [NSButton]) -> NSStackView {
+            let buttonStack = NSStackView(views: buttons)
+            buttonStack.orientation = .vertical
+            buttonStack.alignment = .leading
+            buttonStack.spacing = 2
+            buttons.forEach { $0.widthAnchor.constraint(equalTo: buttonStack.widthAnchor).isActive = true }
+            let group = NSStackView(views: [groupLabel(title), buttonStack])
+            group.orientation = .vertical
+            group.alignment = .leading
+            group.spacing = 7
+            buttonStack.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+            return group
+        }
+        let nav = NSStackView(views: [navigationGroup("General", generalButtons),
+                                      navigationGroup("Device Management", managementButtons)])
         nav.orientation = .vertical
         nav.alignment = .leading
-        nav.spacing = 3
-        echoDeskSidebarButtons.forEach { $0.widthAnchor.constraint(equalTo: nav.widthAnchor).isActive = true }
+        nav.spacing = 21
+        nav.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: nav.widthAnchor).isActive = true }
 
         echoDeskSidebarConnectionDot = StatusIndicator(state: .inactive)
         echoDeskSidebarConnectionLabel = NSTextField(labelWithString: "CHECKING")
-        echoDeskSidebarConnectionLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        echoDeskSidebarConnectionLabel.font = .systemFont(ofSize: 10, weight: .semibold)
+        echoDeskSidebarDeviceName = NSTextField(labelWithString: "EchoDesk Mini")
+        echoDeskSidebarDeviceName.font = .systemFont(ofSize: 13, weight: .semibold)
         echoDeskFooterStatus = NSTextField(labelWithString: "Waiting…")
-        echoDeskFooterStatus.font = .systemFont(ofSize: 11)
+        echoDeskFooterStatus.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         echoDeskFooterStatus.textColor = .secondaryLabelColor
         echoDeskFooterStatus.lineBreakMode = .byTruncatingMiddle
         let footerTop = NSStackView(views: [echoDeskSidebarConnectionDot, echoDeskSidebarConnectionLabel])
         footerTop.orientation = .horizontal
         footerTop.alignment = .centerY
         footerTop.spacing = 7
-        let footerStack = NSStackView(views: [footerTop, echoDeskFooterStatus])
+        let footerStack = NSStackView(views: [echoDeskSidebarDeviceName, footerTop, echoDeskFooterStatus])
         footerStack.orientation = .vertical
         footerStack.alignment = .leading
-        footerStack.spacing = 5
+        footerStack.spacing = 4
         let footer = echoDeskCard(footerStack, padding: 12)
+        footer.setAccessibilityElement(true)
+        footer.setAccessibilityRole(.group)
+        footer.setAccessibilityLabel("Connected EchoDesk")
 
         for view in [brandRow, nav, footer] {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -312,10 +393,10 @@ extension SettingsWindowController {
         NSLayoutConstraint.activate([
             brandRow.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 18),
             brandRow.trailingAnchor.constraint(lessThanOrEqualTo: sidebar.trailingAnchor, constant: -14),
-            brandRow.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 24),
+            brandRow.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 21),
             nav.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 10),
             nav.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -10),
-            nav.topAnchor.constraint(equalTo: brandRow.bottomAnchor, constant: 26),
+            nav.topAnchor.constraint(equalTo: brandRow.bottomAnchor, constant: 25),
             footer.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 14),
             footer.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -14),
             footer.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -18),
@@ -343,15 +424,15 @@ extension SettingsWindowController {
             page.setAccessibilityHidden(true)
             canvas.addSubview(page)
             NSLayoutConstraint.activate([
-                page.leadingAnchor.constraint(equalTo: canvas.leadingAnchor, constant: 32),
-                page.trailingAnchor.constraint(equalTo: canvas.trailingAnchor, constant: -32),
+                page.leadingAnchor.constraint(equalTo: canvas.leadingAnchor, constant: EchoDeskDesign.pageInset),
+                page.trailingAnchor.constraint(equalTo: canvas.trailingAnchor, constant: -EchoDeskDesign.pageInset),
                 page.topAnchor.constraint(equalTo: banner.bottomAnchor, constant: 14),
                 page.bottomAnchor.constraint(equalTo: canvas.bottomAnchor, constant: -18),
             ])
         }
         NSLayoutConstraint.activate([
-            banner.leadingAnchor.constraint(equalTo: canvas.leadingAnchor, constant: 32),
-            banner.trailingAnchor.constraint(equalTo: canvas.trailingAnchor, constant: -32),
+            banner.leadingAnchor.constraint(equalTo: canvas.leadingAnchor, constant: EchoDeskDesign.pageInset),
+            banner.trailingAnchor.constraint(equalTo: canvas.trailingAnchor, constant: -EchoDeskDesign.pageInset),
             banner.topAnchor.constraint(equalTo: canvas.topAnchor, constant: 16),
         ])
     }
@@ -447,6 +528,7 @@ extension SettingsWindowController {
             button.contentTintColor = selected ? .controlAccentColor : .labelColor
             button.layer?.backgroundColor = selected
                 ? NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor : NSColor.clear.cgColor
+            (button as? EchoDeskSidebarButton)?.isCurrentPage = selected
         }
         if page == .setup { refreshEchoDeskSetupDevices() }
         if page == .recovery { refreshEchoDeskRecoveryDevices() }
@@ -499,30 +581,25 @@ extension SettingsWindowController {
         componentRow.orientation = .horizontal; componentRow.alignment = .top
         let component = echoDeskCard(componentRow)
 
-        echoDeskNotificationStatus = NSTextField(labelWithString: "NOT SET UP")
+        echoDeskNotificationStatus = NSTextField(labelWithString: "Not available on macOS")
         echoDeskNotificationStatus.font = .systemFont(ofSize: 11, weight: .bold)
         let notificationTitle = NSTextField(labelWithString: "Notification Stack")
         notificationTitle.font = .systemFont(ofSize: 17, weight: .semibold)
         let notificationHeading = NSStackView(views: [notificationTitle, echoDeskNotificationStatus])
         notificationHeading.orientation = .horizontal; notificationHeading.spacing = 12
-        echoDeskNotificationDetail = echoDeskMuted("macOS only exposes notifications delivered by EchoDesk Desktop itself. Other apps remain private.")
-        let savedNotificationExclusions = UserDefaults.standard.string(forKey: "EchoDeskNotificationExclusions") ?? ""
-        echoDeskNotificationExclusions = echoDeskMuted(savedNotificationExclusions.isEmpty
-            ? "Delivery: All EchoDesk Desktop notifications"
-            : "Silenced sources: \(savedNotificationExclusions)")
-        let notificationButtons = NSStackView(views: [
-            echoDeskPrimaryButton("Set up notifications", #selector(echoDeskSetupNotifications)),
-            NSButton(title: "Send test", target: self, action: #selector(echoDeskTestNotification)),
-            NSButton(title: "Disable", target: self, action: #selector(echoDeskDisableNotifications)),
-        ])
-        notificationButtons.orientation = .horizontal; notificationButtons.spacing = 8
+        echoDeskNotificationDetail = echoDeskMuted("Notification Stack cannot access other apps’ notifications on macOS.")
+        echoDeskNotificationExclusions = echoDeskMuted("")
+        echoDeskNotificationExclusions.isHidden = true
         let notificationCard = echoDeskCard(echoDeskPageStack([
-            notificationHeading, echoDeskNotificationDetail, echoDeskNotificationExclusions, notificationButtons,
+            notificationHeading, echoDeskNotificationDetail,
         ], spacing: 8))
+        notificationCard.alphaValue = 0.62
+        notificationCard.setAccessibilityLabel("Notification Stack. Not available on macOS")
 
         let apps = echoDeskAppGrid(columns: 3)
-        let stack = echoDeskPageStack([header, deviceCard, metrics, echoDeskSectionTitle("Components"), component, notificationCard,
-                                       echoDeskSectionTitle("Quick actions"), apps])
+        let components = echoDeskAdaptiveColumns([component, notificationCard], collapseBelow: 720)
+        let stack = echoDeskPageStack([header, deviceCard, metrics, echoDeskSectionTitle("Components"), components,
+                                       echoDeskSectionTitle("Quick actions"), apps], spacing: EchoDeskDesign.sectionSpacing)
         return stack
     }
 
@@ -535,8 +612,9 @@ extension SettingsWindowController {
         let reset = echoDeskDangerRow("Factory Reset",
             "Clear setup completion and return the physical device to its Hello screen. Firmware and unrelated flash partitions are not erased.",
             "Factory Reset…", #selector(echoDeskFactoryReset))
-        let danger = echoDeskCard(echoDeskPageStack([restart, echoDeskDivider(), reset]))
-        return echoDeskPageStack([header, apps, danger])
+        let system = echoDeskAdaptiveColumns([echoDeskCard(restart), echoDeskCard(reset)], collapseBelow: 700)
+        return echoDeskPageStack([header, apps, echoDeskSectionTitle("Device maintenance"), system],
+                                 spacing: EchoDeskDesign.sectionSpacing)
     }
 
     private func buildEchoDeskCustomisationPage() -> NSView {
@@ -625,18 +703,17 @@ extension SettingsWindowController {
                 let item = NSMenuItem(title: label, action: nil, keyEquivalent: "")
                 item.representedObject = value; popup.menu?.addItem(item)
             }
+            popup.target = self
+            popup.action = #selector(echoDeskApplyPcDashboard)
             return popup
         }
-        let applyDashboard = NSButton(title: "Apply dashboard", target: self,
-                                      action: #selector(echoDeskApplyPcDashboard))
-        applyDashboard.bezelStyle = .rounded
         let dashboard = echoDeskCard(echoDeskPageStack([
             echoDeskSectionTitle("PC Dashboard"),
-            echoDeskMuted("Choose one to four different metrics. Unavailable sensors remain unavailable instead of appearing as zero."),
+            echoDeskMuted("Choose one to four different metrics. Changes apply automatically; unavailable sensors remain unavailable instead of appearing as zero."),
             echoDeskLabeledControl("Metric 1", echoDeskPcDashboardPopups[0]),
             echoDeskLabeledControl("Metric 2", echoDeskPcDashboardPopups[1]),
             echoDeskLabeledControl("Metric 3", echoDeskPcDashboardPopups[2]),
-            echoDeskLabeledControl("Metric 4", echoDeskPcDashboardPopups[3]), applyDashboard,
+            echoDeskLabeledControl("Metric 4", echoDeskPcDashboardPopups[3]),
         ]))
         requestEchoDeskPcDashboardState()
         let desktopAppearance = EchoDeskPopupButton(frame: .zero, pullsDown: false)
@@ -650,7 +727,16 @@ extension SettingsWindowController {
         let desktop = echoDeskCard(echoDeskPageStack([
             echoDeskSectionTitle("Desktop app"), echoDeskLabeledControl("Desktop appearance", desktopAppearance),
         ]))
-        return echoDeskPageStack([header, bedside, quick, general, nowPlaying, clock, codex, performance, dashboard, desktop])
+        let deviceBasics = echoDeskAdaptiveColumns([quick, general], collapseBelow: 720)
+        let experiences = echoDeskAdaptiveColumns([nowPlaying, clock], collapseBelow: 720)
+        let insights = echoDeskAdaptiveColumns([codex, performance], collapseBelow: 720)
+        return echoDeskPageStack([
+            header, bedside,
+            echoDeskSectionTitle("Device basics"), deviceBasics,
+            echoDeskSectionTitle("Experiences"), experiences,
+            echoDeskSectionTitle("Usage and performance"), insights,
+            dashboard, desktop,
+        ], spacing: EchoDeskDesign.sectionSpacing)
     }
 
     private func requestEchoDeskPcDashboardState(completion: ((Bool) -> Void)? = nil) {
@@ -686,8 +772,18 @@ extension SettingsWindowController {
         let metrics = echoDeskPcDashboardPopups.compactMap { $0.selectedItem?.representedObject as? String }
             .filter { !$0.isEmpty }
         guard metrics.count >= 1, metrics.count <= 4, Set(metrics).count == metrics.count else {
+            echoDeskFooterStatus?.stringValue = "Choose one to four different dashboard metrics."
             NSSound.beep(); return
         }
+        echoDeskPcDashboardAutoApplyWorkItem?.cancel()
+        echoDeskFooterStatus?.stringValue = "Dashboard changes pending…"
+        let work = DispatchWorkItem { [weak self] in self?.performEchoDeskPcDashboardApply(metrics) }
+        echoDeskPcDashboardAutoApplyWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
+    private func performEchoDeskPcDashboardApply(_ metrics: [String]) {
+        echoDeskPcDashboardAutoApplyWorkItem = nil
         echoDeskFooterStatus?.stringValue = "Checking the current PC Dashboard…"
         requestEchoDeskPcDashboardState { [weak self] ready in
             guard let self else { return }
@@ -762,13 +858,21 @@ extension SettingsWindowController {
             echoDeskSectionTitle("Select device"), echoDeskMuted("Select an EchoDesk Mini USB serial device before choosing an action."), deviceRow,
         ]))
 
-        echoDeskRecoveryActions = NSStackView(views: [
+        let standardActions = echoDeskAdaptiveColumns([
             echoDeskRecoveryAction(0, "Update EchoDesk", "Update EchoDesk OS to the latest version"),
             echoDeskRecoveryAction(1, "Reset/Install EchoDesk OS", "Install a fresh version of EchoDesk OS"),
+        ], collapseBelow: 720)
+        let repairActions = echoDeskAdaptiveColumns([
             echoDeskRecoveryAction(2, "Repair device", "Repair and reset EchoDesk OS if on older firmware"),
             echoDeskRecoveryAction(3, "Recovery", "Fully reset EchoDesk without checks"),
-        ])
-        echoDeskRecoveryActions.orientation = .vertical; echoDeskRecoveryActions.spacing = 12
+        ], collapseBelow: 720)
+        echoDeskRecoveryActions = NSStackView(views: [standardActions, repairActions])
+        echoDeskRecoveryActions.orientation = .vertical
+        echoDeskRecoveryActions.alignment = .leading
+        echoDeskRecoveryActions.spacing = 14
+        echoDeskRecoveryActions.arrangedSubviews.forEach {
+            $0.widthAnchor.constraint(equalTo: echoDeskRecoveryActions.widthAnchor).isActive = true
+        }
         echoDeskRecoveryStatus = echoDeskMuted("")
         echoDeskRecoveryProgress = NSProgressIndicator()
         echoDeskRecoveryProgress.style = .bar; echoDeskRecoveryProgress.isIndeterminate = true
@@ -883,10 +987,11 @@ extension SettingsWindowController {
             echoDeskLabeledControl("Appearance", echoDeskSetupQuickTheme),
             echoDeskLabeledControl("Time format", echoDeskSetupQuickClockFormat),
         ])
+        echoDeskSetupQuickContinueButton = echoDeskPrimaryButton("Continue", #selector(echoDeskApplySetupQuickSettings))
         return echoDeskCard(echoDeskPageStack([
             echoDeskHero("Choose your quick settings."),
             echoDeskMuted("You can change these at any time from Customisation."), controls,
-            echoDeskPrimaryButton("Continue", #selector(echoDeskApplySetupQuickSettings)),
+            echoDeskSetupQuickContinueButton,
         ]))
     }
 
@@ -949,6 +1054,7 @@ extension SettingsWindowController {
         echoDeskConnectionDetail?.stringValue = ready
             ? "EchoDesk is connected through USB."
             : "Connect EchoDesk Mini or use Setup new device."
+        echoDeskSidebarDeviceName?.stringValue = ready ? "EchoDesk Mini" : "No device connected"
         echoDeskFooterStatus?.stringValue = serial.connectedPort ?? "Waiting…"
         echoDeskFirmwareLabel?.stringValue = serial.deviceFirmwareVersion.map { "EchoDesk OS \($0)" } ?? "Not reported"
         echoDeskHardwareLabel?.stringValue = ready ? "EchoDesk Mini" : "Not reported"
@@ -978,13 +1084,8 @@ extension SettingsWindowController {
         } else {
             echoDeskComponentUpdated?.stringValue = "Last successful update: No successful update yet"
         }
-        let notificationsEnabled = UserDefaults.standard.bool(forKey: "EchoDeskNotificationStackEnabled")
-        let notificationSupported = (serial.deviceEchoDeskNotificationProtocol ?? 0) >= 1
-        echoDeskNotificationStatus?.stringValue = !notificationsEnabled ? "NOT SET UP" : notificationSupported ? "APP NOTIFICATIONS ONLY" : "UPDATE REQUIRED"
-        echoDeskNotificationDetail?.stringValue = !notificationSupported
-            ? "Update EchoDesk OS to use Notification Stack."
-            : "macOS has no public API for reading other apps’ Notification Centre history. EchoDesk Desktop can safely relay its own notifications and test messages."
-        if ready { syncEchoDeskNotificationPreferenceIfNeeded() }
+        echoDeskNotificationStatus?.stringValue = "Not available on macOS"
+        echoDeskNotificationDetail?.stringValue = "Notification Stack cannot access other apps’ notifications on macOS."
         if echoDeskSelectedPage == .setup {
             if echoDeskSetupStep == .usbDevice { refreshEchoDeskSetupDevices() }
             continueEchoDeskSetupAfterReconnect(profile: profile)
@@ -1000,6 +1101,7 @@ extension SettingsWindowController {
            !echoDeskBedsideStateRequestInFlight {
             requestEchoDeskBedsideState()
         }
+        if echoDeskSelectedPage == .bedside { refreshEchoDeskBedsideAvailability() }
         if ready && (forceStateRequest || Date().timeIntervalSince(echoDeskLastStateRequest) > 5) {
             requestEchoDeskState()
         }
@@ -1032,6 +1134,8 @@ extension SettingsWindowController {
                 self.echoDeskQuickClockFormat?.selectItem(at: format == "12h" ? 0 : 1)
             }
             self.applyEchoDeskStateToControls(json)
+            self.flushPendingEchoDeskSettingChangesIfReady()
+            self.retryPendingEchoDeskSetupQuickSettingsIfReady()
             self.applyDeferredEchoDeskQuickSettingsIfNeeded()
             self.refreshEchoDeskDesktopState(forceStateRequest: false)
         }
@@ -1612,13 +1716,54 @@ extension SettingsWindowController {
     }
 
     private func applyEchoDeskSetting(_ key: String, value: Any) {
-        guard let revision = echoDeskLastState?["revision"] as? Int else {
-            requestEchoDeskState(); return
+        guard let monitor, monitor.serialPort.state == .connected,
+              let port = monitor.serialPort.connectedPort,
+              let profile = DeviceRegistry.shared.currentProfile() else {
+            echoDeskFooterStatus?.stringValue = "Connect EchoDesk before changing device settings."
+            NSSound.beep()
+            return
         }
+        echoDeskPendingSettingChanges[key] = value
+        echoDeskPendingSettingPort = port
+        echoDeskPendingSettingMAC = profile.mac
+        echoDeskFooterStatus?.stringValue = "Setting change pending…"
+        if echoDeskLastStatePort != port || echoDeskLastStateMAC != profile.mac
+            || echoDeskLastState?["revision"] as? Int == nil {
+            requestEchoDeskState()
+            return
+        }
+        flushPendingEchoDeskSettingChangesIfReady()
+    }
+
+    private func flushPendingEchoDeskSettingChangesIfReady() {
+        guard !echoDeskApplyingSettingChanges,
+              !echoDeskPendingSettingChanges.isEmpty,
+              echoDeskPendingSetupQuickTheme == nil,
+              let monitor,
+              monitor.serialPort.state == .connected,
+              monitor.serialPort.connectedPort == echoDeskPendingSettingPort,
+              DeviceRegistry.shared.currentProfile()?.mac == echoDeskPendingSettingMAC,
+              echoDeskLastStatePort == echoDeskPendingSettingPort,
+              echoDeskLastStateMAC == echoDeskPendingSettingMAC,
+              let revision = echoDeskLastState?["revision"] as? Int else { return }
+        let changes = echoDeskPendingSettingChanges
+        echoDeskPendingSettingChanges.removeAll()
+        echoDeskApplyingSettingChanges = true
+        echoDeskFooterStatus?.stringValue = "Applying device settings…"
         sendEchoDeskCommand("echodesk_set_settings", extra: [
-            "baseRevision": revision, "persist": true, "settings": [key: value],
+            "baseRevision": revision, "persist": true, "settings": changes,
         ]) { [weak self] ok in
-            if ok { self?.requestEchoDeskState() }
+            guard let self else { return }
+            self.echoDeskApplyingSettingChanges = false
+            if ok {
+                self.echoDeskFooterStatus?.stringValue = "Device settings updated."
+                self.requestEchoDeskState()
+            } else {
+                for (key, value) in changes where self.echoDeskPendingSettingChanges[key] == nil {
+                    self.echoDeskPendingSettingChanges[key] = value
+                }
+                self.echoDeskFooterStatus?.stringValue = "The device did not confirm this change. Reconnect and try again."
+            }
         }
     }
 
@@ -1774,21 +1919,61 @@ extension SettingsWindowController {
             setEchoDeskSetupStep(.welcome)
             return
         }
-        guard monitor?.serialPort.state == .connected else {
+        guard let monitor, monitor.serialPort.state == .connected,
+              let port = monitor.serialPort.connectedPort,
+              let profile = DeviceRegistry.shared.currentProfile() else {
             echoDeskFooterStatus.stringValue = "Reconnect EchoDesk through USB to apply quick settings."
             return
         }
-        guard let revision = echoDeskLastState?["revision"] as? Int else {
-            requestEchoDeskState()
-            echoDeskFooterStatus.stringValue = "Refreshing device settings…"
-            return
-        }
+        echoDeskPendingSetupQuickTheme = theme
+        echoDeskPendingSetupQuickClock = clock
+        echoDeskPendingSetupQuickPort = port
+        echoDeskPendingSetupQuickMAC = profile.mac
+        echoDeskSetupQuickContinueButton?.isEnabled = false
+        // Setup may have restarted or reflashed the device. Never reuse a
+        // revision captured before that transition; request one that matches
+        // the currently connected port and hardware identity, then retry from
+        // the state callback.
+        echoDeskLastState = nil
+        echoDeskLastStatePort = nil
+        echoDeskLastStateMAC = nil
+        requestEchoDeskState()
+        echoDeskFooterStatus.stringValue = "Checking the current EchoDesk settings…"
+    }
+
+    private func retryPendingEchoDeskSetupQuickSettingsIfReady() {
+        guard !echoDeskApplyingSetupQuickSettings,
+              echoDeskSetupStep == .quickSettings,
+              let theme = echoDeskPendingSetupQuickTheme,
+              let clock = echoDeskPendingSetupQuickClock,
+              let expectedPort = echoDeskPendingSetupQuickPort,
+              let expectedMAC = echoDeskPendingSetupQuickMAC,
+              let monitor,
+              monitor.serialPort.state == .connected,
+              monitor.serialPort.connectedPort == expectedPort,
+              DeviceRegistry.shared.currentProfile()?.mac == expectedMAC,
+              echoDeskLastStatePort == expectedPort,
+              echoDeskLastStateMAC == expectedMAC,
+              let revision = echoDeskLastState?["revision"] as? Int else { return }
+        echoDeskApplyingSetupQuickSettings = true
+        echoDeskSetupQuickContinueButton?.isEnabled = false
+        echoDeskFooterStatus.stringValue = "Applying quick settings…"
         sendEchoDeskCommand("echodesk_set_settings", extra: [
             "baseRevision": revision, "persist": true,
             "settings": ["theme": theme, "clockFormat": clock],
         ]) { [weak self] ok in
-            if ok { self?.completeEchoDeskGuidedSetup() }
-            else { self?.echoDeskFooterStatus.stringValue = "EchoDesk did not accept quick settings." }
+            guard let self else { return }
+            self.echoDeskApplyingSetupQuickSettings = false
+            if ok {
+                self.echoDeskPendingSetupQuickTheme = nil
+                self.echoDeskPendingSetupQuickClock = nil
+                self.echoDeskPendingSetupQuickPort = nil
+                self.echoDeskPendingSetupQuickMAC = nil
+                self.completeEchoDeskGuidedSetup()
+            } else {
+                self.echoDeskSetupQuickContinueButton?.isEnabled = true
+                self.echoDeskFooterStatus.stringValue = "EchoDesk did not accept quick settings. Check the connection and try again."
+            }
         }
     }
 
