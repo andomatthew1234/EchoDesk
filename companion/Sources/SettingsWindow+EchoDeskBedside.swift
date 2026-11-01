@@ -39,20 +39,22 @@ struct EchoDeskBedsideConfig {
     var themeStartMinute: Int
     var themeEndMinute: Int
 
-    static let defaults = EchoDeskBedsideConfig(
+    private static let defaultSegments: [EchoDeskBedsideScheduleSegment] = [
+        .init(startMinute: 0, brightness: 1),
+        .init(startMinute: 300, brightness: 40),
+        .init(startMinute: 420, brightness: 70),
+        .init(startMinute: 480, brightness: 100),
+        .init(startMinute: 1080, brightness: 60),
+        .init(startMinute: 1140, brightness: 40),
+        .init(startMinute: 1230, brightness: 30),
+        .init(startMinute: 1290, brightness: 1),
+    ]
+
+    static let defaults: EchoDeskBedsideConfig = EchoDeskBedsideConfig(
         clockFormat: "12h", clockShowSeconds: false, clockStyle: "large",
         nextAlarmWidget: true, weatherWidget: false,
         alarms: [], scheduleEnabled: true, manualBrightness: 40,
-        segments: [
-            .init(startMinute: 0, brightness: 1),
-            .init(startMinute: 300, brightness: 40),
-            .init(startMinute: 420, brightness: 70),
-            .init(startMinute: 480, brightness: 100),
-            .init(startMinute: 1080, brightness: 60),
-            .init(startMinute: 1140, brightness: 40),
-            .init(startMinute: 1230, brightness: 30),
-            .init(startMinute: 1290, brightness: 1),
-        ],
+        segments: defaultSegments,
         nightScheduleEnabled: true, nightManualEnabled: false,
         nightStartMinute: 1140, nightEndMinute: 420,
         themeScheduleEnabled: true, themeManualDark: true,
