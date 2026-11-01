@@ -116,7 +116,9 @@ jobs:
 
       - name: Test firmware release packaging
         shell: pwsh
-        run: .\scripts\test_echodesk_firmware_package.ps1
+        run: >-
+          .\scripts\test_echodesk_firmware_package.ps1
+          -SourceFirmware .\desktop\firmware\echodesk-mini\2.31.0\echodesk-os.bin
 
       - name: Test Rust workspace
         working-directory: companion-windows

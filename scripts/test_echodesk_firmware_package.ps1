@@ -1,8 +1,16 @@
+[CmdletBinding()]
+param(
+    [string]$SourceFirmware
+)
+
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $packager = Join-Path $PSScriptRoot 'package_echodesk_firmware.ps1'
 $manifest = Join-Path $repositoryRoot 'desktop\firmware\firmware-manifest.json'
-$firmware = Join-Path $repositoryRoot 'dist\ai-monitor-freenove-fnk0114a-2p4.bin'
+if ([string]::IsNullOrWhiteSpace($SourceFirmware)) {
+    $SourceFirmware = Join-Path $repositoryRoot 'dist\ai-monitor-freenove-fnk0114a-2p4.bin'
+}
+$firmware = $SourceFirmware
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ("echodesk-firmware-test-" + [guid]::NewGuid().ToString('N'))
 
 function Write-ManifestDigest([string]$Path) {
