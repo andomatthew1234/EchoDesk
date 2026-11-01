@@ -85,6 +85,16 @@ test("every in-page navigation link has a target", async ({ page }) => {
   expect(missing).toEqual([]);
 });
 
+test("Mini purchase calls to action use the EchoDesk Stripe checkout", async ({ page }) => {
+  await page.goto("./#buy", { waitUntil: "networkidle" });
+  const checkout = "https://buy.stripe.com/28E00k3FCcrH7LSeCC53O0W";
+  const callsToAction = page.locator('.mini-card a.button, .purchase-mini a.button');
+  await expect(callsToAction).toHaveCount(2);
+  await expect(callsToAction).toHaveText(["Buy EchoDesk Mini", "Buy EchoDesk Mini"]);
+  expect(await callsToAction.evaluateAll(links => links.map(link => link.getAttribute("href")))).toEqual([checkout, checkout]);
+  await expect(page.locator(".purchase-mini small").filter({ hasText: "Secure checkout powered by Stripe." })).toHaveText("Secure checkout powered by Stripe.");
+});
+
 test("setup step uses the USB icon asset", async ({ page }) => {
   await page.goto("./#setup", { waitUntil: "networkidle" });
   const icon = page.locator(".cable-visual img");
