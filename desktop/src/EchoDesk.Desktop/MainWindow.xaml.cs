@@ -1,6 +1,8 @@
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Media.Animation;
 using EchoDesk.Desktop.Services;
 using EchoDesk.Desktop.ViewModels;
@@ -34,14 +36,16 @@ public partial class MainWindow : Window
                     new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(700))
                     { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } });
             }
+            if (args.PropertyName == nameof(MainViewModel.Feedback) && IsLoaded)
+            {
+                var peer = UIElementAutomationPeer.FromElement(StatusText)
+                           ?? new FrameworkElementAutomationPeer(StatusText);
+                peer.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+            }
         };
         viewModel.ClockWindowRequested += (_, mode) => Dispatcher.Invoke(() => ShowClockWindow(viewModel, mode));
         Loaded += OnLoaded;
-        SizeChanged += (_, _) =>
-        {
-            viewModel.IsCompact = ActualWidth < 790;
-            SidebarColumn.Width = new GridLength(viewModel.IsCompact ? 78 : 220);
-        };
+        SizeChanged += (_, _) => ApplyResponsiveLayout(ActualWidth);
         Closing += (_, eventArgs) =>
         {
             if (!App.IsExiting && viewModel.MinimizeToTray)
@@ -50,6 +54,14 @@ public partial class MainWindow : Window
                 Hide();
             }
         };
+    }
+
+    public void ApplyResponsiveLayout(double windowWidth)
+    {
+        const double compactBreakpoint = 1000;
+        if (DataContext is not MainViewModel viewModel) return;
+        viewModel.IsCompact = windowWidth < compactBreakpoint;
+        SidebarColumn.Width = new GridLength(viewModel.IsCompact ? 78 : 220);
     }
 
     private void ShowClockWindow(MainViewModel viewModel, string? requestedMode)

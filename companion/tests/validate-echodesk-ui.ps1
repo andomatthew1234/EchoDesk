@@ -130,9 +130,9 @@ if ($onboarding.Contains('monitor') -or $onboarding.Contains('Host')) {
     throw 'First-run onboarding must not depend on the Host or a connected device.'
 }
 foreach ($resumeGuard in @(
-    'defaults.string(forKey: "EchoDeskPendingSetupPortV2") != nil',
-    'defaults.integer(forKey: "EchoDeskGuidedSetupStepV2") != EchoDeskSetupStep.connect.rawValue',
-    'guard !pendingUSBSetup'
+    'let savedSetupStep = EchoDeskSetupStep(rawValue:',
+    'let setupInProgress = savedSetupStep != .connect',
+    'guard !setupInProgress'
 )) {
     if (-not $onboarding.Contains($resumeGuard)) {
         throw "First-run onboarding can overwrite a pending guided setup: missing $resumeGuard"
@@ -150,7 +150,8 @@ foreach ($mainSafetyFeature in @(
     'completion?(false, "Firmware update cancelled.")',
     '(payload["requestId"] as? NSNumber)?.uint64Value',
     'json["command"] as? String != expectedCommand',
-    'let pendingUSBSetup = defaults.string(forKey: "EchoDeskPendingSetupPortV2") != nil'
+    'let savedSetupStep = EchoDeskSetupStep(rawValue: defaults.integer(forKey: "EchoDeskGuidedSetupStepV2")) ?? .connect',
+    'if savedSetupStep != .connect'
 )) { Assert-Contains $main $mainSafetyFeature }
 
 foreach ($brokenInterpolation in @(
@@ -164,16 +165,16 @@ foreach ($brokenInterpolation in @(
 }
 
 if ($source.Contains('Terms & Privacy') -or $source.Contains('IsGuidedTermsStep')) {
-    throw 'The macOS 0.2.9 setup must not contain a Terms step.'
+    throw 'The macOS 0.2.10 setup must not contain a Terms step.'
 }
-Assert-Contains $main 'let kAppVersion = "0.2.9"'
+Assert-Contains $main 'let kAppVersion = "0.2.10"'
 Assert-Contains $main 'removeMenuBarStatusItem()'
 Assert-Contains $main 'var availableUpdateAsset: GitHubAsset?'
 Assert-Contains $main '$0.name.hasPrefix("EchoDesk-Desktop-v")'
 Assert-Contains $main '$0.name.hasSuffix("-macos-universal.zip")'
-Assert-Contains $build 'APP_VERSION="0.2.9"'
+Assert-Contains $build 'APP_VERSION="0.2.10"'
 Assert-Contains $build 'SettingsWindow+EchoDeskDesktop.swift'
-Assert-Contains $workflow 'EchoDesk-Desktop-v0.2.9-macos-universal'
+Assert-Contains $workflow 'EchoDesk-Desktop-v0.2.10-macos-universal'
 
 if (-not (Test-Path -LiteralPath $dmgBackgroundPath)) {
     throw 'EchoDesk DMG background asset is missing.'
@@ -211,9 +212,36 @@ foreach ($dmgContract in @(
     '# Preserve the original AI Monitor packaging path.'
 )) { Assert-Contains $build $dmgContract }
 
-$versionNode = $plist.SelectSingleNode("//key[.='CFBundleShortVersionString']/following-sibling::*[1]")
-if ($null -eq $versionNode -or $versionNode.InnerText -ne '0.2.9') {
-    throw 'EchoDesk Info.plist version is not 0.2.9.'
+foreach ($layoutNeedle in @(
+    'final class EchoDeskAdaptiveStackView: NSStackView',
+    'page.isHidden = true',
+    'page.setAccessibilityHidden(true)',
+    'target.layoutSubtreeIfNeeded()',
+    'echoDeskPageTransitionGeneration += 1',
+    'button.layer?.backgroundColor = selected',
+    'button.bezelColor = .controlAccentColor',
+    'label.maximumNumberOfLines = 0',
+    'scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 22, right: 0)'
+)) {
+    if (-not $source.Contains($layoutNeedle)) {
+        throw "EchoDesk macOS shell polish regression: missing $layoutNeedle"
+    }
+}
+if ($source.Contains('stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 22')) {
+    throw 'Nested macOS card stacks must not inherit page-level bottom spacing.'
+}
+if ($source.Contains('echoDeskPageViews.first(where:')) {
+    throw 'Page transitions must use the exact previous page, not the first temporarily visible page.'
 }
 
-Write-Host 'EchoDesk macOS 0.2.9 parity UI validation passed.'
+$settingsSource = Get-Content -LiteralPath (Join-Path $repo 'companion\Sources\SettingsWindow.swift') -Raw
+if (-not $settingsSource.Contains('echoDeskBedsidePreviewTimer?.invalidate()')) {
+    throw 'The Bedside preview timer is not released when the settings window closes.'
+}
+
+$versionNode = $plist.SelectSingleNode("//key[.='CFBundleShortVersionString']/following-sibling::*[1]")
+if ($null -eq $versionNode -or $versionNode.InnerText -ne '0.2.10') {
+    throw 'EchoDesk Info.plist version is not 0.2.10.'
+}
+
+Write-Host 'EchoDesk macOS 0.2.10 parity UI validation passed.'

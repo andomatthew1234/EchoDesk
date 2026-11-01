@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>EchoDesk.Desktop.LayoutTests</AssemblyName>
+    <RootNamespace>EchoDesk.Desktop.LayoutTests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\EchoDesk.Desktop\EchoDesk.Desktop.csproj" />
+  </ItemGroup>
+</Project>

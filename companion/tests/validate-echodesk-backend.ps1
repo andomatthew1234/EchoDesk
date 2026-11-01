@@ -62,7 +62,7 @@ Assert-True ($main.Contains('try? EchoDeskFirmwareBundle.validate(image)')) 'Cac
 
 $build = Get-Content -LiteralPath $buildScript -Raw
 foreach ($required in @(
-    '-D ECHODESK_DESKTOP', 'EchoDesk-Info.plist', '0.2.9',
+    '-D ECHODESK_DESKTOP', 'EchoDesk-Info.plist', '0.2.10',
     'EchoDesk-Desktop-v${APP_VERSION}-macos-universal',
     'EchoDeskWifiSetup.swift', 'EchoDeskFirmwareBundle.swift', 'EchoDeskFirmwareUpdates.swift',
     'SettingsWindow+EchoDeskDesktop.swift', 'SettingsWindow+EchoDeskWifiSetup.swift'

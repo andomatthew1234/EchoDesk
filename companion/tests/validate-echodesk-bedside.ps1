@@ -96,4 +96,44 @@ if ($ackIndex -lt 0 -or $refreshIndex -le $ackIndex) {
     throw 'Bedside config does not wait for an ACK and refresh authoritative state afterward.'
 }
 
+# AppKit does not derive a useful intrinsic height when a custom NSBox has its
+# contentView replaced with an unconstrained stack. That collapses each card in
+# the page stack and lets its controls draw over the preview and neighbouring
+# cards. Keep the Bedside layout on the same explicit edge-to-edge constraint
+# contract as the rest of EchoDesk Desktop.
+$stackStart = $bedside.IndexOf('private func bedsideStack')
+$stackEnd = $bedside.IndexOf('private func bedsideCard', $stackStart)
+$cardEnd = $bedside.IndexOf('private func bedsideLabel', $stackEnd)
+if ($stackStart -lt 0 -or $stackEnd -le $stackStart -or $cardEnd -le $stackEnd) {
+    throw 'Bedside native layout helpers could not be isolated.'
+}
+$stackHelper = $bedside.Substring($stackStart, $stackEnd - $stackStart)
+$cardHelper = $bedside.Substring($stackEnd, $cardEnd - $stackEnd)
+foreach ($needle in @(
+    'if view is NSTextField || view is NSStackView',
+    'view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true',
+    'let card = EchoDeskSurfaceView(.card)',
+    'content.translatesAutoresizingMaskIntoConstraints = false',
+    'content.leadingAnchor.constraint(equalTo:',
+    'content.trailingAnchor.constraint(equalTo:',
+    'content.topAnchor.constraint(equalTo:',
+    'content.bottomAnchor.constraint(equalTo:'
+)) {
+    if (-not (($stackHelper + $cardHelper).Contains($needle))) {
+        throw "Bedside layout regression: missing explicit sizing contract: $needle"
+    }
+}
+if ($cardHelper.Contains('card.contentView = content')) {
+    throw 'Bedside layout regression: replacing NSBox.contentView collapses card height and overlaps controls.'
+}
+Assert-Contains $bedside 'NSTextField(wrappingLabelWithString: text)'
+if ($bedside.Contains('preview.widthAnchor.constraint(equalToConstant: 416)')) {
+    throw 'Bedside layout regression: the preview must compress with the page instead of forcing overflow at 820px.'
+}
+Assert-Contains $bedside 'preview.heightAnchor.constraint(equalTo: preview.widthAnchor'
+Assert-Contains $bedside 'icon.setAccessibilityHidden(true)'
+if ($bedside.Contains('max(0.65, min(1.0')) {
+    throw 'Bedside preview drawing no longer fits the supported 240-point compact preview width.'
+}
+
 Write-Host 'EchoDesk macOS Bedside Mode validation passed.'

@@ -26,6 +26,20 @@
             <Setter Property="HorizontalContentAlignment" Value="Left"/>
             <Setter Property="Margin" Value="8,3"/>
             <Setter Property="Padding" Value="14,11"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}"/>
+                    <Setter Property="BorderThickness" Value="1"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="NavIcon" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontFamily" Value="Segoe Fluent Icons"/>
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="Width" Value="22"/>
+            <Setter Property="TextAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
         <Style x:Key="NavText" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
             <Setter Property="Margin" Value="14,0,0,0"/>
@@ -50,7 +64,7 @@
                     <Image Source="Assets/echodesk-logo.png" Width="34" Height="34" Stretch="Uniform"/>
                     <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
                         <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="17" FontWeight="SemiBold" Text="EchoDesk"/>
-                        <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" Text="DESKTOP 0.2.9"/>
+                        <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" Text="{Binding DesktopVersionLabel}"/>
                     </StackPanel>
                 </StackPanel>
 
@@ -79,20 +93,20 @@
                 </StackPanel>
 
                 <StackPanel Margin="0,4">
-                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Overview">
-                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" FontSize="18" Text="&#xE80F;"/><TextBlock Style="{StaticResource NavText}" Text="Overview"/></StackPanel>
+                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Overview" Tag="{Binding IsOverview}" ToolTip="Overview" AutomationProperties.Name="Overview">
+                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource NavIcon}" Text="&#xE80F;"/><TextBlock Style="{StaticResource NavText}" Text="Overview"/></StackPanel>
                     </Button>
-                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Device Control">
-                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" FontSize="18" Text="&#xE8D7;"/><TextBlock Style="{StaticResource NavText}" Text="Device Control"/></StackPanel>
+                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Device Control" Tag="{Binding IsDeviceControl}" ToolTip="Device Control" AutomationProperties.Name="Device Control">
+                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource NavIcon}" Text="&#xE8D7;"/><TextBlock Style="{StaticResource NavText}" Text="Device Control"/></StackPanel>
                     </Button>
-                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Customisation">
-                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" FontSize="18" Text="&#xE713;"/><TextBlock Style="{StaticResource NavText}" Text="Customisation"/></StackPanel>
+                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Customisation" Tag="{Binding IsCustomisationNavigationSelected}" ToolTip="Customisation" AutomationProperties.Name="Customisation">
+                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource NavIcon}" Text="&#xE713;"/><TextBlock Style="{StaticResource NavText}" Text="Customisation"/></StackPanel>
                     </Button>
-                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Set up a new device">
-                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" FontSize="18" Text="&#xE710;"/><TextBlock Style="{StaticResource NavText}" Text="Setup new device"/></StackPanel>
+                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Set up a new device" Tag="{Binding IsGuidedSetup}" ToolTip="Setup new device" AutomationProperties.Name="Setup new device">
+                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource NavIcon}" Text="&#xE710;"/><TextBlock Style="{StaticResource NavText}" Text="Setup new device"/></StackPanel>
                     </Button>
-                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Device recovery &amp; updates">
-                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" FontSize="18" Text="&#xE95E;"/><TextBlock Style="{StaticResource NavText}" Text="Device recovery &amp; updates" TextWrapping="Wrap" MaxWidth="142"/></StackPanel>
+                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Device recovery &amp; updates" Tag="{Binding IsSetupUpdates}" ToolTip="Device recovery and updates" AutomationProperties.Name="Device recovery and updates">
+                        <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource NavIcon}" Text="&#xE95E;"/><TextBlock Style="{StaticResource NavText}" Text="Device recovery &amp; updates" TextWrapping="Wrap" MaxWidth="142"/></StackPanel>
                     </Button>
                 </StackPanel>
             </DockPanel>
@@ -321,7 +335,7 @@
                                 <TextBlock Text="Select your EchoDesk." FontSize="25" FontWeight="SemiBold"/>
                                 <TextBlock Style="{StaticResource Muted}" Text="Choose the device you'd like to set up. Compatible devices refresh automatically." TextWrapping="Wrap" Margin="0,7,0,16"/>
                                 <ListBox ItemsSource="{Binding GuidedSetupDevices}" SelectedValuePath="Port" SelectedValue="{Binding GuidedSetupSelectedPort}" BorderThickness="0" Background="Transparent" MinHeight="100" MaxHeight="260" ScrollViewer.VerticalScrollBarVisibility="Auto">
-                                    <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,8"/></Style></ListBox.ItemContainerStyle>
+                                    <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,8"/></Style></ListBox.ItemContainerStyle>
                                     <ListBox.ItemTemplate><DataTemplate><Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="13"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="&#xE8B7;" FontFamily="Segoe Fluent Icons" FontSize="24" Margin="0,0,12,0" VerticalAlignment="Center"/><StackPanel Grid.Column="1"><TextBlock FontWeight="SemiBold" FontSize="15"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="EchoDesk Mini"/><Style.Triggers><DataTrigger Binding="{Binding IdentityStatus}" Value="unknown"><Setter Property="Text" Value="Unidentified USB device"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock><TextBlock Text="{Binding FirmwareVersion, StringFormat=Firmware: EchoDesk OS {0}, TargetNullValue=Firmware: Not reported}" Foreground="{DynamicResource MutedTextBrush}"/><TextBlock Text="{Binding UsbSerialNumber, StringFormat=USB Serial: {0}, TargetNullValue=USB Serial: Not reported}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/></StackPanel><TextBlock Grid.Column="2" Text="{Binding Port}" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center"/></Grid></Border></DataTemplate></ListBox.ItemTemplate>
                                 </ListBox>
                                 <TextBlock Text="No known EchoDesk Mini detected yet. Checking again…" Foreground="{DynamicResource MutedTextBrush}" Margin="2,8,0,10"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding GuidedSetupHasDevices}" Value="False"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
@@ -350,7 +364,7 @@
                                     <ProgressBar Height="5" IsIndeterminate="True" Margin="0,0,0,12" Visibility="{Binding WifiSetupBusy, Converter={StaticResource BoolVisibility}}"/>
                                     <TextBlock Text="{Binding GuidedWifiStatus}" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,0,0,12"/>
                                     <ListBox ItemsSource="{Binding GuidedWifiDevices}" SelectedValuePath="DeviceId" SelectedValue="{Binding GuidedWifiSelectedDeviceId}" BorderThickness="0" Background="Transparent" MinHeight="80" MaxHeight="230">
-                                        <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,8"/></Style></ListBox.ItemContainerStyle>
+                                        <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,8"/></Style></ListBox.ItemContainerStyle>
                                         <ListBox.ItemTemplate><DataTemplate><Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="13"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="&#xE701;" FontFamily="Segoe Fluent Icons" FontSize="24" Margin="0,0,12,0" VerticalAlignment="Center"/><StackPanel Grid.Column="1"><TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="15"/><TextBlock Text="{Binding SetupSsid, TargetNullValue=Temporary setup network}" Foreground="{DynamicResource MutedTextBrush}"/></StackPanel><TextBlock Grid.Column="2" Text="{Binding Address}" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center"/></Grid></Border></DataTemplate></ListBox.ItemTemplate>
                                     </ListBox>
                                     <WrapPanel Margin="0,12,0,0"><Button Command="{Binding GuidedSetupBackCommand}" Content="Back" Margin="0,0,8,8"/><Button Command="{Binding GuidedSetupRefreshCommand}" Content="Find again" Margin="0,0,8,8"/><Button Style="{StaticResource PrimaryButton}" Command="{Binding GuidedWifiNextCommand}" Content="Next" Margin="0,0,0,8"/></WrapPanel>
@@ -451,21 +465,46 @@
 
                         <!-- Screen 1: Connect EchoDesk -->
                         <Border Style="{StaticResource Card}" Visibility="{Binding IsFirmwareOverviewScreen, Converter={StaticResource BoolVisibility}}">
-                            <Grid>
+                            <Grid x:Name="RecoveryDeviceLayout">
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                 <Grid Width="190" Height="170" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <Grid.Style>
+                                        <Style TargetType="Grid">
+                                            <Setter Property="Grid.Column" Value="0"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsCompact}" Value="True">
+                                                    <Setter Property="Grid.ColumnSpan" Value="2"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Grid.Style>
                                     <Border Width="145" Height="106" CornerRadius="13" Background="#16191F" BorderBrush="#687180" BorderThickness="3" HorizontalAlignment="Center" VerticalAlignment="Top">
                                         <Grid><TextBlock Text="ECHO&#x0a;DESK" Foreground="White" FontSize="22" FontWeight="Bold" TextAlignment="Center" VerticalAlignment="Center"/></Grid>
                                     </Border>
                                     <Path Data="M 95,106 L 95,145 C 95,158 125,158 125,145" Stroke="{DynamicResource AccentBrush}" StrokeThickness="5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                                     <Border Width="31" Height="13" CornerRadius="4" Background="{DynamicResource AccentBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,42,4"/>
                                 </Grid>
-                                <StackPanel Grid.Column="1" Margin="28,0,0,0">
+                                <StackPanel>
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Grid.Column" Value="1"/>
+                                            <Setter Property="Margin" Value="28,0,0,0"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsCompact}" Value="True">
+                                                    <Setter Property="Grid.Column" Value="0"/>
+                                                    <Setter Property="Grid.ColumnSpan" Value="2"/>
+                                                    <Setter Property="Grid.Row" Value="1"/>
+                                                    <Setter Property="Margin" Value="0,18,0,0"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
                                     <TextBlock Text="{Binding FirmwareConnectionHeading}" FontSize="23" FontWeight="SemiBold"/>
                                     <TextBlock Style="{StaticResource Muted}" Text="{Binding FirmwareConnectionMessage}" TextWrapping="Wrap" Margin="0,8,0,18"/>
                                     <TextBlock Text="Detected serial devices" FontWeight="SemiBold" Margin="0,0,0,7"/>
                                     <ComboBox ItemsSource="{Binding FirmwareDevices}" ItemTemplate="{StaticResource ComboSummaryTemplate}" SelectedValuePath="Port"
-                                              SelectedValue="{Binding SelectedFirmwarePort}" MinWidth="340" HorizontalAlignment="Left"/>
+                                              SelectedValue="{Binding SelectedFirmwarePort}" MinWidth="240" HorizontalAlignment="Stretch"/>
                                     <TextBlock Style="{StaticResource Muted}" Text="{Binding FirmwareDeviceDetails}" Margin="0,7,0,0"/>
                                     <StackPanel Visibility="{Binding ShowBoardConfirmation, Converter={StaticResource BoolVisibility}}" Margin="0,16,0,0">
                                         <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="8" Padding="12">
@@ -491,11 +530,12 @@
                             <StackPanel>
                                 <TextBlock Text="Choose an action" FontSize="23" FontWeight="SemiBold"/>
                                 <TextBlock Style="{StaticResource Muted}" Text="Select and verify a device above, then choose what EchoDesk Desktop should do." Margin="0,7,0,18"/>
-                                <UniformGrid Columns="2">
-                                    <Button Command="{Binding FirmwareRecoveryActionCommand}" CommandParameter="update" IsEnabled="{Binding CanUseFirmwareActions}" Margin="0,0,8,8" Padding="18" HorizontalContentAlignment="Left"><StackPanel><TextBlock Text="Update EchoDesk" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="Update EchoDesk OS to the latest version" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Button>
-                                    <Button Tag="reinstall" Click="FirmwareAction_Click" IsEnabled="{Binding CanUseFirmwareActions}" Margin="8,0,0,8" Padding="18" HorizontalContentAlignment="Left"><StackPanel><TextBlock Text="Reset/Install EchoDesk OS" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="Install a fresh version of EchoDesk OS" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Button>
-                                    <Button Tag="repair" Click="FirmwareAction_Click" IsEnabled="{Binding CanUseFirmwareActions}" Margin="0,8,8,0" Padding="18" HorizontalContentAlignment="Left"><StackPanel><TextBlock Text="Repair device" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="Repair and reset EchoDesk OS if on older firmware" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Button>
-                                    <Button Tag="manualRecovery" Click="FirmwareAction_Click" IsEnabled="{Binding CanStartManualRecovery}" Margin="8,8,0,0" Padding="18" HorizontalContentAlignment="Left"><StackPanel><TextBlock Text="Recovery" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="Fully reset EchoDesk without checks" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Button>
+                                <UniformGrid>
+                                    <UniformGrid.Style><Style TargetType="UniformGrid"><Setter Property="Columns" Value="2"/><Style.Triggers><DataTrigger Binding="{Binding IsCompact}" Value="True"><Setter Property="Columns" Value="1"/></DataTrigger></Style.Triggers></Style></UniformGrid.Style>
+                                    <Button Command="{Binding FirmwareRecoveryActionCommand}" CommandParameter="update" IsEnabled="{Binding CanUseFirmwareActions}" Margin="4" Padding="18" HorizontalContentAlignment="Left"><StackPanel><TextBlock Text="Update EchoDesk" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="Update EchoDesk OS to the latest version" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Button>
+                                    <Button Tag="reinstall" Click="FirmwareAction_Click" IsEnabled="{Binding CanUseFirmwareActions}" Margin="4" Padding="18" HorizontalContentAlignment="Left"><StackPanel><TextBlock Text="Reset/Install EchoDesk OS" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="Install a fresh version of EchoDesk OS" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Button>
+                                    <Button Tag="repair" Click="FirmwareAction_Click" IsEnabled="{Binding CanUseFirmwareActions}" Margin="4" Padding="18" HorizontalContentAlignment="Left"><StackPanel><TextBlock Text="Repair device" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="Repair and reset EchoDesk OS if on older firmware" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Button>
+                                    <Button Tag="manualRecovery" Click="FirmwareAction_Click" IsEnabled="{Binding CanStartManualRecovery}" Margin="4" Padding="18" HorizontalContentAlignment="Left"><StackPanel><TextBlock Text="Recovery" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="Fully reset EchoDesk without checks" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Button>
                                 </UniformGrid>
                             </StackPanel>
                         </Border>
@@ -511,8 +551,8 @@
                                 <ProgressBar Height="8" Margin="0,20,0,7" IsIndeterminate="True"
                                              Visibility="{Binding FirmwareHasNoMeasuredProgress, Converter={StaticResource BoolVisibility}}"/>
                                 <TextBlock Text="{Binding FirmwareProgressLabel}" HorizontalAlignment="Right" FontWeight="SemiBold"/>
-                                <Border Background="#FFF6DD" CornerRadius="8" Padding="12" Margin="0,18,0,0">
-                                    <TextBlock Foreground="#6B4A00" Text="Keep the device connected and prevent Windows from sleeping until EchoDesk reconnects." TextWrapping="Wrap"/>
+                                <Border Background="{DynamicResource WarningSurfaceBrush}" CornerRadius="8" Padding="12" Margin="0,18,0,0">
+                                    <TextBlock Foreground="{DynamicResource WarningTextBrush}" Text="Keep the device connected and prevent Windows from sleeping until EchoDesk reconnects." TextWrapping="Wrap"/>
                                 </Border>
                                 <Button Command="{Binding CancelFirmwareOperationCommand}" Content="Cancel safely" HorizontalAlignment="Left" Margin="0,18,0,0"/>
                             </StackPanel>
@@ -637,10 +677,10 @@
                                 <TextBlock Style="{StaticResource SectionTitle}" Text="PC Dashboard"/>
                                 <TextBlock Style="{StaticResource Muted}" Text="Choose one to four different metrics. Unavailable sensors are shown honestly rather than as zero." TextWrapping="Wrap" Margin="0,0,0,12"/>
                                 <UniformGrid Columns="2" Rows="2">
-                                    <ComboBox ItemsSource="{Binding PcDashboardRequiredMetricOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding PcDashboardMetric1}" Margin="0,0,12,10"/>
-                                    <ComboBox ItemsSource="{Binding PcDashboardMetricOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding PcDashboardMetric2}" Margin="0,0,0,10"/>
-                                    <ComboBox ItemsSource="{Binding PcDashboardMetricOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding PcDashboardMetric3}" Margin="0,0,12,0"/>
-                                    <ComboBox ItemsSource="{Binding PcDashboardMetricOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding PcDashboardMetric4}"/>
+                                    <StackPanel Margin="0,0,12,10"><TextBlock Text="Metric 1" FontWeight="SemiBold" Margin="0,0,0,6"/><ComboBox AutomationProperties.Name="PC Dashboard metric 1" ItemsSource="{Binding PcDashboardRequiredMetricOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding PcDashboardMetric1}"/></StackPanel>
+                                    <StackPanel Margin="0,0,0,10"><TextBlock Text="Metric 2" FontWeight="SemiBold" Margin="0,0,0,6"/><ComboBox AutomationProperties.Name="PC Dashboard metric 2" ItemsSource="{Binding PcDashboardMetricOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding PcDashboardMetric2}"/></StackPanel>
+                                    <StackPanel Margin="0,0,12,0"><TextBlock Text="Metric 3" FontWeight="SemiBold" Margin="0,0,0,6"/><ComboBox AutomationProperties.Name="PC Dashboard metric 3" ItemsSource="{Binding PcDashboardMetricOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding PcDashboardMetric3}"/></StackPanel>
+                                    <StackPanel><TextBlock Text="Metric 4" FontWeight="SemiBold" Margin="0,0,0,6"/><ComboBox AutomationProperties.Name="PC Dashboard metric 4" ItemsSource="{Binding PcDashboardMetricOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding PcDashboardMetric4}"/></StackPanel>
                                 </UniformGrid>
                                 <Button Style="{StaticResource PrimaryButton}" Command="{Binding SavePcDashboardCommand}" Content="Apply dashboard" HorizontalAlignment="Left" Margin="0,14,0,0"/>
                             </StackPanel>
@@ -663,7 +703,7 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsBedsideMode, Converter={StaticResource BoolVisibility}}">
                     <StackPanel MaxWidth="1120">
                         <DockPanel Margin="0,0,0,20">
-                            <Button DockPanel.Dock="Left" Command="{Binding NavigateCommand}" CommandParameter="Customisation" Content="&#xE72B;" FontFamily="Segoe Fluent Icons" Width="40" Height="40" Margin="0,0,14,0" ToolTip="Back to Customisation"/>
+                            <Button DockPanel.Dock="Left" Command="{Binding NavigateCommand}" CommandParameter="Customisation" Content="&#xE72B;" FontFamily="Segoe Fluent Icons" Width="40" Height="40" Margin="0,0,14,0" ToolTip="Back to Customisation" AutomationProperties.Name="Back to Customisation"/>
                             <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Command="{Binding SaveBedsideModeCommand}" Content="Save to EchoDesk" Padding="20,10"/>
                             <StackPanel>
                                 <TextBlock Style="{StaticResource PageTitle}" Text="Bedside Mode"/>
@@ -671,10 +711,22 @@
                             </StackPanel>
                         </DockPanel>
 
-                        <Grid>
+                        <Grid x:Name="BedsideLayout">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="360"/><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 
                             <StackPanel>
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Grid.Column" Value="0"/>
+                                        <Setter Property="Grid.ColumnSpan" Value="1"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsCompact}" Value="True">
+                                                <Setter Property="Grid.ColumnSpan" Value="3"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
                                 <Border CornerRadius="22" Background="#FF090B10" BorderBrush="#FF343946" BorderThickness="5" Padding="18" Height="270">
                                     <Grid>
                                         <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -719,7 +771,21 @@
                                 </Border>
                             </StackPanel>
 
-                            <StackPanel Grid.Column="2">
+                            <StackPanel>
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Grid.Column" Value="2"/>
+                                        <Setter Property="Grid.Row" Value="0"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsCompact}" Value="True">
+                                                <Setter Property="Grid.Column" Value="0"/>
+                                                <Setter Property="Grid.ColumnSpan" Value="3"/>
+                                                <Setter Property="Grid.Row" Value="1"/>
+                                                <Setter Property="Margin" Value="0,24,0,0"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
                                 <StackPanel Visibility="{Binding IsBedsideClockSection, Converter={StaticResource BoolVisibility}}">
                                     <TextBlock Style="{StaticResource SectionTitle}" Text="Clock" FontSize="24"/>
                                     <TextBlock Style="{StaticResource Muted}" Text="Choose how time appears in the top half of Bedside Mode." Margin="0,0,0,18"/>
@@ -740,7 +806,7 @@
                                     <Border Style="{StaticResource Card}" Margin="0,0,0,14">
                                         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                             <StackPanel><TextBlock Text="Next alarm" FontSize="17" FontWeight="SemiBold"/><TextBlock Style="{StaticResource Muted}" Text="Show the next enabled alarm and its day." Margin="0,4,20,0"/></StackPanel>
-                                            <CheckBox Grid.Column="1" IsChecked="{Binding BedsideNextAlarmWidget}" VerticalAlignment="Center"/>
+                                            <CheckBox Grid.Column="1" IsChecked="{Binding BedsideNextAlarmWidget}" VerticalAlignment="Center" AutomationProperties.Name="Show next alarm widget"/>
                                         </Grid>
                                     </Border>
                                     <Border Style="{StaticResource Card}" Opacity="0.62">
@@ -762,13 +828,13 @@
                                                 <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                                                     <StackPanel>
                                                         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                            <CheckBox IsChecked="{Binding Enabled}" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                                                            <TextBox Grid.Column="1" Text="{Binding Time, UpdateSourceTrigger=PropertyChanged}" FontSize="20" FontWeight="SemiBold" ToolTip="24-hour time, HH:mm"/>
-                                                            <TextBox Grid.Column="2" Text="{Binding Label, UpdateSourceTrigger=PropertyChanged}" Margin="12,0" MaxLength="24" ToolTip="Alarm label"/>
-                                                            <Button Grid.Column="3" Content="&#xE74D;" FontFamily="Segoe Fluent Icons" Command="{Binding DataContext.RemoveBedsideAlarmCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" ToolTip="Delete alarm"/>
+                                                            <CheckBox IsChecked="{Binding Enabled}" VerticalAlignment="Center" Margin="0,0,12,0" AutomationProperties.Name="Alarm enabled"/>
+                                                            <TextBox Grid.Column="1" Text="{Binding Time, UpdateSourceTrigger=PropertyChanged}" FontSize="20" FontWeight="SemiBold" ToolTip="24-hour time, HH:mm" AutomationProperties.Name="Alarm time"/>
+                                                            <TextBox Grid.Column="2" Text="{Binding Label, UpdateSourceTrigger=PropertyChanged}" Margin="12,0" MaxLength="24" ToolTip="Alarm label" AutomationProperties.Name="Alarm label"/>
+                                                            <Button Grid.Column="3" Content="&#xE74D;" FontFamily="Segoe Fluent Icons" Command="{Binding DataContext.RemoveBedsideAlarmCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" ToolTip="Delete alarm" AutomationProperties.Name="Delete alarm"/>
                                                         </Grid>
                                                         <UniformGrid Columns="7" Margin="0,14,0,0">
-                                                            <CheckBox Content="M" IsChecked="{Binding Monday}"/><CheckBox Content="T" IsChecked="{Binding Tuesday}"/><CheckBox Content="W" IsChecked="{Binding Wednesday}"/><CheckBox Content="T" IsChecked="{Binding Thursday}"/><CheckBox Content="F" IsChecked="{Binding Friday}"/><CheckBox Content="S" IsChecked="{Binding Saturday}"/><CheckBox Content="S" IsChecked="{Binding Sunday}"/>
+                                                            <CheckBox Content="M" IsChecked="{Binding Monday}" ToolTip="Monday" AutomationProperties.Name="Monday"/><CheckBox Content="T" IsChecked="{Binding Tuesday}" ToolTip="Tuesday" AutomationProperties.Name="Tuesday"/><CheckBox Content="W" IsChecked="{Binding Wednesday}" ToolTip="Wednesday" AutomationProperties.Name="Wednesday"/><CheckBox Content="T" IsChecked="{Binding Thursday}" ToolTip="Thursday" AutomationProperties.Name="Thursday"/><CheckBox Content="F" IsChecked="{Binding Friday}" ToolTip="Friday" AutomationProperties.Name="Friday"/><CheckBox Content="S" IsChecked="{Binding Saturday}" ToolTip="Saturday" AutomationProperties.Name="Saturday"/><CheckBox Content="S" IsChecked="{Binding Sunday}" ToolTip="Sunday" AutomationProperties.Name="Sunday"/>
                                                         </UniformGrid>
                                                     </StackPanel>
                                                 </Border>
@@ -792,7 +858,7 @@
                                                         <TextBox Text="{Binding Time, UpdateSourceTrigger=PropertyChanged}" ToolTip="24-hour time, HH:mm"/>
                                                         <Slider Grid.Column="1" Minimum="1" Maximum="100" Value="{Binding Brightness}" Margin="12,0"/>
                                                         <TextBlock Grid.Column="2" Text="{Binding Brightness, StringFormat={}{0}%}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
-                                                        <Button Grid.Column="3" Content="&#xE74D;" FontFamily="Segoe Fluent Icons" Margin="10,0,0,0" Command="{Binding DataContext.RemoveBedsideBrightnessSegmentCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" ToolTip="Remove schedule time"/>
+                                                        <Button Grid.Column="3" Content="&#xE74D;" FontFamily="Segoe Fluent Icons" Margin="10,0,0,0" Command="{Binding DataContext.RemoveBedsideBrightnessSegmentCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" ToolTip="Remove schedule time" AutomationProperties.Name="Remove brightness schedule time"/>
                                                     </Grid>
                                                 </DataTemplate></ItemsControl.ItemTemplate>
                                             </ItemsControl>
@@ -820,7 +886,8 @@
             </Grid>
 
             <Border Grid.Row="1" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,11">
-                <TextBlock Text="{Binding Feedback}" Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="StatusText" Text="{Binding Feedback}" Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis"
+                           AutomationProperties.LiveSetting="Polite" AutomationProperties.Name="{Binding Feedback}"/>
             </Border>
         </Grid>
 

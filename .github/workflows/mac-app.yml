@@ -26,7 +26,7 @@ on:
       tag:
         description: 'Existing release tag used by manual upload'
         required: true
-        default: 'v0.2.9'
+        default: 'v0.2.10'
 
 # contents: write wird fuer `gh release upload` gebraucht — ohne diese
 # permission liefert die API 403 ('Resource not accessible by integration').
@@ -59,8 +59,8 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.product }}" == "echodesk" ]]; then
             echo "PRODUCT_MODE=echodesk" >> "$GITHUB_ENV"
             echo "APP_BUNDLE=EchoDesk Desktop.app" >> "$GITHUB_ENV"
-            echo "RELEASE_STEM=EchoDesk-Desktop-v0.2.9-macos-universal" >> "$GITHUB_ENV"
-            echo "ARTIFACT_LABEL=EchoDesk-Desktop-v0.2.9-macOS" >> "$GITHUB_ENV"
+            echo "RELEASE_STEM=EchoDesk-Desktop-v0.2.10-macos-universal" >> "$GITHUB_ENV"
+            echo "ARTIFACT_LABEL=EchoDesk-Desktop-v0.2.10-macOS" >> "$GITHUB_ENV"
           else
             echo "PRODUCT_MODE=ai-monitor" >> "$GITHUB_ENV"
             echo "APP_BUNDLE=AI Monitor.app" >> "$GITHUB_ENV"
@@ -94,7 +94,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.product == 'echodesk'
         run: |
           set -euo pipefail
-          EXPECTED=0.2.9
+          EXPECTED=0.2.10
           CODE=$(grep 'let kAppVersion' companion/Sources/main.swift | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
           BUILDSH=$(grep 'APP_VERSION="0\.' companion/build.sh | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
           PLIST=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' companion/Resources/EchoDesk-Info.plist)
@@ -103,7 +103,7 @@ jobs:
             exit 1
           }
           [[ "${{ inputs.tag }}" == "v$EXPECTED" ]] || {
-            echo "::error::EchoDesk 0.2.9 assets must use release tag v$EXPECTED"
+            echo "::error::EchoDesk 0.2.10 assets must use release tag v$EXPECTED"
             exit 1
           }
           echo "EchoDesk Desktop release metadata is consistent ($EXPECTED)."
@@ -192,6 +192,14 @@ jobs:
       - name: Test shared display-plugin contract
         working-directory: companion-windows
         run: cargo test -p aimonitor-core -p aimonitor-plugin-host --locked
+
+      - name: Validate EchoDesk Desktop UI contracts
+        if: env.PRODUCT_MODE == 'echodesk'
+        shell: pwsh
+        run: |
+          ./companion/tests/validate-echodesk-ui.ps1
+          ./companion/tests/validate-echodesk-backend.ps1
+          ./companion/tests/validate-echodesk-bedside.ps1
 
       - name: Build macOS app
         working-directory: companion

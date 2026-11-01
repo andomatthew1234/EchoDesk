@@ -20,7 +20,7 @@ your provider credentials.
 
 ## Install and run
 
-1. Extract `EchoDesk-Desktop-v0.2.9-win-x64.zip` completely.
+1. Extract `EchoDesk-Desktop-v0.2.10-win-x64.zip` completely.
 2. Run `install.ps1` from PowerShell for a current-user Start menu installation,
    or run `EchoDesk Desktop.exe` directly from the extracted folder.
 3. Connect the EchoDesk display by USB. The bundled host starts invisibly and

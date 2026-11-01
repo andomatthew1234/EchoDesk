@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="EchoDesk Clock" Width="520" Height="390" MinWidth="480" MinHeight="340"
         SizeToContent="Height" MaxHeight="620" ResizeMode="NoResize"
-        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        AutomationProperties.Name="EchoDesk Clock configuration">
     <Grid Margin="26">
         <StackPanel>
             <TextBlock x:Name="WindowHeading" Text="Clock" FontSize="27" FontWeight="SemiBold"/>
@@ -27,8 +28,11 @@
                     <TextBlock Text="Enter the countdown duration, then send it to EchoDesk." Foreground="{DynamicResource MutedTextBrush}" Margin="0,5,0,16"/>
                     <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                        <StackPanel><TextBlock Text="Minutes" FontWeight="SemiBold"/><TextBox Text="{Binding CountdownDurationMinutes, UpdateSourceTrigger=PropertyChanged}" MinHeight="42" Padding="12,8" Margin="0,6,0,0"/></StackPanel>
-                        <Button Grid.Column="2" Style="{StaticResource PrimaryButton}" Content="Done" MinWidth="92" VerticalAlignment="Bottom" Click="CountdownDone_Click"/>
+                        <StackPanel><TextBlock Text="Minutes" FontWeight="SemiBold"/><TextBox Text="{Binding CountdownDurationMinutes, UpdateSourceTrigger=PropertyChanged}" MinHeight="42" Padding="12,8" Margin="0,6,0,0" AutomationProperties.Name="Countdown minutes"/></StackPanel>
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom">
+                            <Button Content="Cancel" MinWidth="82" Margin="0,0,8,0" Click="Close_Click" IsCancel="True"/>
+                            <Button Style="{StaticResource PrimaryButton}" Content="Done" MinWidth="92" Click="CountdownDone_Click" IsDefault="True"/>
+                        </StackPanel>
                     </Grid>
                 </StackPanel>
             </Border>
@@ -39,11 +43,14 @@
                     <TextBlock Text="Choose the work and break rhythm for EchoDesk." Foreground="{DynamicResource MutedTextBrush}" Margin="0,5,0,16"/>
                     <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                        <StackPanel><TextBlock Text="Focus minutes" FontWeight="SemiBold"/><TextBox Text="{Binding FocusDurationMinutes, UpdateSourceTrigger=PropertyChanged}" MinHeight="38" Padding="10,7" Margin="0,6,0,0"/></StackPanel>
-                        <StackPanel Grid.Column="2"><TextBlock Text="Break minutes" FontWeight="SemiBold"/><TextBox Text="{Binding FocusBreakMinutes, UpdateSourceTrigger=PropertyChanged}" MinHeight="38" Padding="10,7" Margin="0,6,0,0"/></StackPanel>
-                        <StackPanel Grid.Column="4"><TextBlock Text="Rounds" FontWeight="SemiBold"/><TextBox Text="{Binding FocusRounds, UpdateSourceTrigger=PropertyChanged}" MinHeight="38" Padding="10,7" Margin="0,6,0,0"/></StackPanel>
+                        <StackPanel><TextBlock Text="Focus minutes" FontWeight="SemiBold"/><TextBox Text="{Binding FocusDurationMinutes, UpdateSourceTrigger=PropertyChanged}" MinHeight="38" Padding="10,7" Margin="0,6,0,0" AutomationProperties.Name="Focus minutes"/></StackPanel>
+                        <StackPanel Grid.Column="2"><TextBlock Text="Break minutes" FontWeight="SemiBold"/><TextBox Text="{Binding FocusBreakMinutes, UpdateSourceTrigger=PropertyChanged}" MinHeight="38" Padding="10,7" Margin="0,6,0,0" AutomationProperties.Name="Break minutes"/></StackPanel>
+                        <StackPanel Grid.Column="4"><TextBlock Text="Rounds" FontWeight="SemiBold"/><TextBox Text="{Binding FocusRounds, UpdateSourceTrigger=PropertyChanged}" MinHeight="38" Padding="10,7" Margin="0,6,0,0" AutomationProperties.Name="Focus rounds"/></StackPanel>
                     </Grid>
-                    <Button Style="{StaticResource PrimaryButton}" Content="Done" HorizontalAlignment="Right" MinWidth="92" Margin="0,16,0,0" Click="FocusDone_Click"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+                        <Button Content="Cancel" MinWidth="82" Margin="0,0,8,0" Click="Close_Click" IsCancel="True"/>
+                        <Button Style="{StaticResource PrimaryButton}" Content="Done" MinWidth="92" Click="FocusDone_Click" IsDefault="True"/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </StackPanel>

@@ -10,7 +10,7 @@ if [ "${ECHODESK_DESKTOP:-0}" = "1" ]; then PRODUCT_MODE="echodesk"; fi
 if [ "$PRODUCT_MODE" = "echodesk" ]; then
   BUILD_DIR="/tmp/echodesk-desktop-build"
   APP_NAME="EchoDesk Desktop"
-  APP_VERSION="0.2.9"
+  APP_VERSION="0.2.10"
   EXECUTABLE_NAME="EchoDeskDesktop"
   INFO_PLIST="Resources/EchoDesk-Info.plist"
   RELEASE_STEM="EchoDesk-Desktop-v${APP_VERSION}-macos-universal"

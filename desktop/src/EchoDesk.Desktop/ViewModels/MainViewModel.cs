@@ -280,6 +280,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public RelayCommand FirstRunChoiceCommand { get; }
     public ObservableCollection<AppTile> AppTiles { get; }
     public IReadOnlyList<string> AppearanceOptions { get; }
+    public string DesktopVersionLabel => "DESKTOP 0.2.10";
     public IReadOnlyList<Choice> LayoutOptions { get; }
     public IReadOnlyList<Choice> BackgroundOptions { get; }
     public IReadOnlyList<Choice> DefaultAppOptions { get; }
@@ -305,7 +306,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         set
         {
             if (!Set(ref selectedPage, value)) return;
-            Raise(nameof(IsOverview)); Raise(nameof(IsDeviceControl)); Raise(nameof(IsCustomisation)); Raise(nameof(IsBedsideMode)); Raise(nameof(IsSetupUpdates));
+            Raise(nameof(IsOverview)); Raise(nameof(IsDeviceControl)); Raise(nameof(IsCustomisation)); Raise(nameof(IsBedsideMode)); Raise(nameof(IsCustomisationNavigationSelected)); Raise(nameof(IsSetupUpdates));
             Raise(nameof(IsGuidedSetup)); Raise(nameof(IsFirstRun)); Raise(nameof(IsMainShellEnabled));
             if (IsSetupUpdates && IsBrokerAvailable && !FirmwareOperationActive)
             {
@@ -330,6 +331,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsDeviceControl => SelectedPage == "Device Control";
     public bool IsCustomisation => SelectedPage == "Customisation";
     public bool IsBedsideMode => SelectedPage == "Bedside Mode";
+    public bool IsCustomisationNavigationSelected => IsCustomisation || IsBedsideMode;
     public bool IsSetupUpdates => SelectedPage == "Device recovery & updates";
     public bool IsGuidedSetup => SelectedPage == "Set up a new device";
     public bool IsCompact { get => isCompact; set => Set(ref isCompact, value); }

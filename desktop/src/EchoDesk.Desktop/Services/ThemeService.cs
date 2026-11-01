@@ -18,6 +18,8 @@ public static class ThemeService
         Set("BorderBrush", dark ? "#26FFFFFF" : "#1A000000");
         Set("AccentBrush", dark ? "#FFF7F7F8" : "#FF111113");
         Set("AccentTextBrush", dark ? "#FF111113" : "#FFFFFFFF");
+        Set("WarningSurfaceBrush", dark ? "#FF382C16" : "#FFFFF4D6");
+        Set("WarningTextBrush", dark ? "#FFFFD28A" : "#FF6B4A00");
         var text = (SolidColorBrush)System.Windows.Application.Current.Resources["TextBrush"];
         foreach (System.Windows.Window window in System.Windows.Application.Current.Windows)
         {

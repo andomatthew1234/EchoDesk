@@ -47,4 +47,6 @@ public partial class ClockWindow : Window
     {
         if (await viewModel.ConfigureFocusForDeviceAsync()) Close();
     }
+
+    private void Close_Click(object sender, RoutedEventArgs e) => Close();
 }

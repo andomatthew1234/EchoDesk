@@ -126,12 +126,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskWiFiProvisionButton: NSButton!
     var echoDeskWiFiCancelButton: NSButton!
 
-    // EchoDesk Desktop 0.2.9 parity shell. The mature USB/Wi-Fi/firmware
+    // EchoDesk Desktop 0.2.10 parity shell. The mature USB/Wi-Fi/firmware
     // owners remain below this presentation layer; these references are only
     // the native desktop-window state and never duplicate hardware ownership.
     var echoDeskSidebarButtons: [NSButton] = []
     var echoDeskPageViews: [NSView] = []
     var echoDeskSelectedPage: EchoDeskDesktopPage = .overview
+    var echoDeskPageTransitionGeneration = 0
     var echoDeskFirstRunOverlay: NSView?
     var echoDeskFirstRunWelcomeScreen: NSView?
     var echoDeskFirstRunSetupScreen: NSView?
@@ -427,6 +428,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         stopRefreshTimer()
         brightnessPersistTimer?.invalidate()
         brightnessPersistTimer = nil
+        echoDeskBedsidePreviewTimer?.invalidate()
+        echoDeskBedsidePreviewTimer = nil
     }
 
     private func startRefreshTimer() {

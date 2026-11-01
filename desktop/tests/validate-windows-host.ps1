@@ -131,4 +131,34 @@ Require-SourcePattern `
     -Pattern 'IsBedsideDisplaySection[\s\S]{0,1000}Auto-brightness &amp; display' `
     -Message 'The dedicated Bedside Mode display customisation page is missing.'
 
+Require-SourcePattern `
+    -Path 'desktop\src\EchoDesk.Desktop\App.xaml' `
+    -Pattern '<Style TargetType="TextBox">[\s\S]{0,1800}FocusVisualStyle' `
+    -Message 'Text fields do not have a complete theme-safe focus treatment.'
+
+Require-SourcePattern `
+    -Path 'desktop\src\EchoDesk.Desktop\App.xaml' `
+    -Pattern '<Style TargetType="PasswordBox">[\s\S]{0,1200}SurfaceAltBrush' `
+    -Message 'Password fields can fall back to unreadable native colours in dark mode.'
+
+Require-SourcePattern `
+    -Path 'desktop\src\EchoDesk.Desktop\App.xaml' `
+    -Pattern '<Style TargetType="ListBoxItem">[\s\S]{0,1800}IsKeyboardFocusWithin' `
+    -Message 'Selectable device rows have no keyboard-focus or selected-state treatment.'
+
+Require-SourcePattern `
+    -Path 'desktop\src\EchoDesk.Desktop\MainWindow.xaml' `
+    -Pattern 'x:Name="BedsideLayout"[\s\S]{0,9000}Binding IsCompact[\s\S]{0,1200}Property="Grid.Row" Value="1"' `
+    -Message 'Bedside Mode still forces a desktop-only two-column layout at compact widths.'
+
+Require-SourcePattern `
+    -Path 'desktop\src\EchoDesk.Desktop\MainWindow.xaml' `
+    -Pattern 'AutomationProperties.LiveSetting="Polite"' `
+    -Message 'Background status changes are not exposed to assistive technology.'
+
+Require-SourcePattern `
+    -Path 'desktop\src\EchoDesk.Desktop\MainWindow.xaml' `
+    -Pattern 'Background="\{DynamicResource WarningSurfaceBrush\}"' `
+    -Message 'The recovery warning still uses hard-coded light-only colours.'
+
 Write-Output 'validate-windows-host: PASS'

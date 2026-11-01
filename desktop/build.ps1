@@ -14,7 +14,7 @@ $companionRoot = Join-Path $repositoryRoot 'companion-windows'
 $localDotnet = Join-Path $env:USERPROFILE '.dotnet-sdk\dotnet.exe'
 $dotnet = if (Test-Path -LiteralPath $localDotnet) { $localDotnet } else { (Get-Command dotnet -ErrorAction Stop).Source }
 $configuration = 'Release'
-$packageVersion = '0.2.9'
+$packageVersion = '0.2.10'
 $expectedCliVersion = '0.70.0'
 $expectedCliSha256 = 'F81570B0CD7593ABB9822EB2362F9B9EDA3A382A571457718EE37E664E9A62FC'
 $expectedFlashEngineVersion = '4.6.0'
@@ -35,6 +35,8 @@ if ($cargoLock -notmatch "(?ms)^name = `"espflash`"\r?\nversion = `"$([regex]::E
 if ($LASTEXITCODE -ne 0) { throw 'EchoDesk Desktop build failed.' }
 & $dotnet run --project (Join-Path $desktopRoot 'tests\EchoDesk.Desktop.Tests\EchoDesk.Desktop.Tests.csproj') -c $configuration --no-build
 if ($LASTEXITCODE -ne 0) { throw 'EchoDesk Desktop tests failed.' }
+& $dotnet run --project (Join-Path $desktopRoot 'tests\EchoDesk.Desktop.LayoutTests\EchoDesk.Desktop.LayoutTests.csproj') -c $configuration --no-build
+if ($LASTEXITCODE -ne 0) { throw 'EchoDesk Desktop responsive layout tests failed.' }
 
 & (Join-Path $desktopRoot 'tests\validate-windows-host.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'EchoDesk Windows host contract validation failed.' }

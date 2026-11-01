@@ -7,9 +7,14 @@ namespace EchoDesk.Desktop.Services;
 public sealed class PreferencesService
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
-    private readonly string path = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "EchoDesk Desktop", "settings.json");
+    private readonly string path;
+
+    public PreferencesService(string? settingsPath = null)
+    {
+        path = settingsPath ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "EchoDesk Desktop", "settings.json");
+    }
 
     public DesktopPreferences Load()
     {
