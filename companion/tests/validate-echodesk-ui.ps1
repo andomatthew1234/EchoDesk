@@ -122,7 +122,7 @@ if ($pngWidth -ne 1536 -or $pngHeight -ne 1024) {
 foreach ($dmgContract in @(
     'if [ "$PRODUCT_MODE" = "echodesk" ]',
     'EchoDesk-DMG-Background.png', 'hdiutil create -ov -size',
-    '/usr/bin/hdiutil attach "$DMG_RW_PATH" -readwrite', '/usr/bin/osascript <<OSA',
+    '/usr/bin/hdiutil attach "$DMG_RW_PATH"', 'DMG_MOUNT_DIR#/Volumes/', '/usr/bin/osascript <<OSA',
     'set toolbar visible of container window to false',
     'set statusbar visible of container window to false',
     'set pathbar visible of container window to false',

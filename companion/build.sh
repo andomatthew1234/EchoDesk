@@ -340,15 +340,16 @@ if [ "$PRODUCT_MODE" = "echodesk" ]; then
   }
 
   DMG_WORK_DIR="$(mktemp -d /tmp/echodesk-dmg.XXXXXX)"
-  DMG_MOUNT_DIR="$DMG_WORK_DIR/mount"
+  DMG_MOUNT_DIR=""
+  DMG_DEVICE=""
   DMG_RW_PATH="$DMG_WORK_DIR/EchoDesk-Desktop-writable.dmg"
   DMG_IS_MOUNTED=0
-  mkdir -p "$DMG_MOUNT_DIR"
 
   cleanup_echodesk_dmg() {
     if [ "$DMG_IS_MOUNTED" = "1" ]; then
-      /usr/bin/hdiutil detach "$DMG_MOUNT_DIR" >/dev/null 2>&1 \
-        || /usr/bin/hdiutil detach "$DMG_MOUNT_DIR" -force >/dev/null 2>&1 \
+      DMG_DETACH_TARGET="${DMG_MOUNT_DIR:-$DMG_DEVICE}"
+      /usr/bin/hdiutil detach "$DMG_DETACH_TARGET" >/dev/null 2>&1 \
+        || /usr/bin/hdiutil detach "$DMG_DETACH_TARGET" -force >/dev/null 2>&1 \
         || true
     fi
     case "$DMG_WORK_DIR" in
@@ -368,12 +369,21 @@ if [ "$PRODUCT_MODE" = "echodesk" ]; then
       echo "ERROR: Could not create the writable EchoDesk DMG"
       exit 1
     }
-  /usr/bin/hdiutil attach "$DMG_RW_PATH" -readwrite -noverify -noautoopen \
-    -mountpoint "$DMG_MOUNT_DIR" >/dev/null || {
+  if ! DMG_ATTACH_OUTPUT=$(/usr/bin/hdiutil attach "$DMG_RW_PATH" \
+    -readwrite -noverify -noautoopen); then
       echo "ERROR: Could not mount the writable EchoDesk DMG"
       exit 1
-    }
+  fi
+  DMG_MOUNT_DIR=$(printf '%s\n' "$DMG_ATTACH_OUTPUT" \
+    | awk -F '\t' '$NF ~ /^\/Volumes\// { print $NF; exit }')
+  DMG_DEVICE=$(printf '%s\n' "$DMG_ATTACH_OUTPUT" \
+    | awk -F '\t' '$NF ~ /^\/Volumes\// { print $1; exit }')
   DMG_IS_MOUNTED=1
+  [ -n "$DMG_MOUNT_DIR" ] && [ -d "$DMG_MOUNT_DIR" ] || {
+    echo "ERROR: Could not identify the Finder-visible EchoDesk DMG mount"
+    exit 1
+  }
+  DMG_FINDER_DISK_NAME=${DMG_MOUNT_DIR#/Volumes/}
 
   ditto "$SCRIPT_DIR/build/$APP_NAME.app" "$DMG_MOUNT_DIR/$APP_NAME.app"
   ln -s /Applications "$DMG_MOUNT_DIR/Applications"
@@ -393,7 +403,7 @@ if [ "$PRODUCT_MODE" = "echodesk" ]; then
     /usr/bin/osascript <<OSA
 with timeout of 30 seconds
   tell application "Finder"
-    tell disk "$APP_NAME"
+    tell disk "$DMG_FINDER_DISK_NAME"
       try
         close container window
       end try
