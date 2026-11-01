@@ -10,7 +10,7 @@ if [ "${ECHODESK_DESKTOP:-0}" = "1" ]; then PRODUCT_MODE="echodesk"; fi
 if [ "$PRODUCT_MODE" = "echodesk" ]; then
   BUILD_DIR="/tmp/echodesk-desktop-build"
   APP_NAME="EchoDesk Desktop"
-  APP_VERSION="0.2.7"
+  APP_VERSION="0.2.8"
   EXECUTABLE_NAME="EchoDeskDesktop"
   INFO_PLIST="Resources/EchoDesk-Info.plist"
   RELEASE_STEM="EchoDesk-Desktop-v${APP_VERSION}-macos-universal"
@@ -82,6 +82,7 @@ SWIFT_SOURCES=(
   Sources/ClaudeCodeWindow.swift
   Sources/EchoDeskWifiSetup.swift
   Sources/EchoDeskFirmwareBundle.swift
+  Sources/EchoDeskFirmwareUpdates.swift
   Sources/SettingsWindow+EchoDeskWifiSetup.swift
   Sources/SettingsWindow+EchoDeskDesktop.swift
 )

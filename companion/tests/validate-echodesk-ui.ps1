@@ -98,13 +98,13 @@ foreach ($brokenInterpolation in @(
 }
 
 if ($source.Contains('Terms & Privacy') -or $source.Contains('IsGuidedTermsStep')) {
-    throw 'The macOS 0.2.7 setup must not contain a Terms step.'
+    throw 'The macOS 0.2.8 setup must not contain a Terms step.'
 }
-Assert-Contains $main 'let kAppVersion = "0.2.7"'
+Assert-Contains $main 'let kAppVersion = "0.2.8"'
 Assert-Contains $main 'removeMenuBarStatusItem()'
-Assert-Contains $build 'APP_VERSION="0.2.7"'
+Assert-Contains $build 'APP_VERSION="0.2.8"'
 Assert-Contains $build 'SettingsWindow+EchoDeskDesktop.swift'
-Assert-Contains $workflow 'EchoDesk-Desktop-v0.2.7-macos-universal'
+Assert-Contains $workflow 'EchoDesk-Desktop-v0.2.8-macos-universal'
 
 if (-not (Test-Path -LiteralPath $dmgBackgroundPath)) {
     throw 'EchoDesk DMG background asset is missing.'
@@ -143,8 +143,8 @@ foreach ($dmgContract in @(
 )) { Assert-Contains $build $dmgContract }
 
 $versionNode = $plist.SelectSingleNode("//key[.='CFBundleShortVersionString']/following-sibling::*[1]")
-if ($null -eq $versionNode -or $versionNode.InnerText -ne '0.2.7') {
-    throw 'EchoDesk Info.plist version is not 0.2.7.'
+if ($null -eq $versionNode -or $versionNode.InnerText -ne '0.2.8') {
+    throw 'EchoDesk Info.plist version is not 0.2.8.'
 }
 
-Write-Host 'EchoDesk macOS 0.2.7 parity UI validation passed.'
+Write-Host 'EchoDesk macOS 0.2.8 parity UI validation passed.'

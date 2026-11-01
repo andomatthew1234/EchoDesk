@@ -1293,7 +1293,7 @@ extension SettingsWindowController {
                         detail: "Recovery stopped: this port did not identify as the expected ESP32. Nothing was written.")
                     return
                 }
-                FirmwareManager.shared.downloadFirmware(variant: kDisplayVariantST7789) { ok, message in
+                FirmwareManager.shared.prepareBundledRecoveryFirmware(variant: kDisplayVariantST7789) { ok, message in
                     DispatchQueue.main.async {
                         guard ok else {
                             monitor.serialPort.startScanning()

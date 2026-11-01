@@ -5,6 +5,7 @@ $firmware = Join-Path $repo 'desktop\firmware\echodesk-mini\2.31.0\echodesk-os.b
 $manifestPath = Join-Path $repo 'desktop\firmware\firmware-manifest.json'
 $wifiSource = Join-Path $repo 'companion\Sources\EchoDeskWifiSetup.swift'
 $bundleSource = Join-Path $repo 'companion\Sources\EchoDeskFirmwareBundle.swift'
+$updatesSource = Join-Path $repo 'companion\Sources\EchoDeskFirmwareUpdates.swift'
 $mainSource = Join-Path $repo 'companion\Sources\main.swift'
 $buildScript = Join-Path $repo 'companion\build.sh'
 
@@ -39,6 +40,19 @@ Assert-True (-not $wifi.Contains('print(')) 'Wi-Fi backend must not print creden
 $bundle = Get-Content -LiteralPath $bundleSource -Raw
 Assert-True ($bundle.Contains('SHA256.hash') -and $bundle.Contains('installValidatedCopy')) 'Firmware bundle is not validated before use.'
 
+$updates = Get-Content -LiteralPath $updatesSource -Raw
+foreach ($required in @(
+    'Curve25519.Signing.PublicKey', 'isValidSignature',
+    'mmy3V6WTCrARRl9JmI7m1D5sFUv87CzJp0dCKJgHPOc=',
+    'fw-v', 'fw-beta-v', 'firmware-update-manifest.json.sig',
+    'freenove-fnk0114a-2p4', 'validateCachedImage', 'trustedAssetURL',
+    'enforceRollbackProtection'
+)) {
+    Assert-True ($updates.Contains($required)) "Trusted macOS firmware updater is missing '$required'."
+}
+Assert-True ($updates.Contains('/andomatthew1234/EchoDesk/releases/download/')) 'Remote firmware assets are not confined to the EchoDesk repository and tag.'
+Assert-True ($updates.Contains('EchoDeskFirmwareBundle.validateLayout')) 'Remote firmware is not layout-checked before caching.'
+
 $main = Get-Content -LiteralPath $mainSource -Raw
 foreach ($prefix in @('cu.usbserial-', 'cu.wchusbserial', 'cu.usbmodem')) {
     Assert-True ($main.Contains($prefix)) "macOS serial enumeration is missing '$prefix'."
@@ -48,9 +62,9 @@ Assert-True ($main.Contains('try? EchoDeskFirmwareBundle.validate(image)')) 'Cac
 
 $build = Get-Content -LiteralPath $buildScript -Raw
 foreach ($required in @(
-    '-D ECHODESK_DESKTOP', 'EchoDesk-Info.plist', '0.2.7',
+    '-D ECHODESK_DESKTOP', 'EchoDesk-Info.plist', '0.2.8',
     'EchoDesk-Desktop-v${APP_VERSION}-macos-universal',
-    'EchoDeskWifiSetup.swift', 'EchoDeskFirmwareBundle.swift',
+    'EchoDeskWifiSetup.swift', 'EchoDeskFirmwareBundle.swift', 'EchoDeskFirmwareUpdates.swift',
     'SettingsWindow+EchoDeskDesktop.swift', 'SettingsWindow+EchoDeskWifiSetup.swift'
 )) {
     Assert-True ($build.Contains($required)) "macOS build integration is missing '$required'."

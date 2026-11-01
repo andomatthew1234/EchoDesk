@@ -50,7 +50,7 @@
                     <Image Source="Assets/echodesk-logo.png" Width="34" Height="34" Stretch="Uniform"/>
                     <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
                         <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="17" FontWeight="SemiBold" Text="EchoDesk"/>
-                        <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" Text="DESKTOP 0.2.7"/>
+                        <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" Text="DESKTOP 0.2.8"/>
                     </StackPanel>
                 </StackPanel>
 

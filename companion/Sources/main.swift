@@ -32,7 +32,7 @@ import Darwin
 // ============================================================
 
 #if ECHODESK_DESKTOP
-let kAppVersion = "0.2.7"
+let kAppVersion = "0.2.8"
 let kProductName = "EchoDesk Desktop"
 let kProductRepository = "andomatthew1234/EchoDesk"
 let kProductBundleIdentifier = "com.echodesk.desktop"
@@ -169,7 +169,7 @@ let kFirmwareCheckInterval: TimeInterval = 6 * 3600
 let kFirmwareUpdateBannerID = "firmware-update"
 let kFlashBaudRate = 460800
 #if ECHODESK_DESKTOP
-let kAppAssetName = "EchoDesk-Desktop-v0.2.7-macos-universal.zip"
+let kAppAssetName = "EchoDesk-Desktop-v0.2.8-macos-universal.zip"
 #else
 let kAppAssetName = "AIMonitor.zip"
 #endif
@@ -1347,6 +1347,10 @@ class FirmwareManager {
     var lastFlashAt: Date?
     var onUpdate: (() -> Void)?
     private let releaseFetcher = ReleaseFetcher(logPrefix: "Firmware")
+#if ECHODESK_DESKTOP
+    private var echoDeskRemoteCandidate: EchoDeskRemoteFirmwareCandidate?
+    private var echoDeskDownloadedImageIsBundled = false
+#endif
 
     private var firmwareDir: String {
         let appSupport = NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true).first!
@@ -1512,23 +1516,50 @@ class FirmwareManager {
 
     func checkForUpdate(completion: @escaping (Bool) -> Void) {
 #if ECHODESK_DESKTOP
-        let release = EchoDeskFirmwareBundle.release
-        latestRelease = release
-        Settings.shared.lastFirmwareCheck = Date()
-        do {
-            let destination = localBinPath(for: release.tag_name, variant: kDisplayVariantST7789)
-            downloadedBinPath = try EchoDeskFirmwareBundle.installValidatedCopy(at: destination)
-        } catch {
-            downloadedBinPath = nil
-            NSLog("[Firmware] Bundled EchoDesk OS rejected: %@", error.localizedDescription)
-        }
-        let installed = Settings.shared.installedFirmwareVersion
-        let hasUpdate = installed.map {
-            compareFirmwareVersions(firmwareVersionTag(from: $0), EchoDeskFirmwareBundle.version) == .orderedAscending
-        } ?? true
-        DispatchQueue.main.async {
-            self.onUpdate?()
-            completion(hasUpdate)
+        EchoDeskFirmwareUpdates.discover(channel: Settings.shared.updateChannel) { [weak self] result in
+            guard let self = self else { return }
+            Settings.shared.lastFirmwareCheck = Date()
+            switch result {
+            case .success(let candidate):
+                self.echoDeskRemoteCandidate = candidate
+                self.latestRelease = candidate.displayRelease
+                let destination = URL(fileURLWithPath: self.localBinPath(for: candidate.tag, variant: kDisplayVariantST7789))
+                self.downloadedBinPath = EchoDeskFirmwareUpdates.validateCachedImage(at: destination, candidate: candidate)
+                    ? destination.path : nil
+                self.echoDeskDownloadedImageIsBundled = false
+                let installed = Settings.shared.installedFirmwareVersion
+                let hasUpdate = installed.map {
+                    self.compareFirmwareVersions(self.firmwareVersionTag(from: $0), candidate.version) == .orderedAscending
+                } ?? true
+                DispatchQueue.main.async {
+                    self.onUpdate?()
+                    completion(hasUpdate)
+                }
+            case .failure(let error):
+                // Network outages or an absent firmware release must not take
+                // recovery away. The app-signed bundled image stays available,
+                // but is never labelled as the latest remote version.
+                self.echoDeskRemoteCandidate = nil
+                let release = EchoDeskFirmwareBundle.release
+                self.latestRelease = release
+                do {
+                    let destination = self.localBinPath(for: release.tag_name, variant: kDisplayVariantST7789)
+                    self.downloadedBinPath = try EchoDeskFirmwareBundle.installValidatedCopy(at: destination)
+                    self.echoDeskDownloadedImageIsBundled = true
+                } catch {
+                    self.downloadedBinPath = nil
+                    NSLog("[Firmware] Bundled EchoDesk OS rejected: %@", error.localizedDescription)
+                }
+                NSLog("[Firmware] Trusted GitHub update unavailable; using bundled recovery: %@", error.localizedDescription)
+                let installed = Settings.shared.installedFirmwareVersion
+                let hasUpdate = installed.map {
+                    self.compareFirmwareVersions(self.firmwareVersionTag(from: $0), EchoDeskFirmwareBundle.version) == .orderedAscending
+                } ?? true
+                DispatchQueue.main.async {
+                    self.onUpdate?()
+                    completion(hasUpdate)
+                }
+            }
         }
 #else
         releaseFetcher.check(handle: { [weak self] releases in
@@ -1572,10 +1603,16 @@ class FirmwareManager {
     }
 
     private func firmwareVersionTag(from releaseTag: String) -> String {
+        if releaseTag.hasPrefix("fw-beta-v") {
+            return String(releaseTag.dropFirst("fw-beta-v".count))
+        }
+        if releaseTag.hasPrefix("fw-v") {
+            return String(releaseTag.dropFirst("fw-v".count))
+        }
         if releaseTag.hasPrefix("fw-beta-") {
             return String(releaseTag.dropFirst("fw-beta-".count))
         }
-        return releaseTag
+        return releaseTag.hasPrefix("v") ? String(releaseTag.dropFirst()) : releaseTag
     }
 
     private func newestFirmwareRelease(from releases: [GitHubRelease]) -> GitHubRelease? {
@@ -1607,15 +1644,46 @@ class FirmwareManager {
             completion(false, "EchoDesk Mini requires the ST7789 firmware image.")
             return
         }
-        do {
-            try FileManager.default.createDirectory(atPath: firmwareDir, withIntermediateDirectories: true)
-            let destination = localBinPath(for: EchoDeskFirmwareBundle.release.tag_name, variant: variant)
-            downloadedBinPath = try EchoDeskFirmwareBundle.installValidatedCopy(at: destination)
-            downloadProgress = 1.0
-            completion(true, nil)
-        } catch {
-            downloadedBinPath = nil
-            completion(false, error.localizedDescription)
+        if let candidate = echoDeskRemoteCandidate {
+            let destination = URL(fileURLWithPath: localBinPath(for: candidate.tag, variant: variant))
+            if EchoDeskFirmwareUpdates.validateCachedImage(at: destination, candidate: candidate) {
+                downloadedBinPath = destination.path
+                echoDeskDownloadedImageIsBundled = false
+                downloadProgress = 1.0
+                completion(true, nil)
+                return
+            }
+            isDownloading = true
+            downloadProgress = 0
+            setPhase(.downloading)
+            EchoDeskFirmwareUpdates.download(candidate, to: destination) { [weak self] result in
+                guard let self = self else { return }
+                self.isDownloading = false
+                switch result {
+                case .success(let url):
+                    self.downloadedBinPath = url.path
+                    self.echoDeskDownloadedImageIsBundled = false
+                    self.downloadProgress = 1.0
+                    DispatchQueue.main.async { self.flashPhase = .idle; self.onUpdate?() }
+                    completion(true, nil)
+                case .failure(let error):
+                    self.downloadedBinPath = nil
+                    DispatchQueue.main.async { self.flashPhase = .idle; self.onUpdate?() }
+                    completion(false, error.localizedDescription)
+                }
+            }
+        } else {
+            do {
+                try FileManager.default.createDirectory(atPath: firmwareDir, withIntermediateDirectories: true)
+                let destination = localBinPath(for: EchoDeskFirmwareBundle.release.tag_name, variant: variant)
+                downloadedBinPath = try EchoDeskFirmwareBundle.installValidatedCopy(at: destination)
+                echoDeskDownloadedImageIsBundled = true
+                downloadProgress = 1.0
+                completion(true, nil)
+            } catch {
+                downloadedBinPath = nil
+                completion(false, error.localizedDescription)
+            }
         }
         return
         #else
@@ -1685,6 +1753,28 @@ class FirmwareManager {
         #endif
     }
 
+#if ECHODESK_DESKTOP
+    /// Recovery is deliberately pinned to the app-signed bundled image. A
+    /// remote catalogue candidate can never replace the last-resort image.
+    func prepareBundledRecoveryFirmware(variant: String, completion: @escaping (Bool, String?) -> Void) {
+        guard variant == kDisplayVariantST7789 else {
+            completion(false, "EchoDesk Mini requires the ST7789 firmware image.")
+            return
+        }
+        do {
+            try FileManager.default.createDirectory(atPath: firmwareDir, withIntermediateDirectories: true)
+            let destination = localBinPath(for: EchoDeskFirmwareBundle.release.tag_name, variant: variant)
+            downloadedBinPath = try EchoDeskFirmwareBundle.installValidatedCopy(at: destination)
+            echoDeskDownloadedImageIsBundled = true
+            downloadProgress = 1.0
+            completion(true, nil)
+        } catch {
+            downloadedBinPath = nil
+            completion(false, error.localizedDescription)
+        }
+    }
+#endif
+
     /// Setzt Phase + Label und triggert UI-Refresh. Muss vom Main-Thread aus
     /// konsistent sein, daher immer via DispatchQueue.main.async.
     private func setPhase(_ phase: FirmwareFlashPhase, percent: Int? = nil) {
@@ -1727,8 +1817,19 @@ class FirmwareManager {
         // and flashing; manually selected recovery images retain the existing
         // chip/layout validation below.
         if localPath == nil {
-            guard let image = try? Data(contentsOf: URL(fileURLWithPath: binPath), options: [.mappedIfSafe]),
-                  (try? EchoDeskFirmwareBundle.validate(image)) != nil else {
+            let url = URL(fileURLWithPath: binPath)
+            let valid: Bool
+            if echoDeskDownloadedImageIsBundled,
+               let image = try? Data(contentsOf: url, options: [.mappedIfSafe]) {
+                valid = (try? EchoDeskFirmwareBundle.validate(image)) != nil
+            } else if let candidate = echoDeskRemoteCandidate {
+                valid = EchoDeskFirmwareUpdates.validateCachedImage(at: url, candidate: candidate)
+            } else if let image = try? Data(contentsOf: url, options: [.mappedIfSafe]) {
+                valid = (try? EchoDeskFirmwareBundle.validate(image)) != nil
+            } else {
+                valid = false
+            }
+            guard valid else {
                 rejectInvalidImage()
                 return
             }

@@ -132,7 +132,7 @@ public sealed class BrokerClient : IAsyncDisposable
                 pipe = connected;
                 delay = TimeSpan.FromSeconds(1);
                 var readerTask = ReadLoopAsync(connected, cancellationToken);
-                await StateRequestAsync("hello", new { client = "EchoDesk Desktop", clientVersion = "0.2.7" }, cancellationToken)
+                await StateRequestAsync("hello", new { client = "EchoDesk Desktop", clientVersion = "0.2.8" }, cancellationToken)
                     .ConfigureAwait(false);
                 await readerTask.ConfigureAwait(false);
             }

@@ -93,6 +93,10 @@ enum EchoDeskFirmwareBundle {
         let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         guard digest == expectedSHA256 else { throw BundleError.invalidDigest }
 
+        try validateLayout(data)
+    }
+
+    static func validateLayout(_ data: Data) throws {
         // PlatformIO's merged ESP32 layout: bootloader at 0x1000, partition
         // table at 0x8000, application at 0x10000. The bootloader image header
         // identifies classic ESP32 (chip ID 0) and prevents an S2/S3 image from

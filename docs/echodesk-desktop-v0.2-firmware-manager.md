@@ -43,12 +43,21 @@ release contains:
 | `releaseNotes` | Text shown before an update. |
 | `minimumDesktopVersion` | Oldest manager allowed to install the release. |
 
-No public release URL has been invented. When official GitHub Releases are
-published, the HTTPS asset URL can be added through the release process. A
-remote production manifest must be authenticated independently of the checksum
-inside that same manifest. The package's Windows code signature is the trust
-root for the bundled manifest; remote updates require a separately pinned
-manifest signing key. The manager rejects unsigned remote manifests.
+Remote releases use dedicated `fw-vX.Y.Z` stable tags and
+`fw-beta-vX.Y.Z` prerelease tags. Each GitHub firmware release contains the
+versioned EchoDesk Mini merged image, its SHA-256 sidecar, the exact
+`firmware-update-manifest.json` bytes and a detached Ed25519 signature. The
+download URL in that signed manifest is confined to the matching tag in the
+`andomatthew1234/EchoDesk` repository. A checksum inside an unsigned manifest
+is never accepted as authentication.
+
+The package's Windows or macOS application signature remains the trust root
+for the offline bundled recovery image. Remote manifests use a separately
+pinned Ed25519 public key. The release workflow derives the public key from
+the private GitHub Actions secret and refuses to sign unless its SPKI SHA-256
+fingerprint is exactly
+`f626ed638e7d4fc155ef834a735b7866ab974aef586b399936247915ffe95ca1`.
+The private key is never stored in the repository or in a build artifact.
 
 ## Packaging safeguards
 
@@ -103,14 +112,24 @@ bootloader as an original ESP32 before the first write.
 
 ## Release procedure
 
-1. Build `freenove-fnk0114a-2p4` and the merged image with
-   `scripts/build_freenove_firmware.ps1`.
-2. Update the release record's version, size, SHA-256 and notes.
-3. Regenerate `firmware-manifest.json.sha256` from the final manifest.
-4. Run the firmware packaging tests and full desktop tests.
-5. Build the self-contained desktop package and verify its ZIP checksum.
-6. Code-sign the Windows binaries and installer for production distribution.
-7. Publish GitHub Release assets only with the repository owner's permission.
+1. Set `APP_VERSION` in `src/config.h`, build and test the firmware and Desktop
+   clients, and merge the change to the protected release branch.
+2. Ensure the protected `firmware-release` GitHub Environment contains the
+   base64-encoded private PEM in the
+   `ECHODESK_FIRMWARE_SIGNING_KEY_PEM_B64` secret. Require an environment
+   reviewer for production.
+3. Create and push a `fw-vX.Y.Z` tag for stable firmware or
+   `fw-beta-vX.Y.Z` for a beta. The tag version must exactly equal
+   `APP_VERSION` or CI fails before publication.
+4. `.github/workflows/build.yml` builds the real
+   `freenove-fnk0114a-2p4` PlatformIO target with
+   `scripts/build_echodesk_firmware.sh`, merges the bootloader at `0x1000`,
+   partition table at `0x8000`, `boot_app0` at `0xE000` and app at `0x10000`,
+   and validates the original-ESP32/DIO/40 MHz/4 MB layout.
+5. The protected release job creates the manifest, verifies the signing-key
+   fingerprint, signs the exact JSON bytes, verifies the signature and a
+   tamper-negative test, then publishes all four update assets to GitHub.
 
-This implementation does not publish a release, deploy a website or write any
-physical device as part of its build and test process.
+Branch builds have read-only repository permission. Only the tag-gated,
+environment-protected release job receives `contents: write`. Building or
+testing never writes a physical device.

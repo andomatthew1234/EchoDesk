@@ -126,7 +126,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskWiFiProvisionButton: NSButton!
     var echoDeskWiFiCancelButton: NSButton!
 
-    // EchoDesk Desktop 0.2.7 parity shell. The mature USB/Wi-Fi/firmware
+    // EchoDesk Desktop 0.2.8 parity shell. The mature USB/Wi-Fi/firmware
     // owners remain below this presentation layer; these references are only
     // the native desktop-window state and never duplicate hardware ownership.
     var echoDeskSidebarButtons: [NSButton] = []

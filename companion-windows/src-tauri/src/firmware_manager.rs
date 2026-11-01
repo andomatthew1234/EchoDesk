@@ -3,6 +3,7 @@
 //! The UI selects only an allowlisted hardware model and operation. Paths,
 //! offsets and chip targets always come from the trusted packaged manifest.
 
+use crate::firmware_updates::{self, DiscoveryError};
 use crate::serial_service::{self, ConnectionState, Job};
 use crate::state::AppState;
 use aimonitor_flash::{
@@ -20,7 +21,7 @@ use tauri::{AppHandle, Manager};
 pub const MINI_MODEL: &str = "EchoDesk Mini";
 pub const MINI_HARDWARE_ID: &str = "freenove-fnk0114a-2p4";
 pub const MINI_REPORTED_MODEL: &str = "Freenove FNK0114A_2P4";
-pub const DESKTOP_VERSION: &str = "0.2.7";
+pub const DESKTOP_VERSION: &str = "0.2.8";
 const RECONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const SETUP_RECONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const PAUSE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -70,6 +71,7 @@ pub struct FirmwareManagerState {
     pub current_version: Option<String>,
     pub available_version: Option<String>,
     pub release_notes: Option<String>,
+    pub release_source: Option<String>,
     pub show_unknown_devices: bool,
     pub setup_phase: Option<String>,
     pub setup_target_port: Option<String>,
@@ -85,6 +87,8 @@ pub struct FirmwareManagerState {
     selected_pid: Option<u16>,
     #[serde(skip)]
     selected_usb_serial_number: Option<String>,
+    #[serde(skip)]
+    selected_release: Option<FirmwareRelease>,
 }
 
 impl Default for FirmwareManagerState {
@@ -107,6 +111,7 @@ impl Default for FirmwareManagerState {
             current_version: None,
             available_version: None,
             release_notes: None,
+            release_source: None,
             show_unknown_devices: false,
             setup_phase: None,
             setup_target_port: None,
@@ -117,6 +122,7 @@ impl Default for FirmwareManagerState {
             selected_vid: None,
             selected_pid: None,
             selected_usb_serial_number: None,
+            selected_release: None,
         }
     }
 }
@@ -637,6 +643,43 @@ fn mini_release(manifest: &FirmwareManifest) -> Result<FirmwareRelease, String> 
         .ok_or_else(|| "no_supported_firmware_release".to_string())
 }
 
+fn newer_release(left: FirmwareRelease, right: FirmwareRelease) -> FirmwareRelease {
+    if aimonitor_core::semver::compare(&left.firmware_version, &right.firmware_version).is_lt() {
+        right
+    } else {
+        left
+    }
+}
+
+fn latest_release_with_fallback(
+) -> Result<(PathBuf, FirmwareRelease, &'static str, Option<&'static str>), String> {
+    let (directory, packaged) = manifest()?;
+    let bundled = mini_release(&packaged)?;
+    match firmware_updates::latest_stable(MINI_MODEL, MINI_HARDWARE_ID) {
+        Ok(Some(remote)) => {
+            let source = if aimonitor_core::semver::compare(
+                &bundled.firmware_version,
+                &remote.firmware_version,
+            )
+            .is_lt()
+            {
+                "github"
+            } else {
+                "bundled"
+            };
+            Ok((directory, newer_release(bundled, remote), source, None))
+        }
+        Ok(None) => Ok((directory, bundled, "bundled", None)),
+        Err(DiscoveryError::Unavailable) => Ok((
+            directory,
+            bundled,
+            "bundled",
+            Some("GitHub is unavailable. The verified bundled EchoDesk OS is still available."),
+        )),
+        Err(DiscoveryError::Untrusted) => Err("firmware_release_untrusted".into()),
+    }
+}
+
 pub fn check_updates(app: &AppHandle) -> Result<FirmwareManagerState, String> {
     update_state(app, |state| {
         state.status = "checking".into();
@@ -644,14 +687,13 @@ pub fn check_updates(app: &AppHandle) -> Result<FirmwareManagerState, String> {
         state.error_message = None;
     });
     let result = (|| {
-        let (_, manifest) = manifest()?;
-        let release = mini_release(&manifest)?;
+        let (_, release, source, notice) = latest_release_with_fallback()?;
         if !aimonitor_core::semver::at_least(DESKTOP_VERSION, &release.minimum_desktop_version) {
             return Err("desktop_update_required".to_string());
         }
-        Ok(release)
+        Ok((release, source, notice))
     })();
-    let release = match result {
+    let (release, source, notice) = match result {
         Ok(release) => release,
         Err(internal) => {
             let (code, message) = public_error(&internal);
@@ -665,7 +707,10 @@ pub fn check_updates(app: &AppHandle) -> Result<FirmwareManagerState, String> {
     };
     update_state(app, |state| {
         state.available_version = Some(release.firmware_version.clone());
-        state.release_notes = Some(release.release_notes);
+        state.release_notes = Some(release.release_notes.clone());
+        state.release_source = Some(source.into());
+        state.selected_release = Some(release.clone());
+        state.message = notice.map(str::to_string);
         state.status = match state.current_version.as_deref() {
             Some(current)
                 if aimonitor_core::semver::compare(current, &release.firmware_version).is_lt() =>
@@ -1113,8 +1158,15 @@ fn run_install(
         state.stage = Some("preparing".into());
     });
 
-    let (directory, catalogue) = manifest()?;
-    let release = mini_release(&catalogue)?;
+    let (directory, release) = if policy == InstallPolicy::Esp32OnlyRecovery {
+        let (directory, catalogue) = manifest()?;
+        (directory, mini_release(&catalogue)?)
+    } else if let Some(release) = snapshot(&app).selected_release {
+        (packaged_firmware_dir()?, release)
+    } else {
+        let (directory, release, _, _) = latest_release_with_fallback()?;
+        (directory, release)
+    };
     validate_desktop_version_for_policy(policy, DESKTOP_VERSION, &release.minimum_desktop_version)
         .map_err(str::to_string)?;
     let current = snapshot(&app).current_version;
@@ -1456,6 +1508,10 @@ pub fn public_error(internal: &str) -> (&'static str, &'static str) {
             "checksum_mismatch",
             "Firmware integrity verification failed. Reinstall EchoDesk Desktop and try again.",
         ),
+        "firmware_release_untrusted" => (
+            "untrusted_firmware_release",
+            "The GitHub firmware release could not be authenticated. Nothing was downloaded or written.",
+        ),
         "firmware_size_mismatch" | "firmware_layout_invalid" | "firmware_manifest_invalid" => (
             "invalid_firmware",
             "The packaged firmware is not valid for EchoDesk Mini.",
@@ -1742,7 +1798,7 @@ mod tests {
 
     #[test]
     fn desktop_version_and_public_errors_are_stable() {
-        assert_eq!(DESKTOP_VERSION, "0.2.7");
+        assert_eq!(DESKTOP_VERSION, "0.2.8");
         assert!(aimonitor_core::semver::at_least(DESKTOP_VERSION, "0.2.0"));
         assert_eq!(public_error("wrong_flash_size").0, "wrong_hardware");
         assert_eq!(

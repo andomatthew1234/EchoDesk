@@ -7,6 +7,7 @@ mod commands;
 mod desktop_broker;
 mod flash;
 mod firmware_manager;
+mod firmware_updates;
 mod plugins;
 mod performance;
 mod music;

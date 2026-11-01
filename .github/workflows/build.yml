@@ -3,17 +3,22 @@ name: Build & Release Firmware
 on:
   push:
     branches: [main]
-    # Stable firmware uses major version 1 or newer. Desktop releases use
-    # v0.x.y, so keep those tags out of the firmware release pipeline.
-    tags: ['v[1-9]*', 'fw-beta-v*']
+    # Firmware and Desktop releases share this repository. A dedicated prefix
+    # prevents a Desktop tag from ever publishing firmware by accident.
+    tags: ['fw-v*', 'fw-beta-v*']
     paths:
       - 'src/**'
       - 'platformio.ini'
       - 'installer/**'
+      - 'scripts/build_firmware.sh'
+      - 'scripts/build_echodesk_firmware.sh'
+      - 'scripts/create_firmware_release_manifest.py'
+      - 'scripts/test_firmware_release_contract.py'
+      - '.github/workflows/build.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ${{ github.ref_type == 'tag' && format('release-{0}', github.ref_name) || 'firmware-build' }}
@@ -26,33 +31,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # Bei einem Release-Tag (v* / fw-beta-v*) muss APP_VERSION in src/config.h
+      # Bei einem Release-Tag muss APP_VERSION in src/config.h
       # exakt zum Tag passen, sonst wird eine falsch versionierte Firmware
       # released.
       - name: Verify firmware version matches tag
-        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/fw-beta-v')
+        if: startsWith(github.ref, 'refs/tags/fw-v') || startsWith(github.ref, 'refs/tags/fw-beta-v')
         run: |
           REF="${GITHUB_REF#refs/tags/}"
-          if [[ "$REF" == fw-beta-v* ]]; then TAG="${REF#fw-beta-v}"; else TAG="${REF#v}"; fi
+          if [[ "$REF" == fw-beta-v* ]]; then TAG="${REF#fw-beta-v}"; else TAG="${REF#fw-v}"; fi
           CODE=$(grep '#define APP_VERSION' src/config.h | head -1 | sed 's/.*"\(.*\)".*/\1/')
           if [ "$TAG" != "$CODE" ]; then
             echo "::error::Tag $REF passt nicht zu APP_VERSION '$CODE' in src/config.h (erwartet $TAG)"
             exit 1
           fi
           echo "Version OK: $CODE"
-
-      # Die Versionsangaben auf der Installer-Seite werden nicht automatisch
-      # mitgezogen. Dieser Check verhindert, dass ein Release mit veralteten
-      # Versionsnummern auf der Seite live geht.
-      #
-      # Bewusst nur bei Release-Tags: die Seite zeigt die veroeffentlichte
-      # Version. Zwischen einer Versionsanhebung im Code und dem Release darf
-      # sie also legitim hinterherhinken — sonst wuerde sie auf ein Release
-      # verlinken, das es noch gar nicht gibt. Nur Stable-Tags (v*): die Seite
-      # verlinkt kein Beta, wie im Windows-Workflow.
-      - name: Verify site versions are in sync
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: ./scripts/sync_site_versions.sh --check
 
       - name: Setup Python
         uses: actions/setup-python@v7
@@ -71,11 +63,14 @@ jobs:
       - name: Build & package firmware
         run: bash scripts/build_firmware.sh
 
+      - name: Build EchoDesk Mini firmware
+        run: bash scripts/build_echodesk_firmware.sh release-assets
+
       - name: Test display-plugin fixture scenes against firmware parser
         run: bash scripts/test_display_plugin_scene_contract.sh
 
       - name: Upload build artifacts for release
-        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/fw-beta-v')
+        if: startsWith(github.ref, 'refs/tags/fw-v') || startsWith(github.ref, 'refs/tags/fw-beta-v')
         uses: actions/upload-artifact@v7
         with:
           name: firmware-binaries
@@ -87,16 +82,70 @@ jobs:
             installer/bin/ai-monitor-st7701.bin
             installer/bin/firmware-ota-st7701.bin
 
+      - name: Upload EchoDesk Mini release image
+        if: startsWith(github.ref, 'refs/tags/fw-v') || startsWith(github.ref, 'refs/tags/fw-beta-v')
+        uses: actions/upload-artifact@v7
+        with:
+          name: echodesk-mini-firmware
+          path: |
+            release-assets/echodesk-os-freenove-fnk0114a-2p4-v*.bin
+            release-assets/echodesk-os-freenove-fnk0114a-2p4-v*.bin.sha256
+
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/fw-beta-v')
+    if: startsWith(github.ref, 'refs/tags/fw-v') || startsWith(github.ref, 'refs/tags/fw-beta-v')
     runs-on: ubuntu-latest
+    environment: firmware-release
+    permissions:
+      contents: write
     steps:
+      - name: Checkout release tooling
+        uses: actions/checkout@v7
+
       - name: Download firmware binaries
         uses: actions/download-artifact@v8
         with:
           name: firmware-binaries
           path: release-assets
+
+      - name: Download EchoDesk Mini release image
+        uses: actions/download-artifact@v8
+        with:
+          name: echodesk-mini-firmware
+          path: release-assets
+
+      - name: Create and sign EchoDesk update manifest
+        env:
+          SIGNING_KEY_B64: ${{ secrets.ECHODESK_FIRMWARE_SIGNING_KEY_PEM_B64 }}
+          EXPECTED_SPKI_SHA256: f626ed638e7d4fc155ef834a735b7866ab974aef586b399936247915ffe95ca1
+        run: |
+          set -euo pipefail
+          if [[ -z "${SIGNING_KEY_B64:-}" ]]; then
+            echo "::error::ECHODESK_FIRMWARE_SIGNING_KEY_PEM_B64 is not configured"
+            exit 1
+          fi
+          KEY="$RUNNER_TEMP/echodesk-firmware-signing-key.pem"
+          PUBLIC_KEY="$RUNNER_TEMP/echodesk-firmware-signing-public-key.pem"
+          printf '%s' "$SIGNING_KEY_B64" | base64 --decode > "$KEY"
+          chmod 600 "$KEY"
+          openssl pkey -in "$KEY" -pubout -out "$PUBLIC_KEY"
+          ACTUAL_FINGERPRINT="$(openssl pkey -in "$KEY" -pubout -outform DER | sha256sum | awk '{print $1}')"
+          if [[ "$ACTUAL_FINGERPRINT" != "$EXPECTED_SPKI_SHA256" ]]; then
+            echo "::error::Firmware signing key does not match the public key pinned by EchoDesk Desktop"
+            exit 1
+          fi
+          VERSION="$(sed -n 's/^#define APP_VERSION[[:space:]]*"\([^"]*\)".*/\1/p' src/config.h | head -1)"
+          IMAGE="release-assets/echodesk-os-freenove-fnk0114a-2p4-v${VERSION}.bin"
+          MANIFEST="release-assets/firmware-update-manifest.json"
+          SIGNATURE="release-assets/firmware-update-manifest.json.sig"
+          python3 scripts/create_firmware_release_manifest.py \
+            --image "$IMAGE" --tag "$GITHUB_REF_NAME" --output "$MANIFEST" \
+            --minimum-desktop-version 0.2.8
+          openssl pkeyutl -sign -rawin -inkey "$KEY" -in "$MANIFEST" -out "$SIGNATURE"
+          python3 scripts/test_firmware_release_contract.py \
+            --image "$IMAGE" --manifest "$MANIFEST" --signature "$SIGNATURE" \
+            --public-key "$PUBLIC_KEY" --tag "$GITHUB_REF_NAME"
+          rm -f "$KEY" "$PUBLIC_KEY"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -113,3 +162,7 @@ jobs:
             release-assets/firmware-ota-st7789.bin
             release-assets/ai-monitor-st7701.bin
             release-assets/firmware-ota-st7701.bin
+            release-assets/echodesk-os-freenove-fnk0114a-2p4-v*.bin
+            release-assets/echodesk-os-freenove-fnk0114a-2p4-v*.bin.sha256
+            release-assets/firmware-update-manifest.json
+            release-assets/firmware-update-manifest.json.sig
