@@ -1,31 +1,26 @@
 # EchoDesk guided device setup
 
-EchoDesk Desktop 0.2.5 and EchoDesk OS 2.31.0 implement a coordinated first-run
+EchoDesk Desktop 0.2.6 and EchoDesk OS 2.31.0 implement a coordinated first-run
 flow for the Freenove FNK0114A_2P4 EchoDesk Mini. The WPF app never opens a COM
 port; the bundled EchoDesk Host remains the sole serial owner and the guided
 wizard reuses the existing firmware manager and flasher.
 
-## Production legal gate
+## Blank Terms and Privacy step
 
-The wizard discovers these files beside the installed application:
-
-- `legal/ECHODESK-TERMS.md`
-- `legal/PRIVACY.md`
-- `THIRD-PARTY-NOTICES.md` (informational)
-
-No Terms or Privacy document currently exists in this repository. The
-production checkbox and Continue button therefore remain disabled and the UI
-states why setup is unavailable. Tests use isolated fixture documents; there is
-no production bypass. Supply reviewed documents at the two exact `legal/`
-paths before shipping the guided flow.
+The first Desktop wizard step remains labelled **Terms** so the onboarding
+sequence and back-navigation remain stable. Its content is intentionally blank:
+there are no placeholder terms, privacy copy, document links or acceptance
+checkbox. Continue is enabled and advances to the USB/Wi-Fi connection choice.
+This avoids presenting invented legal text while keeping the requested
+onboarding step available for reviewed copy in a later release.
 
 ## Customer flow
 
 1. A blank device shows **Hello.**, then language selection and the Desktop
    download prompt. English is persisted; the production download URL remains
    intentionally unset until `ECHODESK_SETUP_URL` is configured with HTTPS.
-2. The device offers USB (the default) or **Setup with Wi-Fi**. Desktop shows
-   Terms and the matching transport guidance. USB uses the continuously
+2. Desktop passes through the blank Terms/Privacy step, then the device offers
+   USB (the default) or **Setup with Wi-Fi**. USB uses the continuously
    refreshed serial-device list and a proven EchoDesk handshake.
 3. An unproven supported USB serial adapter is labelled unidentified rather
    than EchoDesk. The customer must confirm the physical FNK0114A_2P4 label;
@@ -95,7 +90,7 @@ cancel failures remain in the existing firmware manager and retain its safe
 retry/recovery behavior. The wizard never follows a different port after its
 selection is pinned and never declares success from a write alone.
 
-Automated coverage exercises legal gating, multiple-device selection,
+Automated coverage exercises the blank introductory step, multiple-device selection,
 bootloader confirmation, setup handshakes, pinning, verified completion,
 factory reset, protocol validation, persistence and native state transitions.
 Build validation does not constitute a physical flash or touchscreen test.

@@ -31,7 +31,17 @@ import Darwin
 // MARK: - Configuration
 // ============================================================
 
+#if ECHODESK_DESKTOP
+let kAppVersion = "0.2.6"
+let kProductName = "EchoDesk Desktop"
+let kProductRepository = "andomatthew1234/EchoDesk"
+let kProductBundleIdentifier = "com.echodesk.desktop"
+#else
 let kAppVersion = "1.32.0"
+let kProductName = "AI Monitor"
+let kProductRepository = "tobymarks/esp32-ai-monitor"
+let kProductBundleIdentifier = "de.aimonitor.app"
+#endif
 let kSerialBaudRate: speed_t = 115200
 let kSerialScanInterval: TimeInterval = 3
 /// Legacy-Suite aus v1.x (<= 1.11.1). Wird ab v1.12.0 einmalig migriert und dann
@@ -39,11 +49,15 @@ let kSerialScanInterval: TimeInterval = 3
 /// Foundation-Warning verursacht („Using your own bundle identifier as
 /// NSUserDefaults suite name"). Ab v1.12.0 läuft alles über `.standard`.
 let kLegacyUserDefaultsSuite = "de.aimonitor.app"
-let kGitHubRepo = "tobymarks/esp32-ai-monitor"
-let kGitHubReleasesAPI = "https://api.github.com/repos/tobymarks/esp32-ai-monitor/releases"
+let kGitHubRepo = kProductRepository
+let kGitHubReleasesAPI = "https://api.github.com/repos/\(kProductRepository)/releases"
 /// Default-Asset (ILI9341-Variante). Wird als Fallback genutzt, wenn der
 /// Release keine variantenspezifischen Assets enthaelt (Releases < v2.10.0).
+#if ECHODESK_DESKTOP
+let kFirmwareAssetName = "ai-monitor-freenove-fnk0114a-2p4.bin"
+#else
 let kFirmwareAssetName = "ai-monitor.bin"
+#endif
 
 /// Mapping Display-Controller-ID → Release-Asset-Name.
 /// Ab App v1.15.0 / FW v2.10.1: Der User waehlt im Flash-Dialog die Board-
@@ -51,11 +65,17 @@ let kFirmwareAssetName = "ai-monitor.bin"
 /// String→String-Mapping, damit kuenftige Boards (S3-Varianten, 3.5"-
 /// Displays) ohne Code-Aenderung ergaenzbar sind — einfach neuen Key
 /// hinzufuegen.
+#if ECHODESK_DESKTOP
+let kFirmwareAssetByDisplay: [String: String] = [
+    "st7789": "ai-monitor-freenove-fnk0114a-2p4.bin",
+]
+#else
 let kFirmwareAssetByDisplay: [String: String] = [
     "ili9341": "ai-monitor.bin",
     "st7789":  "ai-monitor-st7789.bin",
     "st7701":  "ai-monitor-st7701.bin",
 ]
+#endif
 
 /// Display-Variante: stabile String-IDs. Passen zu den FW-Werten im
 /// get_info-`display`-Feld (ab FW v2.10.1).
@@ -63,12 +83,20 @@ let kDisplayVariantILI9341 = "ili9341"
 let kDisplayVariantST7789  = "st7789"
 /// Ab FW 2.19.0: Guition ESP32-S3-4848S040 (480x480, ST7701S).
 let kDisplayVariantST7701  = "st7701"
+#if ECHODESK_DESKTOP
+let kDisplayVariantDefault = kDisplayVariantST7789
+#else
 let kDisplayVariantDefault = kDisplayVariantILI9341
+#endif
 /// Ab dieser Firmware liest das Geraet beim Start seinen Display-Controller
 /// aus und meldet ihn in get_info als `panel`.
 let kFirmwarePanelDetectionMinVersion = "2.23.0-beta.1"
 /// Panels, fuer die es eine eigene Firmware-Variante gibt.
+#if ECHODESK_DESKTOP
+let kFlashablePanels: Set<String> = [kDisplayVariantST7789]
+#else
 let kFlashablePanels: Set<String> = [kDisplayVariantILI9341, kDisplayVariantST7789]
+#endif
 /// `panel`, wenn das Display keine Rueckleitung hat und MISO offen haengt.
 /// So beim ST7789-CYD gemessen — ein Indiz, kein Beweis.
 let kPanelNoReply = "noreply"
@@ -77,7 +105,11 @@ let kPanelMismatchBannerID = "panel-mismatch"
 let kPanelFixedBannerID = "panel-fixed"
 /// Varianten, die jedes Firmware-Release mitbringt. Das S3-Image gibt es erst
 /// ab 2.19.0 — fehlt es, bleibt der Flash für die CYDs trotzdem möglich.
+#if ECHODESK_DESKTOP
+let kRequiredFirmwareVariants = [kDisplayVariantST7789]
+#else
 let kRequiredFirmwareVariants = [kDisplayVariantILI9341, kDisplayVariantST7789]
+#endif
 
 /// Chip und Speicherlayout eines Firmware-Images ab 0x0.
 struct FirmwareChip {
@@ -136,7 +168,11 @@ let kFirmwareCheckInterval: TimeInterval = 6 * 3600
 /// Kennung des Firmware-Update-Banners im Einstellungsfenster.
 let kFirmwareUpdateBannerID = "firmware-update"
 let kFlashBaudRate = 460800
+#if ECHODESK_DESKTOP
+let kAppAssetName = "EchoDesk-Desktop-v0.2.6-macos-universal.zip"
+#else
 let kAppAssetName = "AIMonitor.zip"
+#endif
 let kAppUpdateCheckInterval: TimeInterval = 24 * 3600
 
 /// Der Keychain-Eintrag der alten App-Version (<=1.7.x), der beim App-Start
@@ -1048,9 +1084,13 @@ class AppUpdateManager {
     }
 
     private var currentAppReleaseTag: String {
+#if ECHODESK_DESKTOP
+        return "v\(kAppVersion)"
+#else
         kAppVersion.localizedCaseInsensitiveContains("beta")
             ? "app-beta-v\(kAppVersion)"
             : "app-v\(kAppVersion)"
+#endif
     }
 
     func checkForUpdate(completion: @escaping (Bool) -> Void) {
@@ -1073,12 +1113,23 @@ class AppUpdateManager {
     }
 
     private func selectAppRelease(from releases: [GitHubRelease]) -> GitHubRelease? {
+#if ECHODESK_DESKTOP
+        let stableReleases = releases.filter {
+            $0.tag_name.hasPrefix("v0.") && !$0.prerelease &&
+                $0.assets.contains { $0.name.hasPrefix("EchoDesk-Desktop-v") && $0.name.hasSuffix("-macos-universal.zip") }
+        }
+        let betaReleases = releases.filter {
+            $0.tag_name.hasPrefix("v0.") && $0.prerelease &&
+                $0.assets.contains { $0.name.hasPrefix("EchoDesk-Desktop-v") && $0.name.hasSuffix("-macos-universal.zip") }
+        }
+#else
         let stableReleases = releases.filter {
             $0.tag_name.hasPrefix("app-v") && !$0.prerelease
         }
         let betaReleases = releases.filter {
             $0.tag_name.hasPrefix("app-beta-v") && $0.prerelease
         }
+#endif
 
         switch Settings.shared.updateChannel {
         case .stable:
@@ -1096,7 +1147,13 @@ class AppUpdateManager {
 
     func downloadAndInstall(completion: @escaping (Bool, String) -> Void) {
         guard let release = latestRelease else { completion(false, L("release.none.title")); return }
-        guard let asset = release.assets.first(where: { $0.name == kAppAssetName }) else {
+        guard let asset = release.assets.first(where: {
+#if ECHODESK_DESKTOP
+            $0.name.hasPrefix("EchoDesk-Desktop-v") && $0.name.hasSuffix("-macos-universal.zip")
+#else
+            $0.name == kAppAssetName
+#endif
+        }) else {
             if let htmlUrl = release.html_url, let url = URL(string: htmlUrl) { NSWorkspace.shared.open(url) }
             completion(true, L("common.open_browser")); return
         }
@@ -1293,7 +1350,7 @@ class FirmwareManager {
 
     private var firmwareDir: String {
         let appSupport = NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true).first!
-        return (appSupport as NSString).appendingPathComponent("AI Monitor/firmware")
+        return (appSupport as NSString).appendingPathComponent("\(kProductName)/firmware")
     }
 
     var missingExpectedAssetNames: [String] {
@@ -1454,6 +1511,26 @@ class FirmwareManager {
     }
 
     func checkForUpdate(completion: @escaping (Bool) -> Void) {
+#if ECHODESK_DESKTOP
+        let release = EchoDeskFirmwareBundle.release
+        latestRelease = release
+        Settings.shared.lastFirmwareCheck = Date()
+        do {
+            let destination = localBinPath(for: release.tag_name, variant: kDisplayVariantST7789)
+            downloadedBinPath = try EchoDeskFirmwareBundle.installValidatedCopy(at: destination)
+        } catch {
+            downloadedBinPath = nil
+            NSLog("[Firmware] Bundled EchoDesk OS rejected: %@", error.localizedDescription)
+        }
+        let installed = Settings.shared.installedFirmwareVersion
+        let hasUpdate = installed.map {
+            compareFirmwareVersions(firmwareVersionTag(from: $0), EchoDeskFirmwareBundle.version) == .orderedAscending
+        } ?? true
+        DispatchQueue.main.async {
+            self.onUpdate?()
+            completion(hasUpdate)
+        }
+#else
         releaseFetcher.check(handle: { [weak self] releases in
             guard let self = self, let releases = releases else { return false }
             guard let release = self.selectFirmwareRelease(from: releases) else {
@@ -1475,6 +1552,7 @@ class FirmwareManager {
             DispatchQueue.main.async { self.onUpdate?() }
             return hasUpdate
         }, completion: completion)
+#endif
     }
 
     private func selectFirmwareRelease(from releases: [GitHubRelease]) -> GitHubRelease? {
@@ -1524,6 +1602,23 @@ class FirmwareManager {
     /// dann aber als Hinweis im `completion`-Text, damit der Dialog den
     /// User warnen kann.
     func downloadFirmware(variant: String, completion: @escaping (Bool, String?) -> Void) {
+        #if ECHODESK_DESKTOP
+        guard variant == kDisplayVariantST7789 else {
+            completion(false, "EchoDesk Mini requires the ST7789 firmware image.")
+            return
+        }
+        do {
+            try FileManager.default.createDirectory(atPath: firmwareDir, withIntermediateDirectories: true)
+            let destination = localBinPath(for: EchoDeskFirmwareBundle.release.tag_name, variant: variant)
+            downloadedBinPath = try EchoDeskFirmwareBundle.installValidatedCopy(at: destination)
+            downloadProgress = 1.0
+            completion(true, nil)
+        } catch {
+            downloadedBinPath = nil
+            completion(false, error.localizedDescription)
+        }
+        return
+        #else
         guard let release = latestRelease else { completion(false, L("release.none.title")); return }
         let requestedAsset = kFirmwareAssetByDisplay[variant] ?? kFirmwareAssetName
         // Der Rückgriff auf das ILI9341-Image gilt nur für die CYD-Varianten —
@@ -1587,6 +1682,7 @@ class FirmwareManager {
             }
         }
         task.resume()
+        #endif
     }
 
     /// Setzt Phase + Label und triggert UI-Refresh. Muss vom Main-Thread aus
@@ -1625,6 +1721,19 @@ class FirmwareManager {
             self.recordFlashFailure(message)
             completion(false, message)
         }
+#if ECHODESK_DESKTOP
+        // Re-check the exact signed-app payload immediately before a normal
+        // EchoDesk update. This closes the cache window between bundle import
+        // and flashing; manually selected recovery images retain the existing
+        // chip/layout validation below.
+        if localPath == nil {
+            guard let image = try? Data(contentsOf: URL(fileURLWithPath: binPath), options: [.mappedIfSafe]),
+                  (try? EchoDeskFirmwareBundle.validate(image)) != nil else {
+                rejectInvalidImage()
+                return
+            }
+        }
+#endif
         // Layout aus scripts/build_firmware.sh: CYD mit 4 MB und Bootloader an
         // 0x1000, S3 mit 16 MB und Bootloader an 0x0. Die Chip-Kennung im
         // Header verhindert, dass ein Image auf dem falschen Board landet.
@@ -2011,7 +2120,15 @@ class SerialPortManager {
     func availablePortPaths() -> [String] {
         let devPath = "/dev"
         guard let files = try? FileManager.default.contentsOfDirectory(atPath: devPath) else { return [] }
-        return files.filter { $0.hasPrefix("cu.usbserial-") }.map { "\(devPath)/\($0)" }.sorted()
+        // Apple/FTDI commonly exposes `cu.usbserial-*`; WCH's CH340 driver
+        // uses `cu.wchusbserial*` on macOS. `cu.usbmodem*` covers boards using
+        // native USB CDC. The protocol handshake still decides whether a port
+        // is actually an EchoDesk, so broadening enumeration cannot attach to
+        // an unrelated serial device.
+        let supportedPrefixes = ["cu.usbserial-", "cu.wchusbserial", "cu.usbmodem"]
+        return files.filter { name in supportedPrefixes.contains { name.hasPrefix($0) } }
+            .map { "\(devPath)/\($0)" }
+            .sorted()
     }
 
     /// Wird vom SettingsWindow aufgerufen, wenn der User den Port-Popup ändert.
@@ -3325,7 +3442,7 @@ class UsageMonitor {
                             "windowMinutes": 1440
                         ],
                         "rows": rowsPayload,
-                        "loginMethod": "AI Monitor Test"
+                        "loginMethod": "\(kProductName) Test"
                     ]
                 ]
             ]
@@ -3852,6 +3969,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var menuBarStatusItem: NSStatusItem?
     private var menuBarQuickMenuObservation: NSObjectProtocol?
     private var updateChannelObservation: NSObjectProtocol?
+#if ECHODESK_DESKTOP
+    private var onboardingController: EchoDeskOnboardingController?
+#endif
     private var shownFirmwareUpdateNoticeKeys = Set<String>()
     /// Flash, der schon automatisch korrigiert wurde. Liegt die Erkennung
     /// daneben, flasht die App so nicht endlos hin und her.
@@ -3938,15 +4058,39 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // liegen direkt im Footer — kein sichtbarer Main-Menu-Pfad.
         settingsController = SettingsWindowController()
         settingsController.monitor = monitor
+#if ECHODESK_DESKTOP
+        if UserDefaults.standard.bool(forKey: "EchoDeskOnboardingCompletedV1") {
+            settingsController.show()
+        } else {
+            let onboarding = EchoDeskOnboardingController()
+            onboarding.onFinished = { [weak self] transport in
+                guard let self else { return }
+                self.settingsController.show()
+                if transport == .wifi {
+                    self.settingsController.showSection(.connection)
+                }
+                self.onboardingController = nil
+            }
+            onboardingController = onboarding
+            onboarding.show()
+        }
+#else
         settingsController.show()
+#endif
         refreshMenuBarQuickMenu()
 
-        NSLog("[App] AI Monitor v%@ started (LSUIElement, CodexBar source)", kAppVersion)
+        NSLog("[App] %@ v%@ started (LSUIElement, CodexBar source)", kProductName, kAppVersion)
     }
 
     /// Wird aufgerufen, wenn die App aus Spotlight/Finder erneut gestartet wird.
     /// Liefert true und öffnet das Settings-Fenster.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+#if ECHODESK_DESKTOP
+        if let onboardingController {
+            onboardingController.show()
+            return true
+        }
+#endif
         settingsController?.show()
         return true
     }
@@ -3984,11 +4128,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.image = image
             button.imagePosition = .imageOnly
         } else {
+#if ECHODESK_DESKTOP
+            button.title = "ED"
+#else
             button.title = "AI"
+#endif
         }
-        button.toolTip = "AI Monitor"
+        button.toolTip = kProductName
 
-        let menu = NSMenu(title: "AI Monitor")
+        let menu = NSMenu(title: kProductName)
         menu.delegate = self
         item.menu = menu
         menuBarStatusItem = item
@@ -4063,7 +4211,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let appMenuItem = NSMenuItem()
         mainMenu.addItem(appMenuItem)
-        let appMenu = NSMenu(title: "AI Monitor")
+        let appMenu = NSMenu(title: kProductName)
 
         // HIG: „Display the About menu item first. Include a separator after
         // the About menu item so that it appears by itself in a group."
@@ -4574,7 +4722,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if hasUpdate { self?.showAppUpdateAlert() }
                 else {
                     self?.alert(title: L("update.none.title"),
-                                info: "AI Monitor v\(kAppVersion) \(L("update.none.suffix"))",
+                                info: "\(kProductName) v\(kAppVersion) \(L("update.none.suffix"))",
                                 style: .informational)
                 }
             }
@@ -4682,7 +4830,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 let app = NSApplication.shared
 // Accessory: kein Dock-Icon. LSUIElement in Info.plist ergänzt dies für den Launch.
+#if ECHODESK_DESKTOP
+app.setActivationPolicy(.regular)
+#else
 app.setActivationPolicy(.accessory)
+#endif
 let delegate = AppDelegate()
 app.delegate = delegate
 app.run()

@@ -14,7 +14,7 @@ internal static class Program
             MapperUsesOnlyReportedValues();
             FirmwareManagerMappingPreservesSafetyStates();
             MapperAcceptsNullOptionalNumericFields();
-            GuidedSetupPolicyRequiresRealLegalDocumentsAndPinsSelection();
+            GuidedSetupBlankLegalStepAndPinnedSelection();
             WifiSetupMappingAndGuidedPolicyAreAuthoritative();
             await BrokerRoundTripIsBoundedAndRevisionAware();
             Console.WriteLine("EchoDesk.Desktop.Tests: PASS");
@@ -54,12 +54,8 @@ internal static class Program
         var fixtureRoot = Path.Combine(Path.GetTempPath(), $"EchoDesk.WifiSetup.{Guid.NewGuid():N}");
         try
         {
-            Directory.CreateDirectory(Path.Combine(fixtureRoot, "legal"));
-            File.WriteAllText(Path.Combine(fixtureRoot, "legal", "ECHODESK-TERMS.md"), "terms");
-            File.WriteAllText(Path.Combine(fixtureRoot, "legal", "PRIVACY.md"), "privacy");
-            var flow = new GuidedSetupFlow(GuidedSetupLegalDocuments.Discover(fixtureRoot));
-            flow.SetTermsAccepted(true);
-            Assert(flow.MoveNext(), "Wi-Fi fixture did not pass legal gate");
+            var flow = new GuidedSetupFlow();
+            Assert(flow.MoveNext(), "Wi-Fi fixture did not pass the blank introductory step");
             flow.SelectTransport(GuidedSetupTransport.Wifi);
             Assert(flow.MoveNext() && flow.Step == GuidedSetupStep.SelectDevice, "Wi-Fi setup did not reach discovery");
             flow.SelectWifi(device.DeviceId, state.WifiSetup.Devices);
@@ -109,29 +105,19 @@ internal static class Program
             "incomplete installation was incorrectly promoted to success");
     }
 
-    private static void GuidedSetupPolicyRequiresRealLegalDocumentsAndPinsSelection()
+    private static void GuidedSetupBlankLegalStepAndPinnedSelection()
     {
         var fixtureRoot = Path.Combine(Path.GetTempPath(), $"EchoDesk.GuidedSetup.{Guid.NewGuid():N}");
         try
         {
             Directory.CreateDirectory(fixtureRoot);
-            var missing = GuidedSetupLegalDocuments.Discover(fixtureRoot);
-            var blocked = new GuidedSetupFlow(missing);
-            blocked.SetTermsAccepted(true);
-            Assert(!blocked.TermsAccepted && !blocked.MoveNext(),
-                "production setup must remain blocked when legal documents are absent");
-
-            var legalRoot = Path.Combine(fixtureRoot, "legal");
-            Directory.CreateDirectory(legalRoot);
-            File.WriteAllText(Path.Combine(legalRoot, "ECHODESK-TERMS.md"), "fixture terms");
-            File.WriteAllText(Path.Combine(legalRoot, "PRIVACY.md"), "fixture privacy");
-            File.WriteAllText(Path.Combine(fixtureRoot, "THIRD-PARTY-NOTICES.md"), "fixture notices");
             var documents = GuidedSetupLegalDocuments.Discover(fixtureRoot);
-            Assert(documents.HasRequiredDocuments, "fixture legal document seam did not activate");
+            Assert(!documents.HasRequiredDocuments, "blank legal step unexpectedly discovered documents");
 
-            var flow = new GuidedSetupFlow(documents);
-            flow.SetTermsAccepted(true);
-            Assert(flow.MoveNext() && flow.Step == GuidedSetupStep.Connect, "accepted terms did not advance");
+            var flow = new GuidedSetupFlow();
+            Assert(flow.CanContinue, "blank Terms/Privacy step must allow Continue");
+            Assert(flow.MoveNext() && flow.Step == GuidedSetupStep.Connect,
+                "blank Terms/Privacy step did not advance");
             Assert(flow.MoveNext() && flow.Step == GuidedSetupStep.SelectDevice, "connect step did not advance");
 
             var genericAdapter = new FirmwareDeviceCandidate

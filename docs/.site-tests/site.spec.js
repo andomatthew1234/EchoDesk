@@ -166,12 +166,16 @@ for (const size of sizes) {
     await page.setViewportSize({ width: size.width, height: size.height });
     const response = await page.goto("./download.html", { waitUntil: "networkidle" });
     expect(response.status()).toBe(200);
-    await expect(page.locator("h1")).toContainText("ready for Windows");
+    await expect(page.locator("h1")).toContainText("ready on desktop");
     await expect(page.locator('.desktop-nav a[aria-current="page"]')).toHaveText("Download");
-    await expect(page.locator(".download-primary")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.5/EchoDesk-Desktop-v0.2.5-win-x64-setup.exe");
-    await expect(page.locator(".download-portable")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.5/EchoDesk-Desktop-v0.2.5-win-x64.zip");
-    await expect(page.locator("[data-installer-sha256]")).toHaveText(/^[A-F0-9]{64}$/);
-    await expect(page.locator("[data-portable-sha256]")).toHaveText(/^[A-F0-9]{64}$/);
+    await expect(page.locator(".download-primary")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.6/EchoDesk-Desktop-v0.2.6-win-x64-setup.exe");
+    await expect(page.locator(".download-portable")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.6/EchoDesk-Desktop-v0.2.6-win-x64.zip");
+    await expect(page.locator(".download-macos")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.6/EchoDesk-Desktop-v0.2.6-macos-universal.dmg");
+    await expect(page.locator(".download-macos-zip")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.6/EchoDesk-Desktop-v0.2.6-macos-universal.zip");
+    await expect(page.locator("[data-installer-sha256]")).toHaveText(/Pending final|^[A-F0-9]{64}$/);
+    await expect(page.locator("[data-portable-sha256]")).toHaveText(/Pending final|^[A-F0-9]{64}$/);
+    await expect(page.locator("[data-macos-dmg-sha256]")).toHaveText(/Pending final|^[A-F0-9]{64}$/);
+    await expect(page.locator("[data-macos-zip-sha256]")).toHaveText(/Pending final|^[A-F0-9]{64}$/);
 
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(1);

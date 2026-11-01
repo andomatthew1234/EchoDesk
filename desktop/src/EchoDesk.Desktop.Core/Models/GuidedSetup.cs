@@ -40,13 +40,14 @@ public sealed record GuidedSetupLegalDocuments(
 
 /// <summary>
 /// Pure setup navigation and selection policy. The WPF layer owns I/O, while
-/// this object makes the legal gate and device pinning independently testable.
+/// this object keeps the blank introductory step and device pinning
+/// independently testable.
 /// </summary>
-public sealed class GuidedSetupFlow(GuidedSetupLegalDocuments legalDocuments)
+public sealed class GuidedSetupFlow
 {
     public GuidedSetupStep Step { get; private set; } = GuidedSetupStep.Terms;
     public GuidedSetupTransport Transport { get; private set; } = GuidedSetupTransport.Usb;
-    public bool TermsAccepted { get; private set; }
+    public bool TermsAccepted => true;
     public string? SelectedPort { get; private set; }
     public string? PinnedPort { get; private set; }
     public string? SelectedWifiDeviceId { get; private set; }
@@ -54,10 +55,10 @@ public sealed class GuidedSetupFlow(GuidedSetupLegalDocuments legalDocuments)
     public bool SelectedDeviceRequiresConfirmation { get; private set; }
     public bool BoardConfirmed { get; private set; }
 
-    public bool CanAcceptTerms => legalDocuments.HasRequiredDocuments;
+    public bool CanAcceptTerms => true;
     public bool CanContinue => Step switch
     {
-        GuidedSetupStep.Terms => CanAcceptTerms && TermsAccepted,
+        GuidedSetupStep.Terms => true,
         GuidedSetupStep.Connect => true,
         GuidedSetupStep.SelectDevice => Transport == GuidedSetupTransport.Usb
             ? !string.IsNullOrWhiteSpace(SelectedPort)
@@ -66,8 +67,10 @@ public sealed class GuidedSetupFlow(GuidedSetupLegalDocuments legalDocuments)
         _ => false,
     };
 
-    public void SetTermsAccepted(bool accepted) =>
-        TermsAccepted = legalDocuments.HasRequiredDocuments && accepted;
+    // Kept for binary/source compatibility with the original gated flow. The
+    // introductory Terms/Privacy step is intentionally blank and never asks
+    // the customer to accept text that has not been supplied.
+    public void SetTermsAccepted(bool _) { }
 
     public void SelectTransport(GuidedSetupTransport transport)
     {
@@ -151,7 +154,6 @@ public sealed class GuidedSetupFlow(GuidedSetupLegalDocuments legalDocuments)
     {
         Step = GuidedSetupStep.Terms;
         Transport = GuidedSetupTransport.Usb;
-        TermsAccepted = false;
         SelectedPort = null;
         PinnedPort = null;
         SelectedWifiDeviceId = null;

@@ -50,7 +50,7 @@
                     <Image Source="Assets/echodesk-logo.png" Width="34" Height="34" Stretch="Uniform"/>
                     <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
                         <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="17" FontWeight="SemiBold" Text="EchoDesk"/>
-                        <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" Text="DESKTOP 0.2.5"/>
+                        <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" Text="DESKTOP 0.2.6"/>
                     </StackPanel>
                 </StackPanel>
 
@@ -236,20 +236,10 @@
                         </Border>
 
                         <Border Style="{StaticResource Card}" Visibility="{Binding IsGuidedTermsStep, Converter={StaticResource BoolVisibility}}">
-                            <StackPanel MaxWidth="690">
-                                <TextBlock Text="Before we begin." FontSize="26" FontWeight="SemiBold"/>
-                                <TextBlock Style="{StaticResource Muted}" Text="Please review and accept the EchoDesk Terms and Conditions before setting up your device." TextWrapping="Wrap" Margin="0,8,0,18"/>
-                                <UniformGrid Columns="3" Margin="0,0,0,14">
-                                    <Button Command="{Binding OpenSetupDocumentCommand}" CommandParameter="terms" Margin="0,0,8,0" Padding="12"><StackPanel><TextBlock Text="Terms and Conditions" FontWeight="SemiBold"/><TextBlock Text="Required document" Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/></StackPanel></Button>
-                                    <Button Command="{Binding OpenSetupDocumentCommand}" CommandParameter="privacy" Margin="4,0" Padding="12"><StackPanel><TextBlock Text="Privacy Policy" FontWeight="SemiBold"/><TextBlock Text="Required document" Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/></StackPanel></Button>
-                                    <Button Command="{Binding OpenSetupDocumentCommand}" CommandParameter="notices" Margin="8,0,0,0" Padding="12"><StackPanel><TextBlock Text="Third-party notices" FontWeight="SemiBold"/><TextBlock Text="Licences and notices" Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/></StackPanel></Button>
-                                </UniformGrid>
-                                <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="8" Padding="12" Margin="0,0,0,14">
-                                    <TextBlock Text="{Binding GuidedSetupLegalStatus}" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"/>
-                                </Border>
-                                <CheckBox IsChecked="{Binding GuidedSetupTermsAccepted}" IsEnabled="{Binding GuidedSetupHasLegalDocuments}" Content="I have read and agree to the EchoDesk Terms and Conditions." Margin="0,0,0,18"/>
-                                <Button Style="{StaticResource PrimaryButton}" Command="{Binding GuidedSetupContinueCommand}" Content="Continue" HorizontalAlignment="Right" MinWidth="110"/>
-                            </StackPanel>
+                            <Grid MaxWidth="690" MinHeight="190">
+                                <!-- Intentionally blank until reviewed Terms and Privacy copy exists. -->
+                                <Button Style="{StaticResource PrimaryButton}" Command="{Binding GuidedSetupContinueCommand}" Content="Continue" HorizontalAlignment="Right" VerticalAlignment="Bottom" MinWidth="110"/>
+                            </Grid>
                         </Border>
 
                         <Border Style="{StaticResource Card}" Visibility="{Binding IsGuidedConnectStep, Converter={StaticResource BoolVisibility}}">

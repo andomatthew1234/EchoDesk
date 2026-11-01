@@ -113,6 +113,19 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var wifiNetworks: [DisplayWiFiNetwork] = []
     var lastWiFiStatusRefresh: Date?
     var lastWiFiStatusJSON: [String: Any]?
+#if ECHODESK_DESKTOP
+    // Optional first-run Wi-Fi provisioning. This is deliberately separate
+    // from the device's normal USB-owned NTP Wi-Fi controls below.
+    var echoDeskWiFiStatusLabel: NSTextField!
+    var echoDeskWiFiDevicePopup: NSPopUpButton!
+    var echoDeskWiFiFindButton: NSButton!
+    var echoDeskWiFiSettingsButton: NSButton!
+    var echoDeskWiFiCodeField: NSTextField!
+    var echoDeskWiFiSSIDField: NSTextField!
+    var echoDeskWiFiPasswordField: NSSecureTextField!
+    var echoDeskWiFiProvisionButton: NSButton!
+    var echoDeskWiFiCancelButton: NSButton!
+#endif
 
     // Rechte Spalte — Display
     var deviceRow: NSView!
@@ -228,7 +241,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "AI Monitor"
+        window.title = kProductName
         window.isReleasedWhenClosed = false
         window.center()
         // HIG „Designing for macOS": „Let people resize, hide, show, and move
@@ -495,7 +508,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private func buildFooter() -> NSView {
         let container = NSView()
 
-        footerVersionLabel = NSTextField(labelWithString: "AI Monitor v\(kAppVersion)")
+        footerVersionLabel = NSTextField(labelWithString: "\(kProductName) v\(kAppVersion)")
         footerVersionLabel.font = NSFont.appFont(.subheadline)
         footerVersionLabel.textColor = .tertiaryLabelColor
         footerVersionLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -919,7 +932,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         // Footer-Version (falls kAppVersion sich in einem Hot-Reload mal aendert)
         let channelSuffix = Settings.shared.updateChannel == .beta ? " · Beta-Kanal" : ""
-        footerVersionLabel?.stringValue = "AI Monitor v\(kAppVersion)\(channelSuffix)"
+        footerVersionLabel?.stringValue = "\(kProductName) v\(kAppVersion)\(channelSuffix)"
 
         updateOverviewGuidance()
         refreshLiveLabels()
@@ -1007,7 +1020,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// Wird vom App-Menue (AppDelegate) aufgerufen — daher nicht fileprivate.
     @objc func showAbout() {
         let alert = NSAlert()
-        alert.messageText = "AI Monitor v\(kAppVersion)"
+        alert.messageText = "\(kProductName) v\(kAppVersion)"
         alert.informativeText = """
         macOS-Hintergrund-App für das ESP32-Usage-Display.
 
@@ -1016,7 +1029,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         und sendet die verfügbaren Nutzungslimits per USB-Serial an das \
         ESP32-Display.
 
-        Repo: github.com/tobymarks/esp32-ai-monitor
+        Repo: github.com/\(kProductRepository)
 
         © 2026 Tobias Marks · MIT-Lizenz
         """

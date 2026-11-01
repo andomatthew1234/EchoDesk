@@ -4,12 +4,29 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-BUILD_DIR="/tmp/aimonitor-build"
-APP="$BUILD_DIR/AI Monitor.app"
+PRODUCT_MODE="${PRODUCT_MODE:-ai-monitor}"
+# Convenience/CI compatibility: either invocation builds the branded app.
+if [ "${ECHODESK_DESKTOP:-0}" = "1" ]; then PRODUCT_MODE="echodesk"; fi
+if [ "$PRODUCT_MODE" = "echodesk" ]; then
+  BUILD_DIR="/tmp/echodesk-desktop-build"
+  APP_NAME="EchoDesk Desktop"
+  APP_VERSION="0.2.6"
+  EXECUTABLE_NAME="EchoDeskDesktop"
+  INFO_PLIST="Resources/EchoDesk-Info.plist"
+  RELEASE_STEM="EchoDesk-Desktop-v${APP_VERSION}-macos-universal"
+  SWIFT_DEFINES=(-D ECHODESK_DESKTOP)
+else
+  BUILD_DIR="/tmp/aimonitor-build"
+  APP_NAME="AI Monitor"
+  APP_VERSION="1.32.0"
+  EXECUTABLE_NAME="AIMonitor"
+  INFO_PLIST="Resources/Info.plist"
+  RELEASE_STEM="AIMonitor"
+  SWIFT_DEFINES=()
+fi
+APP="$BUILD_DIR/$APP_NAME.app"
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
-
-APP_VERSION="1.32.0"
 
 # Developer ID Signing (ab v1.13.0) — optional. Wenn die Identity nicht im
 # Keychain ist (z.B. CI-Runner ohne Cert-Import), fallen wir auf Ad-hoc-Sign
@@ -29,7 +46,7 @@ else
   echo "Developer ID NOT found — falling back to ad-hoc signing (no notarization)."
 fi
 
-echo "Compiling AI Monitor v${APP_VERSION}..."
+echo "Compiling $APP_NAME v${APP_VERSION}..."
 
 # Baue .app Bundle Struktur zuerst
 mkdir -p "$APP/Contents/MacOS"
@@ -63,6 +80,10 @@ SWIFT_SOURCES=(
   Sources/IntelligentViews.swift
   Sources/SettingsWindow+Plugins.swift
   Sources/ClaudeCodeWindow.swift
+  Sources/EchoDeskWifiSetup.swift
+  Sources/EchoDeskFirmwareBundle.swift
+  Sources/EchoDeskOnboarding.swift
+  Sources/SettingsWindow+EchoDeskWifiSetup.swift
 )
 
 SLICES=()
@@ -70,17 +91,18 @@ for ARCH in arm64 x86_64; do
   echo "Compiling slice: $ARCH (macOS $MACOS_MIN)"
   swiftc \
     "${SWIFT_SOURCES[@]}" \
+    "${SWIFT_DEFINES[@]}" \
     -framework Cocoa \
     -framework Security \
     -framework Network \
     -framework ServiceManagement \
     -target "$ARCH-apple-macosx$MACOS_MIN" \
     -O \
-    -o "$BUILD_DIR/AIMonitor-$ARCH"
-  SLICES+=("$BUILD_DIR/AIMonitor-$ARCH")
+    -o "$BUILD_DIR/$EXECUTABLE_NAME-$ARCH"
+  SLICES+=("$BUILD_DIR/$EXECUTABLE_NAME-$ARCH")
 done
 
-lipo -create -output "$APP/Contents/MacOS/AIMonitor" "${SLICES[@]}"
+lipo -create -output "$APP/Contents/MacOS/$EXECUTABLE_NAME" "${SLICES[@]}"
 rm -f "${SLICES[@]}"
 
 # The native companion uses the same validated plugin format and scene builder
@@ -98,7 +120,7 @@ lipo -create -output "$APP/Contents/MacOS/aimonitor-plugin-host" \
 
 # Gegenprobe: beide Slices muessen drin sein, sonst waere der Universal-Build
 # still zu einem Single-Arch-Build degradiert.
-ARCHS_BUILT=$(lipo -archs "$APP/Contents/MacOS/AIMonitor")
+ARCHS_BUILT=$(lipo -archs "$APP/Contents/MacOS/$EXECUTABLE_NAME")
 echo "Universal binary: $ARCHS_BUILT"
 for NEED in arm64 x86_64; do
   case " $ARCHS_BUILT " in
@@ -108,7 +130,22 @@ for NEED in arm64 x86_64; do
 done
 
 # Info.plist + Resources
-cp Resources/Info.plist "$APP/Contents/"
+cp "$INFO_PLIST" "$APP/Contents/Info.plist"
+
+if [ "$PRODUCT_MODE" = "echodesk" ]; then
+  FIRMWARE_SOURCE="$SCRIPT_DIR/../desktop/firmware/echodesk-mini/2.31.0/echodesk-os.bin"
+  FIRMWARE_DEST="$APP/Contents/Resources/firmware/echodesk-mini/2.31.0"
+  [ -f "$FIRMWARE_SOURCE" ] || { echo "ERROR: EchoDesk OS 2.31.0 is missing"; exit 1; }
+  EXPECTED_FIRMWARE_SHA="77dd25b6bb32cd059807135a9db9577b7f7d39748f50bc7256c528bd45577175"
+  ACTUAL_FIRMWARE_SHA=$(shasum -a 256 "$FIRMWARE_SOURCE" | awk '{print tolower($1)}')
+  [ "$ACTUAL_FIRMWARE_SHA" = "$EXPECTED_FIRMWARE_SHA" ] \
+    || { echo "ERROR: EchoDesk OS 2.31.0 SHA-256 mismatch"; exit 1; }
+  [ "$(stat -f %z "$FIRMWARE_SOURCE")" = "1516400" ] \
+    || { echo "ERROR: EchoDesk OS 2.31.0 size mismatch"; exit 1; }
+  mkdir -p "$FIRMWARE_DEST"
+  cp "$FIRMWARE_SOURCE" "$FIRMWARE_DEST/echodesk-os.bin"
+  echo "Bundled and validated EchoDesk OS 2.31.0"
+fi
 
 # -----------------------------------------------------------------------------
 # App-Icon (ab v1.23.0)
@@ -253,7 +290,7 @@ if [ "$HAS_DEVELOPER_ID" = "1" ]; then
   codesign --force --timestamp --options runtime \
     --sign "$SIGN_IDENTITY" "$APP/Contents/MacOS/aimonitor-plugin-host"
   codesign --force --timestamp --options runtime \
-    --sign "$SIGN_IDENTITY" "$APP/Contents/MacOS/AIMonitor"
+    --sign "$SIGN_IDENTITY" "$APP/Contents/MacOS/$EXECUTABLE_NAME"
   codesign --force --timestamp --options runtime \
     --sign "$SIGN_IDENTITY" "$APP"
 
@@ -279,13 +316,13 @@ cp -R "$BUILD_DIR" "$SCRIPT_DIR/build"
 #   4. Ticket an DMG stapeln
 #   5. App einzeln stapeln (damit die ZIP-Version das Ticket enthält)
 #   6. ZIP aus gestapelter .app erzeugen (ditto)
-DMG_PATH="$SCRIPT_DIR/build/AIMonitor.dmg"
+DMG_PATH="$SCRIPT_DIR/build/$RELEASE_STEM.dmg"
 rm -f "$DMG_PATH"
 DMG_STAGING="$(mktemp -d)"
-cp -R "$SCRIPT_DIR/build/AI Monitor.app" "$DMG_STAGING/"
+cp -R "$SCRIPT_DIR/build/$APP_NAME.app" "$DMG_STAGING/"
 ln -sf /Applications "$DMG_STAGING/Applications"
 
-if hdiutil create -volname "AI Monitor" \
+if hdiutil create -volname "$APP_NAME" \
   -srcfolder "$DMG_STAGING" \
   -ov -format UDZO \
   "$DMG_PATH" >/dev/null 2>&1; then
@@ -313,8 +350,8 @@ if [ "$HAS_DEVELOPER_ID" = "1" ] && [ "$NOTARIZE" = "1" ] && [ -n "$DMG_PATH" ];
 
     echo "Stapling ticket to DMG and App..."
     xcrun stapler staple "$DMG_PATH"
-    xcrun stapler staple "$SCRIPT_DIR/build/AI Monitor.app"
-    xcrun stapler validate "$SCRIPT_DIR/build/AI Monitor.app"
+    xcrun stapler staple "$SCRIPT_DIR/build/$APP_NAME.app"
+    xcrun stapler validate "$SCRIPT_DIR/build/$APP_NAME.app"
     xcrun stapler validate "$DMG_PATH"
     echo "Stapling complete."
   else
@@ -334,9 +371,9 @@ fi
 # Extended Attributes korrekt — besser als zip(1) für signierte Bundles.
 # =============================================================================
 cd "$SCRIPT_DIR/build"
-rm -f AIMonitor.zip
-ditto -c -k --keepParent "AI Monitor.app" AIMonitor.zip
-echo "Release ZIP: $SCRIPT_DIR/build/AIMonitor.zip"
+rm -f "$RELEASE_STEM.zip"
+ditto -c -k --keepParent "$APP_NAME.app" "$RELEASE_STEM.zip"
+echo "Release ZIP: $SCRIPT_DIR/build/$RELEASE_STEM.zip"
 
 # =============================================================================
 # Verifikation (nur bei Developer-ID-Build)
@@ -345,13 +382,13 @@ if [ "$HAS_DEVELOPER_ID" = "1" ] && [ "$NOTARIZE" = "1" ]; then
   echo ""
   echo "=== Gatekeeper-Verifikation ==="
   spctl -a -vvv -t install "$DMG_PATH" 2>&1 || true
-  spctl -a -vvv -t execute "$SCRIPT_DIR/build/AI Monitor.app" 2>&1 || true
-  xcrun stapler validate "$SCRIPT_DIR/build/AI Monitor.app" 2>&1 || true
+  spctl -a -vvv -t execute "$SCRIPT_DIR/build/$APP_NAME.app" 2>&1 || true
+  xcrun stapler validate "$SCRIPT_DIR/build/$APP_NAME.app" 2>&1 || true
   xcrun stapler validate "$DMG_PATH" 2>&1 || true
 fi
 
 echo ""
-echo "Build complete: $SCRIPT_DIR/build/AI Monitor.app"
+echo "Build complete: $SCRIPT_DIR/build/$APP_NAME.app"
 echo ""
 echo "=== Release Workflow ==="
 echo "1. Update kAppVersion in Sources/main.swift"

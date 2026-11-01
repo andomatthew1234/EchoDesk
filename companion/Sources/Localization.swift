@@ -16,16 +16,27 @@ import Foundation
 /// Sprache ihn nicht kennt — sonst stuende der rohe Key in der UI.
 func L(_ key: String) -> String {
     let s = Bundle.main.localizedString(forKey: key, value: kLocalizationMissing, table: nil)
-    if s != kLocalizationMissing { return s }
+    if s != kLocalizationMissing { return productized(s) }
     if let path = Bundle.main.path(forResource: "en", ofType: "lproj"),
        let fallback = Bundle(path: path) {
         let e = fallback.localizedString(forKey: key, value: kLocalizationMissing, table: nil)
-        if e != kLocalizationMissing { return e }
+        if e != kLocalizationMissing { return productized(e) }
     }
     #if DEBUG
     print("[i18n] Kein Eintrag fuer Key: \(key)")
     #endif
     return key
+}
+
+/// The EchoDesk macOS product deliberately reuses the mature native companion
+/// localisation catalogue. Branding is applied at lookup time so the original
+/// AI Monitor build and translations remain untouched.
+private func productized(_ value: String) -> String {
+    #if ECHODESK_DESKTOP
+    return value.replacingOccurrences(of: "AI Monitor", with: "EchoDesk Desktop")
+    #else
+    return value
+    #endif
 }
 
 /// Variante fuer Format-Strings, z. B. ein Key mit %@ oder %d.

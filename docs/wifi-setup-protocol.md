@@ -1,6 +1,6 @@
 # EchoDesk Wi-Fi setup protocol v1
 
-EchoDesk OS 2.31.0 and EchoDesk Desktop 0.2.5 add opt-in Wi-Fi provisioning for
+EchoDesk OS 2.31.0 and EchoDesk Desktop 0.2.6 add opt-in Wi-Fi provisioning for
 EchoDesk Mini. USB is the default connection and remains the only firmware
 installation and recovery transport. This version provisions a network and
 supports authenticated rediscovery; it does not carry Codex usage or device

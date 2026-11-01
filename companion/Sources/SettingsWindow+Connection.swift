@@ -13,8 +13,11 @@ extension SettingsWindowController {
     func buildConnectionPage() -> NSView {
         let portBox = buildPortBox()
         let wifiBox = buildWiFiBox()
-
+#if ECHODESK_DESKTOP
+        let stack = NSStackView(views: [portBox, buildEchoDeskWiFiSetupBox(), wifiBox])
+#else
         let stack = NSStackView(views: [portBox, wifiBox])
+#endif
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 24

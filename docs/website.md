@@ -17,7 +17,7 @@ Then open `http://127.0.0.1:4173/docs/`.
 ## Source layout
 
 - `index.html`: complete page content and semantic structure.
-- `download.html`: Windows download, setup and release-verification page.
+- `download.html`: Windows and macOS download, setup and release-verification page.
 - `css/`: visual system, motion and responsive rules.
 - `js/`: navigation/theme controls, product interaction, flip cards and
   progressive reveal animation.
@@ -32,13 +32,17 @@ Then open `http://127.0.0.1:4173/docs/`.
 
 The download page targets these versioned GitHub Release assets:
 
-- `releases/download/v0.2.5/EchoDesk-Desktop-v0.2.5-win-x64-setup.exe`
-- `releases/download/v0.2.5/EchoDesk-Desktop-v0.2.5-win-x64.zip`
+- `releases/download/v0.2.6/EchoDesk-Desktop-v0.2.6-win-x64-setup.exe`
+- `releases/download/v0.2.6/EchoDesk-Desktop-v0.2.6-win-x64.zip`
+- `releases/download/v0.2.6/EchoDesk-Desktop-v0.2.6-macos-universal.dmg`
+- `releases/download/v0.2.6/EchoDesk-Desktop-v0.2.6-macos-universal.zip`
 
-Upload only the final files produced by `desktop/build.ps1`. Update the
-displayed file size and both SHA-256 values in `download.html` from those exact
+Upload only the final Windows files produced by `desktop/build.ps1` and the
+final universal macOS files produced by `companion/build.sh`. Update every
+displayed file size and SHA-256 value in `download.html` from those exact
 release files, then run the browser suite. Never rename an older release to
-fill a new versioned path.
+fill a new versioned path, and never claim an ad-hoc-signed Mac build is
+notarized.
 
 ## Product visual provenance
 

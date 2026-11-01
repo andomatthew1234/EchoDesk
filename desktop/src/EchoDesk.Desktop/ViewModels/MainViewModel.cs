@@ -55,7 +55,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         uiContext = SynchronizationContext.Current ?? new SynchronizationContext();
         guidedSetupLegalDocuments = setupLegalDocuments
             ?? GuidedSetupLegalDocuments.Discover(AppContext.BaseDirectory);
-        guidedSetup = new GuidedSetupFlow(guidedSetupLegalDocuments);
+        guidedSetup = new GuidedSetupFlow();
         preferences = preferencesService.Load();
         broker.StateChanged += OnStateChanged;
         NavigateCommand = new RelayCommand(page => SelectedPage = page as string ?? "Overview");
@@ -352,9 +352,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public bool GuidedSetupPrivacyAvailable => guidedSetupLegalDocuments.HasPrivacy;
     public bool GuidedSetupNoticesAvailable => !string.IsNullOrWhiteSpace(guidedSetupLegalDocuments.ThirdPartyNoticesPath)
                                                && File.Exists(guidedSetupLegalDocuments.ThirdPartyNoticesPath);
-    public string GuidedSetupLegalStatus => GuidedSetupHasLegalDocuments
-        ? "Review both documents before accepting."
-        : "Setup is unavailable in this build because official EchoDesk Terms and Privacy documents have not been supplied.";
+    public string GuidedSetupLegalStatus => "";
     public bool GuidedSetupTermsAccepted
     {
         get => guidedSetup.TermsAccepted;

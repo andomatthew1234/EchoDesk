@@ -7,7 +7,7 @@
     <AssemblyName>EchoDesk Desktop</AssemblyName>
     <RootNamespace>EchoDesk.Desktop</RootNamespace>
     <ApplicationIcon>Assets\echodesk.ico</ApplicationIcon>
-    <Version>0.2.5</Version>
+    <Version>0.2.6</Version>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\EchoDesk.Desktop.Core\EchoDesk.Desktop.Core.csproj" />

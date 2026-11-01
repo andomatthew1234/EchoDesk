@@ -72,7 +72,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_echodesk_firm
 The packager copies firmware only after every check passes, then hashes the
 copy again. `desktop/build.ps1` places the manifest digest, firmware digest and
 in-process flash-engine version into `component-manifest.json` before creating
-`EchoDesk-Desktop-v0.2.5-win-x64.zip`.
+`EchoDesk-Desktop-v0.2.6-win-x64.zip`.
 
 `desktop/installer/EchoDesk-Desktop.nsi` creates a current-user setup executable
 that installs to `%LOCALAPPDATA%\Programs\EchoDesk Desktop`, adds Start menu

@@ -58,7 +58,7 @@ extension SettingsWindowController {
     }
 
     func diagnosticReport() -> String {
-        guard let monitor = monitor else { return "AI Monitor Diagnose\nMonitor nicht initialisiert." }
+        guard let monitor = monitor else { return "\(kProductName) Diagnose\nMonitor nicht initialisiert." }
 
         let df = DateFormatter()
         df.dateStyle = .medium
@@ -86,7 +86,7 @@ extension SettingsWindowController {
         let entry = src.lastEntry
 
         var lines: [String] = []
-        lines.append("AI Monitor Diagnose")
+        lines.append("\(kProductName) Diagnose")
         lines.append("Erstellt: \(df.string(from: Date()))")
         lines.append("")
         lines.append("App")

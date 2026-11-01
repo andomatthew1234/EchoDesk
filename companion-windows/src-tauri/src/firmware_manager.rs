@@ -20,7 +20,7 @@ use tauri::{AppHandle, Manager};
 pub const MINI_MODEL: &str = "EchoDesk Mini";
 pub const MINI_HARDWARE_ID: &str = "freenove-fnk0114a-2p4";
 pub const MINI_REPORTED_MODEL: &str = "Freenove FNK0114A_2P4";
-pub const DESKTOP_VERSION: &str = "0.2.5";
+pub const DESKTOP_VERSION: &str = "0.2.6";
 const RECONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const PAUSE_TIMEOUT: Duration = Duration::from_secs(5);
 const SETTLE_DELAY: Duration = Duration::from_millis(500);
@@ -1433,7 +1433,7 @@ mod tests {
 
     #[test]
     fn desktop_version_and_public_errors_are_stable() {
-        assert_eq!(DESKTOP_VERSION, "0.2.5");
+        assert_eq!(DESKTOP_VERSION, "0.2.6");
         assert!(aimonitor_core::semver::at_least(DESKTOP_VERSION, "0.2.0"));
         assert_eq!(public_error("wrong_flash_size").0, "wrong_hardware");
         assert_eq!(

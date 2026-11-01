@@ -10,13 +10,23 @@ on:
       - 'app-beta-v*'
   workflow_dispatch:
     inputs:
+      product:
+        description: 'macOS product to build'
+        required: true
+        type: choice
+        default: 'echodesk'
+        options:
+          - 'echodesk'
+          - 'ai-monitor'
       upload_to_release:
-        description: 'Upload ZIP+DMG zum vorhandenen Release (Tag manuell angeben)'
-        required: false
-        default: 'false'
+        description: 'Upload the signed ZIP and DMG to an existing release'
+        required: true
+        type: boolean
+        default: false
       tag:
-        description: 'Release-Tag (nur bei workflow_dispatch mit upload=true)'
-        required: false
+        description: 'Existing release tag used by manual upload'
+        required: true
+        default: 'v0.2.6'
 
 # contents: write wird fuer `gh release upload` gebraucht — ohne diese
 # permission liefert die API 403 ('Resource not accessible by integration').
@@ -42,6 +52,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Configure macOS product
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.product }}" == "echodesk" ]]; then
+            echo "PRODUCT_MODE=echodesk" >> "$GITHUB_ENV"
+            echo "APP_BUNDLE=EchoDesk Desktop.app" >> "$GITHUB_ENV"
+            echo "RELEASE_STEM=EchoDesk-Desktop-v0.2.6-macos-universal" >> "$GITHUB_ENV"
+            echo "ARTIFACT_LABEL=EchoDesk-Desktop-v0.2.6-macOS" >> "$GITHUB_ENV"
+          else
+            echo "PRODUCT_MODE=ai-monitor" >> "$GITHUB_ENV"
+            echo "APP_BUNDLE=AI Monitor.app" >> "$GITHUB_ENV"
+            echo "RELEASE_STEM=AIMonitor" >> "$GITHUB_ENV"
+            echo "ARTIFACT_LABEL=AIMonitor-macOS" >> "$GITHUB_ENV"
+          fi
+
       # Die App-Version steht an drei manuell gepflegten Stellen. Bei einem
       # app-v* / app-beta-v*-Tag muessen alle drei zum Tag passen, sonst meldet
       # der In-App-Updater eine andere Version als ausgeliefert wird.
@@ -50,8 +76,8 @@ jobs:
         run: |
           REF="${GITHUB_REF#refs/tags/}"
           if [[ "$REF" == app-beta-v* ]]; then TAG="${REF#app-beta-v}"; else TAG="${REF#app-v}"; fi
-          CODE=$(grep 'let kAppVersion' companion/Sources/main.swift | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          BUILDSH=$(grep '^APP_VERSION=' companion/build.sh | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          CODE=$(grep 'let kAppVersion' companion/Sources/main.swift | tail -1 | sed 's/.*"\(.*\)".*/\1/')
+          BUILDSH=$(grep 'APP_VERSION="1\.' companion/build.sh | head -1 | sed 's/.*"\(.*\)".*/\1/')
           PLIST=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' companion/Resources/Info.plist)
           fail=0
           for pair in "kAppVersion:$CODE" "build.sh:$BUILDSH" "Info.plist:$PLIST"; do
@@ -63,6 +89,24 @@ jobs:
           done
           [ "$fail" = 0 ] && echo "Version OK: $TAG"
           exit $fail
+
+      - name: Verify EchoDesk Desktop release metadata
+        if: github.event_name == 'workflow_dispatch' && inputs.product == 'echodesk'
+        run: |
+          set -euo pipefail
+          EXPECTED=0.2.6
+          CODE=$(grep 'let kAppVersion' companion/Sources/main.swift | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
+          BUILDSH=$(grep 'APP_VERSION="0\.' companion/build.sh | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
+          PLIST=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' companion/Resources/EchoDesk-Info.plist)
+          [[ "$CODE" == "$EXPECTED" && "$BUILDSH" == "$EXPECTED" && "$PLIST" == "$EXPECTED" ]] || {
+            echo "::error::EchoDesk version mismatch: source=$CODE build=$BUILDSH plist=$PLIST expected=$EXPECTED"
+            exit 1
+          }
+          [[ "${{ inputs.tag }}" == "v$EXPECTED" ]] || {
+            echo "::error::EchoDesk 0.2.6 assets must upload to release tag v$EXPECTED"
+            exit 1
+          }
+          echo "EchoDesk Desktop release metadata is consistent ($EXPECTED)."
 
       - name: Select newest Xcode
         run: |
@@ -149,7 +193,7 @@ jobs:
         working-directory: companion-windows
         run: cargo test -p aimonitor-core -p aimonitor-plugin-host --locked
 
-      - name: Build AI Monitor.app
+      - name: Build macOS app
         working-directory: companion
         env:
           NOTARY_PROFILE: AC_NOTARY
@@ -165,12 +209,12 @@ jobs:
           else
             echo "Ad-hoc-Build (keine Signing-Secrets hinterlegt)."
           fi
-          ./build.sh
+          PRODUCT_MODE="$PRODUCT_MODE" ./build.sh
 
       - name: Smoke test bundled display-plugin helper
         run: |
           set -euo pipefail
-          HELPER="companion/build/AI Monitor.app/Contents/MacOS/aimonitor-plugin-host"
+          HELPER="companion/build/$APP_BUNDLE/Contents/MacOS/aimonitor-plugin-host"
           PACKAGE="$RUNNER_TEMP/display-fixture.aimplugin"
           python3 scripts/package_display_plugin.py \
             tests/fixtures/display-plugin/plugin.json "$PACKAGE"
@@ -206,16 +250,29 @@ jobs:
       - name: Upload ZIP artifact
         uses: actions/upload-artifact@v7
         with:
-          name: AIMonitor-zip
-          path: companion/build/AIMonitor.zip
+          name: ${{ env.ARTIFACT_LABEL }}-zip
+          path: companion/build/${{ env.RELEASE_STEM }}.zip
           if-no-files-found: error
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v7
         with:
-          name: AIMonitor-dmg
-          path: companion/build/AIMonitor.dmg
+          name: ${{ env.ARTIFACT_LABEL }}-dmg
+          path: companion/build/${{ env.RELEASE_STEM }}.dmg
           if-no-files-found: warn
+
+      - name: Verify distributable before release upload
+        if: startsWith(github.ref, 'refs/tags/app-v') || startsWith(github.ref, 'refs/tags/app-beta-v') || (github.event_name == 'workflow_dispatch' && inputs.upload_to_release)
+        run: |
+          set -euo pipefail
+          if [[ -z "${MACOS_CERT_P12_BASE64:-}" ]]; then
+            echo "::error::Refusing to publish an ad-hoc signed macOS build. Configure signing/notarization secrets first."
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "companion/build/$APP_BUNDLE"
+          xcrun stapler validate "companion/build/$APP_BUNDLE"
+          xcrun stapler validate "companion/build/$RELEASE_STEM.dmg"
+          spctl -a -t open --context context:primary-signature -vv "companion/build/$RELEASE_STEM.dmg"
 
       # CI baut vollstaendig signiert + notarisiert + gestapelt: der Job
       # importiert die Developer ID aus den Repo-Secrets und setzt NOTARIZE=1,
@@ -227,11 +284,15 @@ jobs:
       # Signing-Secrets hinterlegt sind, liefert CI dieselbe Qualitaet; der
       # Guard erzwang nur noch unnoetige lokale Builds und ist entfallen.
       - name: Attach assets to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/app-v') || startsWith(github.ref, 'refs/tags/app-beta-v')
+        if: startsWith(github.ref, 'refs/tags/app-v') || startsWith(github.ref, 'refs/tags/app-beta-v') || (github.event_name == 'workflow_dispatch' && inputs.upload_to_release)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
           # Release anlegen, falls es noch nicht existiert. Beta-Tags
           # (app-beta-v*) werden als prerelease markiert, damit der In-App-
           # Updater sie ausschliesslich im Beta-Kanal anbietet.
@@ -247,12 +308,6 @@ jobs:
           fi
           echo "Uploading notarized CI build to $TAG."
           gh release upload "$TAG" \
-            companion/build/AIMonitor.zip \
-            companion/build/AIMonitor.dmg \
+            "companion/build/$RELEASE_STEM.zip" \
+            "companion/build/$RELEASE_STEM.dmg" \
             --clobber
-
-          # Gegenprobe: Was hochgeladen wurde, muss Gatekeeper passieren.
-          # Faengt ab, dass ein unbemerkt ad-hoc signierter Build als Release
-          # herausgeht, falls die Signing-Secrets einmal fehlen.
-          spctl -a -t open --context context:primary-signature -vv \
-            companion/build/AIMonitor.dmg
