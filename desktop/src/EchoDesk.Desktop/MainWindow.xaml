@@ -50,7 +50,7 @@
                     <Image Source="Assets/echodesk-logo.png" Width="34" Height="34" Stretch="Uniform"/>
                     <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
                         <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="17" FontWeight="SemiBold" Text="EchoDesk"/>
-                        <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" Text="DESKTOP 0.2.6"/>
+                        <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" Text="DESKTOP 0.2.7"/>
                     </StackPanel>
                 </StackPanel>
 
@@ -89,10 +89,10 @@
                         <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" FontSize="18" Text="&#xE713;"/><TextBlock Style="{StaticResource NavText}" Text="Customisation"/></StackPanel>
                     </Button>
                     <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Set up a new device">
-                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" FontSize="18" Text="&#xE710;"/><TextBlock Style="{StaticResource NavText}" Text="Set up a new device"/></StackPanel>
+                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" FontSize="18" Text="&#xE710;"/><TextBlock Style="{StaticResource NavText}" Text="Setup new device"/></StackPanel>
                     </Button>
-                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Setup &amp; Updates">
-                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" FontSize="18" Text="&#xE895;"/><TextBlock Style="{StaticResource NavText}" Text="Setup &amp; Updates"/></StackPanel>
+                    <Button Style="{StaticResource NavButton}" Command="{Binding NavigateCommand}" CommandParameter="Device recovery &amp; updates">
+                        <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" FontSize="18" Text="&#xE95E;"/><TextBlock Style="{StaticResource NavText}" Text="Device recovery &amp; updates" TextWrapping="Wrap" MaxWidth="142"/></StackPanel>
                     </Button>
                 </StackPanel>
             </DockPanel>
@@ -226,46 +226,39 @@
                         <TextBlock Style="{StaticResource Muted}" Text="A guided, verified installation for EchoDesk Mini." Margin="0,0,0,18"/>
 
                         <Border Style="{StaticResource Card}" Padding="18,13" Margin="0,0,0,18">
-                            <UniformGrid Columns="5">
-                                <StackPanel HorizontalAlignment="Center"><Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource AccentBrush}"><TextBlock Text="1" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Terms" FontSize="11" Margin="0,5,0,0"/></StackPanel>
-                                <StackPanel HorizontalAlignment="Center"><Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource SurfaceAltBrush}"><TextBlock Text="2" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Connect" FontSize="11" Margin="0,5,0,0"/></StackPanel>
-                                <StackPanel HorizontalAlignment="Center"><Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource SurfaceAltBrush}"><TextBlock Text="3" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Choose" FontSize="11" Margin="0,5,0,0"/></StackPanel>
-                                <StackPanel HorizontalAlignment="Center"><Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource SurfaceAltBrush}"><TextBlock Text="4" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Install" FontSize="11" Margin="0,5,0,0"/></StackPanel>
-                                <StackPanel HorizontalAlignment="Center"><Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource SurfaceAltBrush}"><TextBlock Text="5" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Ready" FontSize="11" Margin="0,5,0,0"/></StackPanel>
+                            <UniformGrid Columns="6">
+                                <StackPanel HorizontalAlignment="Center"><Border Width="28" Height="28" CornerRadius="14"><Border.Style><Style TargetType="Border"><Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsGuidedConnectStep}" Value="True"><Setter Property="Background" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Border.Style><TextBlock Text="1" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Connect" FontSize="11" Margin="0,5,0,0"/></StackPanel>
+                                <StackPanel HorizontalAlignment="Center"><Border Width="28" Height="28" CornerRadius="14"><Border.Style><Style TargetType="Border"><Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsGuidedSelectStep}" Value="True"><Setter Property="Background" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Border.Style><TextBlock Text="2" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Device" FontSize="11" Margin="0,5,0,0"/></StackPanel>
+                                <StackPanel HorizontalAlignment="Center"><Border Width="28" Height="28" CornerRadius="14"><Border.Style><Style TargetType="Border"><Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsGuidedChoosePathStep}" Value="True"><Setter Property="Background" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Border.Style><TextBlock Text="3" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Options" FontSize="11" Margin="0,5,0,0"/></StackPanel>
+                                <StackPanel HorizontalAlignment="Center"><Border Width="28" Height="28" CornerRadius="14"><Border.Style><Style TargetType="Border"><Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsGuidedInstallStep}" Value="True"><Setter Property="Background" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Border.Style><TextBlock Text="4" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Update" FontSize="11" Margin="0,5,0,0"/></StackPanel>
+                                <StackPanel HorizontalAlignment="Center"><Border Width="28" Height="28" CornerRadius="14"><Border.Style><Style TargetType="Border"><Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsGuidedQuickSettingsStep}" Value="True"><Setter Property="Background" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Border.Style><TextBlock Text="5" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Settings" FontSize="11" Margin="0,5,0,0"/></StackPanel>
+                                <StackPanel HorizontalAlignment="Center"><Border Width="28" Height="28" CornerRadius="14"><Border.Style><Style TargetType="Border"><Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsGuidedCompleteStep}" Value="True"><Setter Property="Background" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Border.Style><TextBlock Text="6" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Ready" FontSize="11" Margin="0,5,0,0"/></StackPanel>
                             </UniformGrid>
-                        </Border>
-
-                        <Border Style="{StaticResource Card}" Visibility="{Binding IsGuidedTermsStep, Converter={StaticResource BoolVisibility}}">
-                            <Grid MaxWidth="690" MinHeight="190">
-                                <!-- Intentionally blank until reviewed Terms and Privacy copy exists. -->
-                                <Button Style="{StaticResource PrimaryButton}" Command="{Binding GuidedSetupContinueCommand}" Content="Continue" HorizontalAlignment="Right" VerticalAlignment="Bottom" MinWidth="110"/>
-                            </Grid>
                         </Border>
 
                         <Border Style="{StaticResource Card}" Visibility="{Binding IsGuidedConnectStep, Converter={StaticResource BoolVisibility}}">
                             <StackPanel>
-                                <TextBlock Text="How do you want to set up EchoDesk?" FontSize="25" FontWeight="SemiBold"/>
-                                <TextBlock Style="{StaticResource Muted}" Text="USB is the recommended default. Wi-Fi setup is optional and starts only when you choose it." TextWrapping="Wrap" Margin="0,7,0,18"/>
+                                <TextBlock Text="Connect EchoDesk" FontSize="25" FontWeight="SemiBold"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="Choose how you want to connect for setup." TextWrapping="Wrap" Margin="0,7,0,18"/>
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                     <Border BorderBrush="{DynamicResource AccentBrush}" BorderThickness="2" CornerRadius="10" Padding="18">
                                         <StackPanel>
                                             <TextBlock Text="&#xE88E;" FontFamily="Segoe Fluent Icons" FontSize="28" Foreground="{DynamicResource AccentBrush}"/>
                                             <TextBlock Text="Set up with USB" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,5"/>
-                                            <TextBlock Text="Plug EchoDesk into this PC. The app verifies the device, installs EchoDesk OS and keeps the existing USB workflow unchanged." Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" MinHeight="65"/>
+                                            <TextBlock Text="Setup EchoDesk by plugging into your PC." Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" MinHeight="65"/>
                                             <Button Style="{StaticResource PrimaryButton}" Command="{Binding GuidedSetupChooseTransportCommand}" CommandParameter="usb" Content="Continue with USB" HorizontalAlignment="Left" Margin="0,16,0,0"/>
                                         </StackPanel>
                                     </Border>
                                     <Border Grid.Column="2" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="18">
                                         <StackPanel>
                                             <TextBlock Text="&#xE701;" FontFamily="Segoe Fluent Icons" FontSize="28" Foreground="{DynamicResource AccentBrush}"/>
-                                            <TextBlock Text="Set up with Wi-Fi" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,5"/>
-                                            <TextBlock Text="Use the temporary network shown on EchoDesk to send your home Wi-Fi details. Windows may disconnect from the internet briefly." Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" MinHeight="65"/>
-                                            <Button Command="{Binding GuidedSetupChooseTransportCommand}" CommandParameter="wifi" Content="Setup with Wi-Fi" HorizontalAlignment="Left" Margin="0,16,0,0"/>
+                                            <TextBlock Text="Setup with WiFi" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,5"/>
+                                            <TextBlock Text="Setup EchoDesk without plugging into your PC. You'll still need to use USB connection for some utilities." Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" MinHeight="65"/>
+                                            <Button Command="{Binding GuidedSetupChooseTransportCommand}" CommandParameter="wifi" Content="Setup with WiFi" HorizontalAlignment="Left" Margin="0,16,0,0"/>
                                         </StackPanel>
                                     </Border>
                                 </Grid>
-                                <Button Command="{Binding GuidedSetupBackCommand}" Content="Back" HorizontalAlignment="Left" Margin="0,18,0,0"/>
                             </StackPanel>
                         </Border>
 
@@ -273,12 +266,12 @@
                             <StackPanel>
                                 <TextBlock Text="Select your EchoDesk." FontSize="25" FontWeight="SemiBold"/>
                                 <TextBlock Style="{StaticResource Muted}" Text="Choose the device you'd like to set up. Compatible devices refresh automatically." TextWrapping="Wrap" Margin="0,7,0,16"/>
-                                <ListBox ItemsSource="{Binding GuidedSetupDevices}" SelectedValuePath="Port" SelectedValue="{Binding GuidedSetupSelectedPort}" BorderThickness="0" Background="Transparent" MinHeight="110">
+                                <ListBox ItemsSource="{Binding GuidedSetupDevices}" SelectedValuePath="Port" SelectedValue="{Binding GuidedSetupSelectedPort}" BorderThickness="0" Background="Transparent" MinHeight="100" MaxHeight="260" ScrollViewer.VerticalScrollBarVisibility="Auto">
                                     <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,8"/></Style></ListBox.ItemContainerStyle>
-                                    <ListBox.ItemTemplate><DataTemplate><Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="13"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="&#xE8B7;" FontFamily="Segoe Fluent Icons" FontSize="24" Margin="0,0,12,0" VerticalAlignment="Center"/><StackPanel Grid.Column="1"><TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="15"/><TextBlock Text="{Binding HardwareModel, TargetNullValue=Unidentified serial device — confirmation required}" Foreground="{DynamicResource MutedTextBrush}"/><TextBlock Text="{Binding FirmwareVersion, StringFormat=EchoDesk OS {0}, TargetNullValue=Firmware version unavailable}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/></StackPanel><TextBlock Grid.Column="2" Text="{Binding Port}" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center"/></Grid></Border></DataTemplate></ListBox.ItemTemplate>
+                                    <ListBox.ItemTemplate><DataTemplate><Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="13"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="&#xE8B7;" FontFamily="Segoe Fluent Icons" FontSize="24" Margin="0,0,12,0" VerticalAlignment="Center"/><StackPanel Grid.Column="1"><TextBlock FontWeight="SemiBold" FontSize="15"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="EchoDesk Mini"/><Style.Triggers><DataTrigger Binding="{Binding IdentityStatus}" Value="unknown"><Setter Property="Text" Value="Unidentified USB device"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock><TextBlock Text="{Binding FirmwareVersion, StringFormat=Firmware: EchoDesk OS {0}, TargetNullValue=Firmware: Not reported}" Foreground="{DynamicResource MutedTextBrush}"/><TextBlock Text="{Binding UsbSerialNumber, StringFormat=USB Serial: {0}, TargetNullValue=USB Serial: Not reported}" Foreground="{DynamicResource MutedTextBrush}" FontSize="11"/></StackPanel><TextBlock Grid.Column="2" Text="{Binding Port}" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center"/></Grid></Border></DataTemplate></ListBox.ItemTemplate>
                                 </ListBox>
-                                <TextBlock Text="No compatible EchoDesk Mini detected yet. Checking again…" Foreground="{DynamicResource MutedTextBrush}" Margin="2,8,0,10"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding GuidedSetupHasDevices}" Value="False"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
-                                <Expander Header="Having trouble finding your device?" Margin="0,6,0,16"><TextBlock Text="Reconnect the USB cable, try another data-capable cable or USB port, and close any serial terminal. Windows should show a serial device. Setup never asks you to type a COM port." TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}" Margin="4,9,4,4"/></Expander>
+                                <TextBlock Text="No known EchoDesk Mini detected yet. Checking again…" Foreground="{DynamicResource MutedTextBrush}" Margin="2,8,0,10"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding GuidedSetupHasDevices}" Value="False"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+                                <Button Command="{Binding GuidedSetupRevealUnknownCommand}" Content="Having trouble finding your device? Show unidentified USB devices" HorizontalAlignment="Left" HorizontalContentAlignment="Left" Margin="0,6,0,12" Padding="0" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource AccentBrush}" Cursor="Hand"/>
                                 <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="8" Padding="12" Margin="0,0,0,14" Visibility="{Binding GuidedSetupRequiresBoardConfirmation, Converter={StaticResource BoolVisibility}}">
                                     <StackPanel>
                                         <TextBlock Text="This USB serial adapter cannot identify the attached board by itself. Check the label on the physical device before continuing." TextWrapping="Wrap" Margin="0,0,0,8"/>
@@ -286,35 +279,51 @@
                                     </StackPanel>
                                 </Border>
                                 <TextBlock Text="{Binding GuidedSetupDeviceDetails}" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,0,0,14"/>
-                                <StackPanel Orientation="Horizontal"><Button Command="{Binding GuidedSetupBackCommand}" Content="Back" Margin="0,0,8,0"/><Button Command="{Binding GuidedSetupRefreshCommand}" Content="Refresh now" Margin="0,0,8,0"/><Button Style="{StaticResource PrimaryButton}" Command="{Binding GuidedSetupContinueCommand}" Content="Set up this device"/></StackPanel>
+                                <WrapPanel><Button Command="{Binding GuidedSetupBackCommand}" Content="Back" Margin="0,0,8,8" MinWidth="90"/><Button Command="{Binding GuidedSetupRefreshCommand}" Content="Refresh now" Margin="0,0,8,8" MinWidth="110"/><Button Style="{StaticResource PrimaryButton}" Command="{Binding GuidedSetupContinueCommand}" Content="Set up this device" Margin="0,0,0,8" MinWidth="150"/></WrapPanel>
                             </StackPanel>
                         </Border>
 
                         <Border Style="{StaticResource Card}" Visibility="{Binding IsGuidedWifiSelectStep, Converter={StaticResource BoolVisibility}}">
                             <StackPanel>
-                                <TextBlock Text="Connect through the temporary EchoDesk network." FontSize="25" FontWeight="SemiBold"/>
-                                <TextBlock Style="{StaticResource Muted}" Text="On EchoDesk, choose Setup with Wi-Fi. It will show a network named EchoDesk-XXXX and an 8-digit code. Open Windows Wi-Fi settings and join that temporary network using the code shown. Then return here and find the device. EchoDesk Desktop never changes Windows networks automatically." TextWrapping="Wrap" Margin="0,7,0,14"/>
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                                    <Button Command="{Binding OpenWindowsWifiSettingsCommand}" Content="Open Windows Wi-Fi settings" Margin="0,0,8,0"/>
-                                    <Button Style="{StaticResource PrimaryButton}" Command="{Binding GuidedSetupRefreshCommand}" Content="Find Wi-Fi devices"/>
+                                <StackPanel Visibility="{Binding IsGuidedWifiJoinStep, Converter={StaticResource BoolVisibility}}">
+                                    <TextBlock Text="Join the temporary EchoDesk network." FontSize="25" FontWeight="SemiBold"/>
+                                    <TextBlock Style="{StaticResource Muted}" Text="On EchoDesk, choose Setup with WiFi. Open Windows Wi-Fi settings and join the EchoDesk-XXXX network shown on the device. EchoDesk Desktop never changes Windows networks automatically." TextWrapping="Wrap" Margin="0,7,0,18"/>
+                                    <WrapPanel><Button Command="{Binding GuidedSetupBackCommand}" Content="Back" Margin="0,0,8,8"/><Button Command="{Binding OpenWindowsWifiSettingsCommand}" Content="Open Windows Wi-Fi settings" Margin="0,0,8,8"/><Button Style="{StaticResource PrimaryButton}" Command="{Binding GuidedWifiNextCommand}" Content="I've connected" Margin="0,0,0,8"/></WrapPanel>
                                 </StackPanel>
-                                <ProgressBar Height="5" IsIndeterminate="True" Margin="0,0,0,12" Visibility="{Binding WifiSetupBusy, Converter={StaticResource BoolVisibility}}"/>
-                                <TextBlock Text="{Binding GuidedWifiStatus}" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,0,0,12"/>
-                                <ListBox ItemsSource="{Binding GuidedWifiDevices}" SelectedValuePath="DeviceId" SelectedValue="{Binding GuidedWifiSelectedDeviceId}" BorderThickness="0" Background="Transparent" MinHeight="80">
-                                    <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,8"/></Style></ListBox.ItemContainerStyle>
-                                    <ListBox.ItemTemplate><DataTemplate><Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="13"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="&#xE701;" FontFamily="Segoe Fluent Icons" FontSize="24" Margin="0,0,12,0" VerticalAlignment="Center"/><StackPanel Grid.Column="1"><TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="15"/><TextBlock Text="{Binding SetupSsid, TargetNullValue=Temporary setup network}" Foreground="{DynamicResource MutedTextBrush}"/></StackPanel><TextBlock Grid.Column="2" Text="{Binding Address}" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center"/></Grid></Border></DataTemplate></ListBox.ItemTemplate>
-                                </ListBox>
-                                <TextBlock Text="No EchoDesk setup device found. Confirm this PC is joined to the temporary EchoDesk-XXXX network, then select Find Wi-Fi devices." Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="2,8,0,14"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding GuidedWifiHasDevices}" Value="False"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
-                                <Grid Margin="0,4,0,14">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                    <StackPanel><TextBlock Text="8-digit setup code" FontWeight="SemiBold" Margin="0,0,0,5"/><TextBox Text="{Binding GuidedWifiSetupCode, UpdateSourceTrigger=PropertyChanged}" MaxLength="8"/></StackPanel>
-                                    <StackPanel Grid.Column="2"><TextBlock Text="Home Wi-Fi name (SSID)" FontWeight="SemiBold" Margin="0,0,0,5"/><TextBox Text="{Binding GuidedWifiSsid, UpdateSourceTrigger=PropertyChanged}" MaxLength="32"/></StackPanel>
+                                <StackPanel Visibility="{Binding IsGuidedWifiFindStep, Converter={StaticResource BoolVisibility}}">
+                                    <TextBlock Text="Find your EchoDesk." FontSize="25" FontWeight="SemiBold"/>
+                                    <TextBlock Style="{StaticResource Muted}" Text="Select the EchoDesk shown on the temporary network." TextWrapping="Wrap" Margin="0,7,0,14"/>
+                                    <ProgressBar Height="5" IsIndeterminate="True" Margin="0,0,0,12" Visibility="{Binding WifiSetupBusy, Converter={StaticResource BoolVisibility}}"/>
+                                    <TextBlock Text="{Binding GuidedWifiStatus}" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+                                    <ListBox ItemsSource="{Binding GuidedWifiDevices}" SelectedValuePath="DeviceId" SelectedValue="{Binding GuidedWifiSelectedDeviceId}" BorderThickness="0" Background="Transparent" MinHeight="80" MaxHeight="230">
+                                        <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,8"/></Style></ListBox.ItemContainerStyle>
+                                        <ListBox.ItemTemplate><DataTemplate><Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="13"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="&#xE701;" FontFamily="Segoe Fluent Icons" FontSize="24" Margin="0,0,12,0" VerticalAlignment="Center"/><StackPanel Grid.Column="1"><TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" FontSize="15"/><TextBlock Text="{Binding SetupSsid, TargetNullValue=Temporary setup network}" Foreground="{DynamicResource MutedTextBrush}"/></StackPanel><TextBlock Grid.Column="2" Text="{Binding Address}" Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center"/></Grid></Border></DataTemplate></ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <WrapPanel Margin="0,12,0,0"><Button Command="{Binding GuidedSetupBackCommand}" Content="Back" Margin="0,0,8,8"/><Button Command="{Binding GuidedSetupRefreshCommand}" Content="Find again" Margin="0,0,8,8"/><Button Style="{StaticResource PrimaryButton}" Command="{Binding GuidedWifiNextCommand}" Content="Next" Margin="0,0,0,8"/></WrapPanel>
+                                </StackPanel>
+                                <StackPanel Visibility="{Binding IsGuidedWifiCredentialsStep, Converter={StaticResource BoolVisibility}}">
+                                    <TextBlock Text="Connect EchoDesk to your WiFi." FontSize="25" FontWeight="SemiBold"/>
+                                    <TextBlock Style="{StaticResource Muted}" Text="Enter the code shown on EchoDesk, then the home network it should join." TextWrapping="Wrap" Margin="0,7,0,14"/>
+                                    <Grid Margin="0,4,0,14"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="8-digit setup code" FontWeight="SemiBold" Margin="0,0,0,5"/><TextBox Text="{Binding GuidedWifiSetupCode, UpdateSourceTrigger=PropertyChanged}" MaxLength="8"/></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="Home Wi-Fi name (SSID)" FontWeight="SemiBold" Margin="0,0,0,5"/><TextBox Text="{Binding GuidedWifiSsid, UpdateSourceTrigger=PropertyChanged}" MaxLength="32"/></StackPanel></Grid>
+                                    <TextBlock Text="Home Wi-Fi password" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                                    <PasswordBox x:Name="GuidedWifiPasswordBox" PasswordChanged="GuidedWifiPassword_Changed" MaxLength="63" Margin="0,0,0,6"/>
+                                    <TextBlock Text="Leave blank only for an open network. WPA2 passwords must be 8–63 characters." Foreground="{DynamicResource MutedTextBrush}" FontSize="11" Margin="0,0,0,14"/>
+                                    <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="8" Padding="12" Margin="0,0,0,14" Visibility="{Binding GuidedSetupHasError, Converter={StaticResource BoolVisibility}}"><TextBlock Text="{Binding GuidedSetupError}" Foreground="{DynamicResource DangerBrush}" TextWrapping="Wrap"/></Border>
+                                    <WrapPanel><Button Command="{Binding GuidedSetupBackCommand}" Content="Back" Margin="0,0,8,8"/><Button Style="{StaticResource PrimaryButton}" Command="{Binding GuidedWifiProvisionCommand}" Content="Connect EchoDesk to WiFi" Margin="0,0,0,8"/></WrapPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Visibility="{Binding IsGuidedChoosePathStep, Converter={StaticResource BoolVisibility}}">
+                            <StackPanel>
+                                <TextBlock Text="How would you like to continue?" FontSize="25" FontWeight="SemiBold"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="Your EchoDesk has been verified. You can start immediately or check EchoDesk OS first." Margin="0,7,0,18" TextWrapping="Wrap"/>
+                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <Border BorderBrush="{DynamicResource AccentBrush}" BorderThickness="2" CornerRadius="10" Padding="18"><StackPanel><TextBlock Text="&#xE768;" FontFamily="Segoe Fluent Icons" FontSize="28" Foreground="{DynamicResource AccentBrush}"/><TextBlock Text="Get started now" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,5"/><TextBlock Text="Setup EchoDesk without updating firmware." Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" MinHeight="50"/><Button Style="{StaticResource PrimaryButton}" Command="{Binding GuidedSetupChoiceCommand}" CommandParameter="now" Content="Get started now" HorizontalAlignment="Left" Margin="0,16,0,0"/></StackPanel></Border>
+                                    <Border Grid.Column="2" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="18"><StackPanel><TextBlock Text="&#xE895;" FontFamily="Segoe Fluent Icons" FontSize="28" Foreground="{DynamicResource AccentBrush}"/><TextBlock Text="Check for updates" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,5"/><TextBlock Text="EchoDesk will find your current device firmware and update it if a newer version is available." Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" MinHeight="50"/><Button Command="{Binding GuidedSetupChoiceCommand}" CommandParameter="updates" Content="Check for updates" HorizontalAlignment="Left" Margin="0,16,0,0"/></StackPanel></Border>
                                 </Grid>
-                                <TextBlock Text="Home Wi-Fi password" FontWeight="SemiBold" Margin="0,0,0,5"/>
-                                <PasswordBox x:Name="GuidedWifiPasswordBox" PasswordChanged="GuidedWifiPassword_Changed" MaxLength="63" Margin="0,0,0,6"/>
-                                <TextBlock Text="Leave blank only for an open network. WPA2 passwords must be 8–63 characters." Foreground="{DynamicResource MutedTextBrush}" FontSize="11" Margin="0,0,0,14"/>
-                                <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="8" Padding="12" Margin="0,0,0,14" Visibility="{Binding GuidedSetupHasError, Converter={StaticResource BoolVisibility}}"><TextBlock Text="{Binding GuidedSetupError}" Foreground="{DynamicResource DangerBrush}" TextWrapping="Wrap"/></Border>
-                                <StackPanel Orientation="Horizontal"><Button Command="{Binding GuidedSetupBackCommand}" Content="Back" Margin="0,0,8,0"/><Button Style="{StaticResource PrimaryButton}" Command="{Binding GuidedWifiProvisionCommand}" Content="Connect EchoDesk to Wi-Fi"/></StackPanel>
+                                <TextBlock Text="This device needs a newer EchoDesk OS before setup can finish. Check for updates to continue." Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Margin="0,14,0,0" Visibility="{Binding GuidedSetupRequiresFirmware, Converter={StaticResource BoolVisibility}}"/>
+                                <Button Command="{Binding GuidedSetupBackCommand}" Content="Back" HorizontalAlignment="Left" Margin="0,18,0,0"/>
                             </StackPanel>
                         </Border>
 
@@ -332,6 +341,19 @@
                             </StackPanel>
                         </Border>
 
+                        <Border Style="{StaticResource Card}" Visibility="{Binding IsGuidedQuickSettingsStep, Converter={StaticResource BoolVisibility}}">
+                            <StackPanel MaxWidth="700">
+                                <TextBlock Text="A few quick settings" FontSize="25" FontWeight="SemiBold"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="Choose how EchoDesk should look and display time. You can change these later in Customisation." TextWrapping="Wrap" Margin="0,7,0,18"/>
+                                <TextBlock Text="Appearance" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,18"><Button Command="{Binding SetThemeCommand}" CommandParameter="light" Content="Light" Width="130" Margin="0,0,8,0"/><Button Command="{Binding SetThemeCommand}" CommandParameter="dark" Content="Dark" Width="130"/></StackPanel>
+                                <TextBlock Text="Time format" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                                <ComboBox ItemsSource="{Binding ClockFormatOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding ClockFormat}" Width="260" HorizontalAlignment="Left" Margin="0,0,0,22"/>
+                                <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="8" Padding="12" Margin="0,0,0,14" Visibility="{Binding GuidedSetupHasError, Converter={StaticResource BoolVisibility}}"><TextBlock Text="{Binding GuidedSetupError}" Foreground="{DynamicResource DangerBrush}" TextWrapping="Wrap"/></Border>
+                                <Button Style="{StaticResource PrimaryButton}" Command="{Binding CompleteGuidedQuickSettingsCommand}" Content="Finish setup" HorizontalAlignment="Right" MinWidth="130"/>
+                            </StackPanel>
+                        </Border>
+
                         <Border Style="{StaticResource Card}" Visibility="{Binding IsGuidedWifiInstallStep, Converter={StaticResource BoolVisibility}}">
                             <StackPanel MaxWidth="690">
                                 <TextBlock Text="Connecting EchoDesk to Wi-Fi." FontSize="25" FontWeight="SemiBold"/>
@@ -346,7 +368,7 @@
 
                         <Border Style="{StaticResource Card}" Visibility="{Binding IsGuidedCompleteStep, Converter={StaticResource BoolVisibility}}">
                             <StackPanel HorizontalAlignment="Center" MaxWidth="620" Margin="28">
-                                <Border Width="70" Height="70" CornerRadius="35" Background="{DynamicResource SuccessBrush}"><TextBlock Text="&#xE73E;" FontFamily="Segoe Fluent Icons" Foreground="White" FontSize="34" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+                                <Canvas x:Name="GuidedConfetti" Width="170" Height="76" Margin="0,0,0,4"><TextBlock Canvas.Left="8" Canvas.Top="8" Text="●" Foreground="#FF4D6D" FontSize="18"/><TextBlock Canvas.Left="45" Canvas.Top="34" Text="◆" Foreground="#FFB703" FontSize="17"/><TextBlock Canvas.Left="83" Canvas.Top="2" Text="▲" Foreground="#4CC9F0" FontSize="17"/><TextBlock Canvas.Left="122" Canvas.Top="38" Text="●" Foreground="#8AC926" FontSize="16"/><TextBlock Canvas.Left="151" Canvas.Top="9" Text="◆" Foreground="#9B5DE5" FontSize="16"/></Canvas>
                                 <TextBlock Text="{Binding GuidedSetupCompleteHeading}" FontSize="28" FontWeight="SemiBold" TextAlignment="Center" Margin="0,18,0,7"/>
                                 <TextBlock Style="{StaticResource Muted}" Text="{Binding GuidedSetupCompleteMessage}" TextAlignment="Center" TextWrapping="Wrap"/>
                                 <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="8" Padding="12" Margin="0,16,0,0" Visibility="{Binding GuidedSetupUsesWifi, Converter={StaticResource BoolVisibility}}">
@@ -355,26 +377,26 @@
                                         <Button Command="{Binding GuidedSetupRefreshCommand}" Content="Find Wi-Fi devices" HorizontalAlignment="Center" Margin="0,10,0,0"/>
                                     </StackPanel>
                                 </Border>
-                                <Button Style="{StaticResource PrimaryButton}" Command="{Binding FinishGuidedSetupCommand}" Content="Open EchoDesk Desktop" Margin="0,24,0,0" MinWidth="190"/>
+                                <Button Style="{StaticResource PrimaryButton}" Command="{Binding FinishGuidedSetupCommand}" Content="Go to home" Margin="0,24,0,0" MinWidth="190"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
                 </ScrollViewer>
 
-                <!-- Setup and Updates -->
+                <!-- Device recovery and updates -->
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsSetupUpdates, Converter={StaticResource BoolVisibility}}">
                     <StackPanel MaxWidth="1050">
                         <Grid Margin="0,0,0,24">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Style="{StaticResource PageTitle}" Text="Setup &amp; Updates"/>
-                                <TextBlock Style="{StaticResource Muted}" Text="Install, update or recover EchoDesk OS without command-line tools."/>
+                                <TextBlock Style="{StaticResource PageTitle}" Text="Device recovery &amp; updates"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="Update, reset, repair or recover EchoDesk OS."/>
                             </StackPanel>
                             <Button Grid.Column="1" Command="{Binding ScanFirmwareDevicesCommand}" Content="Scan for devices" VerticalAlignment="Center"/>
                         </Grid>
 
                         <!-- Screen 1: Connect EchoDesk -->
-                        <Border Style="{StaticResource Card}" Visibility="{Binding IsFirmwareConnectScreen, Converter={StaticResource BoolVisibility}}">
+                        <Border Style="{StaticResource Card}" Visibility="{Binding IsFirmwareOverviewScreen, Converter={StaticResource BoolVisibility}}">
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                 <Grid Width="190" Height="170" HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -406,52 +428,23 @@
                                         <Button Style="{StaticResource PrimaryButton}" Command="{Binding SelectFirmwareDeviceCommand}" Content="Use this device" Margin="0,0,8,0"/>
                                         <Button Command="{Binding ScanFirmwareDevicesCommand}" Content="Scan again"/>
                                     </StackPanel>
-                                    <Border Background="{DynamicResource SurfaceAltBrush}" CornerRadius="8" Padding="12" Margin="0,16,0,0">
-                                        <StackPanel>
-                                            <TextBlock Text="Recovery" FontWeight="SemiBold"/>
-                                            <TextBlock Style="{StaticResource Muted}" Text="If normal identification fails, Manual Recovery can reinstall the bundled OS after verifying only that this port is an original ESP32." TextWrapping="Wrap" Margin="0,5,0,9"/>
-                                            <Button Content="Manual Recovery…" Tag="manualRecovery" Click="FirmwareAction_Click" IsEnabled="{Binding CanStartManualRecovery}" HorizontalAlignment="Left"/>
-                                        </StackPanel>
-                                    </Border>
+                                    <Button Command="{Binding RevealFirmwareUnknownCommand}" Content="Show unidentified USB devices" HorizontalAlignment="Left" Margin="0,10,0,0"/>
                                 </StackPanel>
                             </Grid>
                         </Border>
 
-                        <!-- Screen 2: Ready to install / update -->
-                        <StackPanel Visibility="{Binding IsFirmwareReadyScreen, Converter={StaticResource BoolVisibility}}">
-                            <Border Style="{StaticResource Card}" Margin="0,0,0,14">
-                                <StackPanel>
-                                    <TextBlock Text="EchoDesk Mini is ready" FontSize="23" FontWeight="SemiBold"/>
-                                    <TextBlock Style="{StaticResource Muted}" Text="The ESP32 and firmware package have been checked. EchoDesk Desktop will release the serial port before writing and reconnect afterwards." TextWrapping="Wrap" Margin="0,7,0,18"/>
-                                    <UniformGrid Columns="3">
-                                        <StackPanel Margin="0,0,12,0"><TextBlock Style="{StaticResource Muted}" Text="DEVICE" FontSize="11"/><TextBlock Text="EchoDesk Mini" FontWeight="SemiBold" FontSize="16" Margin="0,6,0,0"/></StackPanel>
-                                        <StackPanel Margin="12,0"><TextBlock Style="{StaticResource Muted}" Text="CURRENT VERSION" FontSize="11"/><TextBlock Text="{Binding FirmwareCurrentVersion}" FontWeight="SemiBold" FontSize="16" Margin="0,6,0,0"/></StackPanel>
-                                        <StackPanel Margin="12,0,0,0"><TextBlock Style="{StaticResource Muted}" Text="AVAILABLE VERSION" FontSize="11"/><TextBlock Text="{Binding FirmwareAvailableVersion}" FontWeight="SemiBold" FontSize="16" Margin="0,6,0,0"/></StackPanel>
-                                    </UniformGrid>
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource Card}" Margin="0,0,0,14">
-                                <StackPanel>
-                                    <TextBlock Style="{StaticResource SectionTitle}" Text="What happens"/>
-                                    <TextBlock Text="1  Verify firmware    2  Enter bootloader    3  Write and verify    4  Restart and reconnect" TextWrapping="Wrap"/>
-                                    <TextBlock Foreground="{DynamicResource WarningBrush}" Text="A repair or reinstall may reset device settings. EchoDesk will preserve and restore supported settings where available. Do not unplug the USB cable." TextWrapping="Wrap" Margin="0,12,0,0"/>
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource Card}" Margin="0,0,0,14">
-                                <StackPanel>
-                                    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Style="{StaticResource SectionTitle}" Text="Release notes"/><Button Grid.Column="1" Command="{Binding CheckFirmwareUpdatesCommand}" Content="Check for updates"/></Grid>
-                                    <TextBlock Text="{Binding FirmwareReleaseNotes}" TextWrapping="Wrap" Margin="0,4,0,14"/>
-                                    <CheckBox IsChecked="{Binding UpdateNotificationsEnabled, Mode=OneWay}" Command="{Binding ToggleUpdateNotificationsCommand}" Content="Notify me when EchoDesk OS updates are available"/>
-                                </StackPanel>
-                            </Border>
-                            <StackPanel Orientation="Horizontal">
-                                <Button Style="{StaticResource PrimaryButton}" Content="Install EchoDesk OS" Tag="install" Click="FirmwareAction_Click" Margin="0,0,8,0"/>
-                                <Button Content="Install update" Tag="update" Click="FirmwareAction_Click" Margin="0,0,8,0" IsEnabled="{Binding FirmwareUpdateAvailable}"/>
-                                <Button Content="Reinstall current version" Tag="reinstall" Click="FirmwareAction_Click" Margin="0,0,8,0"/>
-                                <Button Content="Repair device…" Tag="repair" Click="FirmwareAction_Click" Margin="0,0,8,0"/>
-                                <Button Content="Manual Recovery…" Tag="manualRecovery" Click="FirmwareAction_Click" IsEnabled="{Binding CanStartManualRecovery}"/>
+                        <Border Style="{StaticResource Card}" Visibility="{Binding IsFirmwareOverviewScreen, Converter={StaticResource BoolVisibility}}">
+                            <StackPanel>
+                                <TextBlock Text="Choose an action" FontSize="23" FontWeight="SemiBold"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="Select and verify a device above, then choose what EchoDesk Desktop should do." Margin="0,7,0,18"/>
+                                <UniformGrid Columns="2">
+                                    <Button Command="{Binding FirmwareRecoveryActionCommand}" CommandParameter="update" IsEnabled="{Binding CanUseFirmwareActions}" Margin="0,0,8,8" Padding="18" HorizontalContentAlignment="Left"><StackPanel><TextBlock Text="Update EchoDesk" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="Update EchoDesk OS to the latest version" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Button>
+                                    <Button Tag="reinstall" Click="FirmwareAction_Click" IsEnabled="{Binding CanUseFirmwareActions}" Margin="8,0,0,8" Padding="18" HorizontalContentAlignment="Left"><StackPanel><TextBlock Text="Reset/Install EchoDesk OS" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="Install a fresh version of EchoDesk OS" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Button>
+                                    <Button Tag="repair" Click="FirmwareAction_Click" IsEnabled="{Binding CanUseFirmwareActions}" Margin="0,8,8,0" Padding="18" HorizontalContentAlignment="Left"><StackPanel><TextBlock Text="Repair device" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="Repair and reset EchoDesk OS if on older firmware" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Button>
+                                    <Button Tag="manualRecovery" Click="FirmwareAction_Click" IsEnabled="{Binding CanStartManualRecovery}" Margin="8,8,0,0" Padding="18" HorizontalContentAlignment="Left"><StackPanel><TextBlock Text="Recovery" FontSize="17" FontWeight="SemiBold"/><TextBlock Text="Fully reset EchoDesk without checks" Foreground="{DynamicResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Button>
+                                </UniformGrid>
                             </StackPanel>
-                        </StackPanel>
+                        </Border>
 
                         <!-- Screen 3: Installing. Percentage is shown only when reported by the flashing engine. -->
                         <Border Style="{StaticResource Card}" Visibility="{Binding IsFirmwareInstallingScreen, Converter={StaticResource BoolVisibility}}">
@@ -478,9 +471,8 @@
                                 <TextBlock Text="EchoDesk is ready!" FontSize="28" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,18,0,6"/>
                                 <TextBlock Style="{StaticResource Muted}" Text="EchoDesk OS was written, verified, restarted and reconnected successfully." TextAlignment="Center" TextWrapping="Wrap"/>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,24,0,0">
-                                    <Button Style="{StaticResource PrimaryButton}" Command="{Binding NavigateCommand}" CommandParameter="Overview" Content="Go to Overview" Margin="0,0,8,0"/>
-                                    <Button Command="{Binding NavigateCommand}" CommandParameter="Device Control" Content="Open EchoDesk Desktop" Margin="0,0,8,0"/>
-                                    <Button Command="{Binding NavigateCommand}" CommandParameter="Customisation" Content="Customise device"/>
+                                    <Button Style="{StaticResource PrimaryButton}" Command="{Binding StartSetupAfterRecoveryCommand}" Content="Setup EchoDesk Now" Margin="0,0,8,0"/>
+                                    <Button Command="{Binding NavigateCommand}" CommandParameter="Overview" Content="Go to home"/>
                                 </StackPanel>
                             </StackPanel>
                         </Border>

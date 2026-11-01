@@ -15,7 +15,6 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly BrokerClient broker;
     private readonly PreferencesService preferencesService;
     private readonly SynchronizationContext uiContext;
-    private readonly GuidedSetupLegalDocuments guidedSetupLegalDocuments;
     private readonly GuidedSetupFlow guidedSetup;
     private DesktopPreferences preferences;
     private BrokerState state = BrokerState.Offline();
@@ -44,17 +43,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string guidedWifiSetupCode = "";
     private string guidedWifiSsid = "";
     private string guidedWifiPassword = "";
+    private bool showUnknownSetupDevices;
+    private bool guidedUpdateRequested;
 
-    public MainViewModel(
-        BrokerClient broker,
-        PreferencesService preferencesService,
-        GuidedSetupLegalDocuments? setupLegalDocuments = null)
+    public MainViewModel(BrokerClient broker, PreferencesService preferencesService)
     {
         this.broker = broker;
         this.preferencesService = preferencesService;
         uiContext = SynchronizationContext.Current ?? new SynchronizationContext();
-        guidedSetupLegalDocuments = setupLegalDocuments
-            ?? GuidedSetupLegalDocuments.Discover(AppContext.BaseDirectory);
         guidedSetup = new GuidedSetupFlow();
         preferences = preferencesService.Load();
         broker.StateChanged += OnStateChanged;
@@ -73,6 +69,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         ScanFirmwareDevicesCommand = new AsyncRelayCommand(
             _ => ExecuteFirmwareAsync(() => broker.ScanFirmwareDevicesAsync(), "Device scan complete."),
             _ => IsBrokerAvailable && !FirmwareOperationActive);
+        RevealFirmwareUnknownCommand = new AsyncRelayCommand(
+            _ => ExecuteFirmwareAsync(() => broker.ScanFirmwareDevicesAsync(true), "Unidentified USB devices are now visible."),
+            _ => IsBrokerAvailable && !FirmwareOperationActive);
         SelectFirmwareDeviceCommand = new AsyncRelayCommand(
             _ => SelectFirmwareDeviceAsync(),
             _ => CanSelectFirmwareDevice);
@@ -82,6 +81,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         InstallFirmwareCommand = new AsyncRelayCommand(
             mode => StartFirmwareOperationAsync(mode as string ?? "install"),
             mode => CanStartFirmwareOperation(mode as string));
+        FirmwareRecoveryActionCommand = new AsyncRelayCommand(
+            RunFirmwareRecoveryActionAsync,
+            action => CanRunFirmwareRecoveryAction(action as string));
         CancelFirmwareOperationCommand = new AsyncRelayCommand(
             _ => ExecuteFirmwareAsync(() => broker.CancelFirmwareOperationAsync(), "Firmware installation cancelled safely."),
             _ => FirmwareOperationActive && FirmwareManager.Stage is not "writing" and not "verifying_installation");
@@ -103,12 +105,24 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         GuidedSetupChooseTransportCommand = new RelayCommand(
             ChooseGuidedSetupTransport,
             _ => guidedSetup.Step == GuidedSetupStep.Connect && !guidedSetupFinalizing);
+        GuidedSetupChoiceCommand = new AsyncRelayCommand(
+            ChooseGuidedSetupPathAsync,
+            option => CanChooseGuidedSetupPath(option as string));
+        GuidedSetupRevealUnknownCommand = new AsyncRelayCommand(
+            _ => RevealUnknownSetupDevicesAsync(),
+            _ => IsGuidedUsbSelectStep && !showUnknownSetupDevices && !FirmwareOperationActive);
+        GuidedWifiNextCommand = new AsyncRelayCommand(
+            _ => AdvanceGuidedWifiAsync(),
+            _ => CanAdvanceGuidedWifi);
         GuidedWifiProvisionCommand = new AsyncRelayCommand(
             _ => ProvisionGuidedWifiAsync(), _ => CanProvisionGuidedWifi);
         OpenWindowsWifiSettingsCommand = new RelayCommand(_ =>
             Process.Start(new ProcessStartInfo("ms-settings:network-wifi") { UseShellExecute = true }));
+        CompleteGuidedQuickSettingsCommand = new AsyncRelayCommand(
+            _ => CompleteGuidedQuickSettingsAsync(),
+            _ => IsGuidedQuickSettingsStep && !guidedSetupFinalizing);
         FinishGuidedSetupCommand = new RelayCommand(_ => FinishGuidedSetup());
-        OpenSetupDocumentCommand = new RelayCommand(OpenSetupDocument, CanOpenSetupDocument);
+        StartSetupAfterRecoveryCommand = new RelayCommand(_ => StartSetupAfterRecovery());
         AppearanceOptions = ["system", "light", "dark"];
         LayoutOptions =
         [
@@ -158,9 +172,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public AsyncRelayCommand SetAdvancedSettingCommand { get; }
     public AsyncRelayCommand ToggleAiUsageCommand { get; }
     public AsyncRelayCommand ScanFirmwareDevicesCommand { get; }
+    public AsyncRelayCommand RevealFirmwareUnknownCommand { get; }
     public AsyncRelayCommand SelectFirmwareDeviceCommand { get; }
     public AsyncRelayCommand CheckFirmwareUpdatesCommand { get; }
     public AsyncRelayCommand InstallFirmwareCommand { get; }
+    public AsyncRelayCommand FirmwareRecoveryActionCommand { get; }
     public AsyncRelayCommand CancelFirmwareOperationCommand { get; }
     public AsyncRelayCommand ToggleUpdateNotificationsCommand { get; }
     public AsyncRelayCommand GuidedSetupContinueCommand { get; }
@@ -169,10 +185,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public AsyncRelayCommand GuidedSetupRetryCommand { get; }
     public AsyncRelayCommand GuidedSetupCancelCommand { get; }
     public RelayCommand GuidedSetupChooseTransportCommand { get; }
+    public AsyncRelayCommand GuidedSetupChoiceCommand { get; }
+    public AsyncRelayCommand GuidedSetupRevealUnknownCommand { get; }
+    public AsyncRelayCommand GuidedWifiNextCommand { get; }
     public AsyncRelayCommand GuidedWifiProvisionCommand { get; }
     public RelayCommand OpenWindowsWifiSettingsCommand { get; }
+    public AsyncRelayCommand CompleteGuidedQuickSettingsCommand { get; }
     public RelayCommand FinishGuidedSetupCommand { get; }
-    public RelayCommand OpenSetupDocumentCommand { get; }
+    public RelayCommand StartSetupAfterRecoveryCommand { get; }
     public ObservableCollection<AppTile> AppTiles { get; }
     public IReadOnlyList<string> AppearanceOptions { get; }
     public IReadOnlyList<Choice> LayoutOptions { get; }
@@ -211,7 +231,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsOverview => SelectedPage == "Overview";
     public bool IsDeviceControl => SelectedPage == "Device Control";
     public bool IsCustomisation => SelectedPage == "Customisation";
-    public bool IsSetupUpdates => SelectedPage == "Setup & Updates";
+    public bool IsSetupUpdates => SelectedPage == "Device recovery & updates";
     public bool IsGuidedSetup => SelectedPage == "Set up a new device";
     public bool IsCompact { get => isCompact; set => Set(ref isCompact, value); }
     public BrokerState State => state;
@@ -290,8 +310,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         "verifying" or "restarting" or "reconnecting";
     public bool IsFirmwareConnectScreen => !FirmwareManager.Available || FirmwareManager.Status is
         "unavailable" or "idle" or "scanning" or "noDevice" or "selectionRequired";
+    public bool IsFirmwareOverviewScreen => !IsFirmwareInstallingScreen && !IsFirmwareSuccessScreen
+        && !IsFirmwarePartialScreen && !IsFirmwareFailureScreen;
     // Keep the current release details visible during the short manifest check;
-    // a transient backend event must never leave Setup & Updates blank.
+    // A transient backend event must never leave recovery and updates blank.
     public bool IsFirmwareReadyScreen => FirmwareManager.Status is "ready" or "checking" or "updateAvailable" or "upToDate";
     public bool IsFirmwareInstallingScreen => FirmwareOperationActive;
     public bool IsFirmwareSuccessScreen => FirmwareManager.Status == "success" && FirmwareManager.WriteCompleted && FirmwareManager.Reconnected;
@@ -305,9 +327,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public bool CanStartManualRecovery => IsBrokerAvailable && FirmwareManager.Available
         && !FirmwareOperationActive && FirmwareManager.Status != "checking"
         && SelectedFirmwareDevice is not null && !string.IsNullOrWhiteSpace(SelectedFirmwarePort);
+    public bool FirmwareTargetSelected => SelectedFirmwareDevice is not null
+        && !string.IsNullOrWhiteSpace(FirmwareManager.SelectedPort)
+        && string.Equals(FirmwareManager.SelectedPort, SelectedFirmwarePort, StringComparison.OrdinalIgnoreCase)
+        && (!SelectedFirmwareDevice.RequiresBoardConfirmation || FirmwareManager.BoardConfirmed);
+    public bool CanUseFirmwareActions => IsBrokerAvailable && FirmwareManager.Available
+        && FirmwareTargetSelected && !FirmwareOperationActive && FirmwareManager.Status != "checking";
     public string FirmwareConnectionHeading => FirmwareManager.Status == "noDevice"
         ? "Connect EchoDesk"
-        : FirmwareManager.Status == "selectionRequired" ? "Choose your EchoDesk" : "Connect EchoDesk";
+        : FirmwareManager.Status is "ready" or "checking" or "updateAvailable" or "upToDate"
+            ? "Selected EchoDesk"
+            : "Choose your EchoDesk";
     public string FirmwareConnectionMessage => FirmwareManager.Message ??
         "Connect EchoDesk Mini with its USB-C cable. We’ll identify the serial device and verify the ESP32 before any write is allowed.";
     public string FirmwareDeviceDetails => SelectedFirmwareDevice is null
@@ -338,35 +368,35 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public GuidedSetupTransport CurrentGuidedSetupTransport => guidedSetup.Transport;
     public bool GuidedSetupUsesUsb => guidedSetup.Transport == GuidedSetupTransport.Usb;
     public bool GuidedSetupUsesWifi => guidedSetup.Transport == GuidedSetupTransport.Wifi;
-    public bool IsGuidedTermsStep => guidedSetup.Step == GuidedSetupStep.Terms;
     public bool IsGuidedConnectStep => guidedSetup.Step == GuidedSetupStep.Connect;
     public bool IsGuidedSelectStep => guidedSetup.Step == GuidedSetupStep.SelectDevice;
+    public bool IsGuidedChoosePathStep => guidedSetup.Step == GuidedSetupStep.ChoosePath;
     public bool IsGuidedInstallStep => guidedSetup.Step == GuidedSetupStep.Install;
+    public bool IsGuidedQuickSettingsStep => guidedSetup.Step == GuidedSetupStep.QuickSettings;
+    public bool GuidedSetupRequiresFirmware => IsGuidedChoosePathStep
+        && string.Equals(FirmwareManager.SetupPhase, "firmwareRequired", StringComparison.OrdinalIgnoreCase);
     public bool IsGuidedUsbSelectStep => IsGuidedSelectStep && GuidedSetupUsesUsb;
     public bool IsGuidedWifiSelectStep => IsGuidedSelectStep && GuidedSetupUsesWifi;
     public bool IsGuidedUsbInstallStep => IsGuidedInstallStep && GuidedSetupUsesUsb;
     public bool IsGuidedWifiInstallStep => IsGuidedInstallStep && GuidedSetupUsesWifi;
     public bool IsGuidedCompleteStep => guidedSetup.Step == GuidedSetupStep.Complete;
-    public bool GuidedSetupHasLegalDocuments => guidedSetupLegalDocuments.HasRequiredDocuments;
-    public bool GuidedSetupTermsAvailable => guidedSetupLegalDocuments.HasTerms;
-    public bool GuidedSetupPrivacyAvailable => guidedSetupLegalDocuments.HasPrivacy;
-    public bool GuidedSetupNoticesAvailable => !string.IsNullOrWhiteSpace(guidedSetupLegalDocuments.ThirdPartyNoticesPath)
-                                               && File.Exists(guidedSetupLegalDocuments.ThirdPartyNoticesPath);
-    public string GuidedSetupLegalStatus => "";
-    public bool GuidedSetupTermsAccepted
-    {
-        get => guidedSetup.TermsAccepted;
-        set
-        {
-            guidedSetup.SetTermsAccepted(value);
-            Raise();
-            Raise(nameof(CanContinueGuidedSetup));
-            GuidedSetupContinueCommand.Refresh();
-        }
-    }
+    public bool IsGuidedWifiJoinStep => IsGuidedWifiSelectStep
+        && guidedSetup.WifiStep == GuidedWifiStep.JoinTemporaryNetwork;
+    public bool IsGuidedWifiFindStep => IsGuidedWifiSelectStep
+        && guidedSetup.WifiStep == GuidedWifiStep.FindDevice;
+    public bool IsGuidedWifiCredentialsStep => IsGuidedWifiSelectStep
+        && guidedSetup.WifiStep == GuidedWifiStep.EnterCredentials;
+    public bool ShowUnknownSetupDevices => showUnknownSetupDevices;
+    public IReadOnlyList<FirmwareDeviceCandidate> GuidedSetupKnownDevices =>
+        FirmwareDevices.Where(GuidedSetupFlow.IsKnown).ToArray();
+    public IReadOnlyList<FirmwareDeviceCandidate> GuidedSetupUnknownDevices => showUnknownSetupDevices
+        ? FirmwareDevices.Where(GuidedSetupFlow.IsUnknown).ToArray()
+        : [];
     public IReadOnlyList<FirmwareDeviceCandidate> GuidedSetupDevices =>
-        FirmwareDevices.Where(GuidedSetupFlow.IsDiscoverable).ToArray();
+        GuidedSetupKnownDevices.Concat(GuidedSetupUnknownDevices).ToArray();
     public bool GuidedSetupHasDevices => GuidedSetupDevices.Count > 0;
+    public bool GuidedSetupHasKnownDevices => GuidedSetupKnownDevices.Count > 0;
+    public bool GuidedSetupHasUnknownDevices => GuidedSetupUnknownDevices.Count > 0;
     public WifiSetupState WifiSetup => state.WifiSetup;
     public IReadOnlyList<WifiSetupDevice> GuidedWifiDevices =>
         WifiSetup.Devices.Where(GuidedSetupFlow.IsDiscoverable).ToArray();
@@ -425,6 +455,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         && (guidedWifiPassword.Length == 0 || guidedWifiPassword.Length is >= 8 and <= 63)
         && WifiSetup.Status is not "scanning" and not "provisioning";
     public bool WifiSetupBusy => WifiSetup.Status is "scanning" or "provisioning";
+    public bool CanAdvanceGuidedWifi => IsGuidedWifiJoinStep
+        || (IsGuidedWifiFindStep && GuidedWifiSelectedDevice is not null);
     public string GuidedWifiStatus => WifiSetup.Message ?? WifiSetup.Status switch
     {
         "scanning" => "Looking for EchoDesk on the temporary setup network…",
@@ -464,7 +496,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
     public bool CanContinueGuidedSetup => guidedSetup.CanContinue
         && !FirmwareOperationActive && !guidedSetupFinalizing;
-    public bool CanGoBackInGuidedSetup => guidedSetup.Step is GuidedSetupStep.Connect or GuidedSetupStep.SelectDevice
+    public bool CanGoBackInGuidedSetup => guidedSetup.Step is GuidedSetupStep.SelectDevice or GuidedSetupStep.ChoosePath
         && !FirmwareOperationActive && !guidedSetupFinalizing;
     public bool CanRetryGuidedSetup => guidedSetup.Step == GuidedSetupStep.Install
         && (GuidedSetupUsesUsb
@@ -496,12 +528,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         : "Select a compatible EchoDesk to continue.";
     public string GuidedSetupProgressLabel => FirmwareManager.ProgressPercent is { } progress
         ? $"{FirmwareStageLabel} · {progress}%" : FirmwareStageLabel;
-    public string GuidedSetupCompleteHeading => GuidedSetupUsesWifi
-        ? "EchoDesk is on Wi-Fi"
-        : "Your EchoDesk is ready";
-    public string GuidedSetupCompleteMessage => GuidedSetupUsesWifi
-        ? $"EchoDesk accepted the details for {WifiSetup.ConnectedSsid ?? "your Wi-Fi network"}. Reconnect this computer to that network, then find EchoDesk again to confirm it is reachable. USB remains available."
-        : "EchoDesk OS is installed, verified and connected. You can now customise the display and use the desktop companion.";
+    public string GuidedSetupCompleteHeading => "Welcome to EchoDesk!";
+    public string GuidedSetupCompleteMessage =>
+        "Welcome to the community. Your new EchoDesk is ready to go.";
     public string GuidedWifiConfirmationStatus => GuidedWifiHasPairedDevice
         ? $"EchoDesk found on your network{(string.IsNullOrWhiteSpace(WifiSetup.Address) ? "." : $" at {WifiSetup.Address}.")}"
         : "After reconnecting Windows to your home network, select Find Wi-Fi devices to confirm EchoDesk is reachable.";
@@ -621,11 +650,26 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public Task RestartAsync() => ExecuteAsync(() => broker.RestartAsync(), "EchoDesk is restarting. Reconnection is automatic.");
 
-    public Task FactoryResetAsync() => string.IsNullOrWhiteSpace(Port)
-        ? Task.CompletedTask
-        : ExecuteAsync(
-            () => broker.FactoryResetAsync(Port),
-            "Factory reset accepted. EchoDesk is returning to the Hello screen.");
+    public async Task FactoryResetAsync()
+    {
+        var targetPort = state.Port;
+        if (string.IsNullOrWhiteSpace(targetPort)) return;
+        try
+        {
+            var next = await broker.FactoryResetAsync(targetPort);
+            ApplyState(next);
+            var accepted = string.Equals(next.FirmwareManager.SetupTargetPort, targetPort, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(next.FirmwareManager.SetupPhase, "waitingForDesktop", StringComparison.OrdinalIgnoreCase)
+                && !next.FirmwareManager.SetupCompleted;
+            if (!accepted) throw new InvalidDataException("EchoDesk Host did not confirm the reset transition.");
+            StartSetupAfterRecovery();
+            Feedback = "Factory reset accepted. EchoDesk is restarting at the setup screen.";
+        }
+        catch (Exception error)
+        {
+            Feedback = Friendly(error);
+        }
+    }
 
     private Task SetAiUsageEnabledAsync(bool enabled) => ExecuteAsync(
         () => broker.SetAiUsageEnabledAsync(enabled),
@@ -722,23 +766,18 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         RefreshCommands();
         if (IsConnected) Feedback = "Device state is synchronised.";
 
-        if (IsGuidedSetup && guidedSetup.Step == GuidedSetupStep.Install
-            && IsFirmwareSuccessScreen && !guidedSetupFinalizing)
+        if (IsGuidedSetup && IsGuidedUsbInstallStep && guidedUpdateRequested
+            && IsFirmwareSuccessScreen && guidedSetup.FinishInstall(
+                next.FirmwareManager.WriteCompleted, next.FirmwareManager.Reconnected))
         {
-            _ = FinalizeGuidedSetupAsync();
+            guidedUpdateRequested = false;
+            RaiseGuidedSetupComputed();
         }
     }
 
     private async Task ContinueGuidedSetupAsync()
     {
         GuidedSetupError = null;
-        if (guidedSetup.Step is GuidedSetupStep.Terms or GuidedSetupStep.Connect)
-        {
-            if (!guidedSetup.MoveNext()) return;
-            if (guidedSetup.Step == GuidedSetupStep.SelectDevice) StartGuidedDiscovery();
-            RaiseGuidedSetupComputed();
-            return;
-        }
         if (guidedSetup.Transport != GuidedSetupTransport.Usb
             || guidedSetup.Step != GuidedSetupStep.SelectDevice || guidedSetup.SelectedPort is not { } port)
             return;
@@ -758,14 +797,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             }
             var begun = await broker.BeginGuidedSetupAsync(port);
             ApplyState(begun);
-            if (!string.Equals(begun.FirmwareManager.SelectedPort, port, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(begun.FirmwareManager.SelectedPort, port, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(begun.FirmwareManager.SetupTargetPort, port, StringComparison.OrdinalIgnoreCase)
+                || begun.FirmwareManager.SetupPhase is not ("ready" or "firmwareRequired"))
                 throw new InvalidDataException("EchoDesk Host did not retain the selected device identity.");
-            if (!guidedSetup.MoveNext()) return;
+            if (!guidedSetup.ConfirmDevice()) return;
             StopGuidedDiscovery();
             RaiseGuidedSetupComputed();
-            var installing = await broker.StartFirmwareOperationAsync("install");
-            ApplyState(installing);
-            Feedback = "Guided setup started. Keep this EchoDesk connected.";
+            Feedback = "EchoDesk verified. Choose how you want to continue.";
         }
         catch (Exception error)
         {
@@ -779,7 +818,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void MoveGuidedSetupBack()
     {
         if (!guidedSetup.MoveBack()) return;
-        if (guidedSetup.Step != GuidedSetupStep.SelectDevice) StopGuidedDiscovery();
+        if (guidedSetup.Step == GuidedSetupStep.SelectDevice
+            && (GuidedSetupUsesUsb || guidedSetup.WifiStep == GuidedWifiStep.FindDevice))
+            StartGuidedDiscovery();
+        else
+            StopGuidedDiscovery();
         if (guidedSetup.Step == GuidedSetupStep.Connect)
         {
             guidedWifiPassword = "";
@@ -798,9 +841,55 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         guidedSetup.SelectTransport(transport);
         guidedWifiDeviceId = null;
         GuidedSetupError = null;
-        if (!guidedSetup.MoveNext()) return;
-        StartGuidedDiscovery();
+        if (transport == GuidedSetupTransport.Usb) StartGuidedDiscovery();
         RaiseGuidedSetupComputed();
+    }
+
+    private async Task ChooseGuidedSetupPathAsync(object? parameter)
+    {
+        if (guidedSetup.Step != GuidedSetupStep.ChoosePath) return;
+        GuidedSetupError = null;
+        if (string.Equals(parameter as string, "updates", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!guidedSetup.StartUpdateCheck()) return;
+            guidedUpdateRequested = true;
+            RaiseGuidedSetupComputed();
+            try
+            {
+                var checkedState = await broker.CheckFirmwareUpdatesAsync();
+                ApplyState(checkedState);
+                if (checkedState.FirmwareManager.Status == "updateAvailable")
+                {
+                    ApplyState(await broker.StartFirmwareOperationAsync("update"));
+                }
+                else if (checkedState.FirmwareManager.Status is "upToDate" or "ready")
+                {
+                    guidedUpdateRequested = false;
+                    guidedSetup.SkipInstallWhenCurrent();
+                    Feedback = "EchoDesk OS is up to date.";
+                    RaiseGuidedSetupComputed();
+                }
+            }
+            catch (Exception error)
+            {
+                GuidedSetupError = FriendlyFirmwareError(error);
+            }
+            return;
+        }
+
+        if (guidedSetup.GetStartedNow())
+        {
+            Feedback = "EchoDesk is ready for a few quick settings.";
+            RaiseGuidedSetupComputed();
+        }
+    }
+
+    private bool CanChooseGuidedSetupPath(string? option)
+    {
+        if (guidedSetup.Step != GuidedSetupStep.ChoosePath || guidedSetupFinalizing) return false;
+        return string.Equals(option, "updates", StringComparison.OrdinalIgnoreCase)
+            || (string.Equals(option, "now", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(FirmwareManager.SetupPhase, "ready", StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task RefreshGuidedDevicesAsync()
@@ -809,7 +898,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             var next = guidedSetup.Transport == GuidedSetupTransport.Wifi
                 ? await broker.DiscoverWifiSetupDevicesAsync()
-                : await broker.ScanFirmwareDevicesAsync();
+                : await broker.ScanFirmwareDevicesAsync(showUnknownSetupDevices);
             ApplyState(next);
             GuidedSetupError = null;
         }
@@ -818,6 +907,28 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             GuidedSetupError = guidedSetup.Transport == GuidedSetupTransport.Wifi
                 ? Friendly(error)
                 : FriendlyFirmwareError(error);
+        }
+        RaiseGuidedSetupComputed();
+    }
+
+    private async Task RevealUnknownSetupDevicesAsync()
+    {
+        showUnknownSetupDevices = true;
+        RaiseGuidedSetupComputed();
+        await RefreshGuidedDevicesAsync();
+    }
+
+    private async Task AdvanceGuidedWifiAsync()
+    {
+        if (!CanAdvanceGuidedWifi || !guidedSetup.AdvanceWifi()) return;
+        if (IsGuidedWifiFindStep)
+        {
+            StartGuidedDiscovery();
+            await RefreshGuidedDevicesAsync();
+        }
+        else
+        {
+            StopGuidedDiscovery();
         }
         RaiseGuidedSetupComputed();
     }
@@ -839,7 +950,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private async Task GuidedDiscoveryLoopAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested
-               && IsGuidedSetup && guidedSetup.Step == GuidedSetupStep.SelectDevice)
+               && IsGuidedSetup && guidedSetup.Step == GuidedSetupStep.SelectDevice
+               && (GuidedSetupUsesUsb || guidedSetup.WifiStep == GuidedWifiStep.FindDevice))
         {
             await RefreshGuidedDevicesAsync();
             try
@@ -859,7 +971,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         var password = guidedWifiPassword;
         GuidedSetupError = null;
         StopGuidedDiscovery();
-        if (!guidedSetup.MoveNext()) return;
+        if (!guidedSetup.BeginWifiProvisioning()) return;
         RaiseGuidedSetupComputed();
         try
         {
@@ -884,7 +996,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             var next = GuidedSetupUsesWifi
                 ? await broker.ProvisionWifiSetupDeviceAsync(
                     guidedSetup.PinnedWifiDeviceId!, GuidedWifiSetupCode, GuidedWifiSsid.Trim(), guidedWifiPassword)
-                : await broker.StartFirmwareOperationAsync("install");
+                : await broker.StartFirmwareOperationAsync("update");
             ApplyState(next);
         }
         catch (Exception error)
@@ -910,27 +1022,30 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private async Task FinalizeGuidedSetupAsync()
+    private async Task CompleteGuidedQuickSettingsAsync()
     {
         var port = guidedSetup.PinnedPort;
-        if (port is null || guidedSetupFinalizing) return;
+        if (guidedSetup.Step != GuidedSetupStep.QuickSettings || guidedSetupFinalizing) return;
         guidedSetupFinalizing = true;
         RaiseGuidedSetupComputed();
         try
         {
-            if (!string.Equals(state.Port, port, StringComparison.OrdinalIgnoreCase) || !state.IsConnected)
-                throw new IOException("The selected EchoDesk has not reconnected yet.");
-            var completed = await broker.CompleteGuidedSetupAsync(port);
-            ApplyState(completed);
-            var acknowledged = string.Equals(
-                completed.Device?.SetupState, "completed", StringComparison.OrdinalIgnoreCase);
-            if (!guidedSetup.Complete(
-                    completed.FirmwareManager.WriteCompleted,
-                    completed.FirmwareManager.Reconnected && completed.IsConnected,
-                    acknowledged))
+            if (GuidedSetupUsesUsb)
             {
-                throw new InvalidDataException("EchoDesk did not confirm setup completion.");
+                if (port is null || !string.Equals(state.Port, port, StringComparison.OrdinalIgnoreCase) || !state.IsConnected)
+                    throw new IOException("The selected EchoDesk has not reconnected yet.");
+                var settings = await broker.SetSettingsAsync(
+                    Device?.SettingsRevision ?? 0,
+                    new SettingsPatch { Theme = DeviceTheme, ClockFormat = ClockFormat },
+                    true);
+                ApplyState(settings);
+                var completed = await broker.CompleteGuidedSetupAsync(port);
+                ApplyState(completed);
+                var acknowledged = completed.FirmwareManager.SetupCompleted
+                    || string.Equals(completed.Device?.SetupState, "completed", StringComparison.OrdinalIgnoreCase);
+                if (!acknowledged) throw new InvalidDataException("EchoDesk did not confirm setup completion.");
             }
+            if (!guidedSetup.Complete()) throw new InvalidDataException("Setup could not be completed from this step.");
             GuidedSetupError = null;
             Feedback = "Your EchoDesk is ready.";
         }
@@ -953,27 +1068,20 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         guidedWifiSetupCode = "";
         guidedWifiSsid = "";
         guidedWifiPassword = "";
+        showUnknownSetupDevices = false;
+        guidedUpdateRequested = false;
         GuidedSetupError = null;
         RaiseGuidedSetupComputed();
     }
 
-    private bool CanOpenSetupDocument(object? parameter) => SetupDocumentPath(parameter as string) is { } path
-        && File.Exists(path);
-
-    private void OpenSetupDocument(object? parameter)
+    private void StartSetupAfterRecovery()
     {
-        var path = SetupDocumentPath(parameter as string);
-        if (path is null || !File.Exists(path)) return;
-        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        guidedSetup.Reset();
+        showUnknownSetupDevices = false;
+        GuidedSetupError = null;
+        SelectedPage = "Set up a new device";
+        RaiseGuidedSetupComputed();
     }
-
-    private string? SetupDocumentPath(string? name) => name switch
-    {
-        "terms" => guidedSetupLegalDocuments.TermsPath,
-        "privacy" => guidedSetupLegalDocuments.PrivacyPath,
-        "notices" => guidedSetupLegalDocuments.ThirdPartyNoticesPath,
-        _ => null,
-    };
 
     private async Task OpenAppAsync(object? parameter)
     {
@@ -1006,6 +1114,49 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             mode == "manualRecovery"
                 ? "Manual recovery started. Keep the selected ESP32 connected."
                 : "Firmware installation started. Keep EchoDesk connected.");
+    }
+
+    private bool CanRunFirmwareRecoveryAction(string? action) => action switch
+    {
+        "recovery" => CanStartManualRecovery,
+        "update" or "resetInstall" or "repair" => CanUseFirmwareActions,
+        _ => false,
+    };
+
+    private async Task RunFirmwareRecoveryActionAsync(object? parameter)
+    {
+        var action = parameter as string;
+        if (!CanRunFirmwareRecoveryAction(action)) return;
+        try
+        {
+            BrokerState next;
+            if (action == "update")
+            {
+                next = await broker.CheckFirmwareUpdatesAsync();
+                ApplyState(next);
+                if (next.FirmwareManager.Status != "updateAvailable")
+                {
+                    Feedback = "EchoDesk OS is already up to date.";
+                    return;
+                }
+                next = await broker.StartFirmwareOperationAsync("update");
+            }
+            else if (action == "recovery")
+            {
+                next = await broker.StartManualRecoveryAsync(SelectedFirmwarePort!);
+            }
+            else
+            {
+                var mode = action == "resetInstall" ? "reinstall" : "repair";
+                next = await broker.StartFirmwareOperationAsync(mode);
+            }
+            ApplyState(next);
+            Feedback = "EchoDesk OS operation started. Keep the USB cable connected.";
+        }
+        catch (Exception error)
+        {
+            Feedback = FriendlyFirmwareError(error);
+        }
     }
 
     private bool CanStartFirmwareOperation(string? mode)
@@ -1133,23 +1284,27 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         RefreshCommand.Refresh(); ReconnectCommand.Refresh(); OpenAppCommand.Refresh();
         SetThemeCommand.Refresh(); SetNowPlayingCommand.Refresh(); SetAdvancedSettingCommand.Refresh();
         ToggleAiUsageCommand.Refresh();
-        ScanFirmwareDevicesCommand.Refresh(); SelectFirmwareDeviceCommand.Refresh();
+        ScanFirmwareDevicesCommand.Refresh(); RevealFirmwareUnknownCommand.Refresh(); SelectFirmwareDeviceCommand.Refresh();
         CheckFirmwareUpdatesCommand.Refresh(); InstallFirmwareCommand.Refresh();
+        FirmwareRecoveryActionCommand.Refresh();
         CancelFirmwareOperationCommand.Refresh(); ToggleUpdateNotificationsCommand.Refresh();
         GuidedSetupContinueCommand.Refresh(); GuidedSetupBackCommand.Refresh();
         GuidedSetupRefreshCommand.Refresh(); GuidedSetupRetryCommand.Refresh();
         GuidedSetupCancelCommand.Refresh(); GuidedSetupChooseTransportCommand.Refresh();
-        GuidedWifiProvisionCommand.Refresh(); OpenSetupDocumentCommand.Refresh();
+        GuidedSetupChoiceCommand.Refresh(); GuidedSetupRevealUnknownCommand.Refresh();
+        GuidedWifiNextCommand.Refresh(); GuidedWifiProvisionCommand.Refresh();
+        CompleteGuidedQuickSettingsCommand.Refresh();
     }
 
     private void RaiseFirmwareComputed()
     {
         foreach (var name in new[]
                  {
-                     nameof(SelectedFirmwareDevice), nameof(FirmwareOperationActive), nameof(IsFirmwareConnectScreen),
+                     nameof(SelectedFirmwareDevice), nameof(FirmwareOperationActive), nameof(IsFirmwareConnectScreen), nameof(IsFirmwareOverviewScreen),
                      nameof(IsFirmwareReadyScreen), nameof(IsFirmwareInstallingScreen), nameof(IsFirmwareSuccessScreen),
                      nameof(IsFirmwarePartialScreen), nameof(IsFirmwareFailureScreen), nameof(ShowBoardConfirmation),
-                     nameof(CanSelectFirmwareDevice), nameof(CanStartManualRecovery), nameof(FirmwareConnectionHeading), nameof(FirmwareConnectionMessage),
+                     nameof(CanSelectFirmwareDevice), nameof(CanStartManualRecovery), nameof(FirmwareTargetSelected),
+                     nameof(CanUseFirmwareActions), nameof(FirmwareConnectionHeading), nameof(FirmwareConnectionMessage),
                      nameof(FirmwareDeviceDetails), nameof(FirmwareCurrentVersion), nameof(FirmwareAvailableVersion),
                      nameof(FirmwareReleaseNotes), nameof(FirmwareStageLabel), nameof(FirmwareProgressLabel),
                      nameof(FirmwareOperationMessage), nameof(FirmwareErrorMessage), nameof(FirmwareHasMeasuredProgress),
@@ -1163,17 +1318,21 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         foreach (var name in new[]
                  {
-                     nameof(CurrentGuidedSetupStep), nameof(IsGuidedTermsStep), nameof(IsGuidedConnectStep),
+                     nameof(CurrentGuidedSetupStep), nameof(IsGuidedConnectStep),
                      nameof(CurrentGuidedSetupTransport), nameof(GuidedSetupUsesUsb), nameof(GuidedSetupUsesWifi),
-                     nameof(IsGuidedSelectStep), nameof(IsGuidedInstallStep), nameof(IsGuidedCompleteStep),
+                     nameof(IsGuidedSelectStep), nameof(IsGuidedChoosePathStep), nameof(IsGuidedInstallStep),
+                     nameof(IsGuidedQuickSettingsStep), nameof(GuidedSetupRequiresFirmware), nameof(IsGuidedCompleteStep),
                      nameof(IsGuidedUsbSelectStep), nameof(IsGuidedWifiSelectStep),
                      nameof(IsGuidedUsbInstallStep), nameof(IsGuidedWifiInstallStep),
-                     nameof(GuidedSetupTermsAccepted), nameof(GuidedSetupDevices), nameof(GuidedSetupHasDevices),
+                     nameof(IsGuidedWifiJoinStep), nameof(IsGuidedWifiFindStep), nameof(IsGuidedWifiCredentialsStep),
+                     nameof(ShowUnknownSetupDevices), nameof(GuidedSetupKnownDevices), nameof(GuidedSetupUnknownDevices),
+                     nameof(GuidedSetupDevices), nameof(GuidedSetupHasDevices), nameof(GuidedSetupHasKnownDevices),
+                     nameof(GuidedSetupHasUnknownDevices),
                      nameof(GuidedSetupSelectedPort), nameof(GuidedSetupSelectedDevice),
                      nameof(WifiSetup), nameof(GuidedWifiDevices), nameof(GuidedWifiHasDevices),
                      nameof(GuidedPairedWifiDevices), nameof(GuidedWifiHasPairedDevice),
                      nameof(GuidedWifiSelectedDeviceId), nameof(GuidedWifiSelectedDevice),
-                     nameof(GuidedWifiSetupCode), nameof(GuidedWifiSsid), nameof(CanProvisionGuidedWifi),
+                     nameof(GuidedWifiSetupCode), nameof(GuidedWifiSsid), nameof(CanProvisionGuidedWifi), nameof(CanAdvanceGuidedWifi),
                      nameof(GuidedWifiStatus), nameof(GuidedWifiConfirmationStatus), nameof(WifiSetupBusy),
                      nameof(GuidedSetupRequiresBoardConfirmation), nameof(GuidedSetupBoardConfirmed),
                      nameof(CanContinueGuidedSetup), nameof(CanGoBackInGuidedSetup), nameof(CanRetryGuidedSetup),

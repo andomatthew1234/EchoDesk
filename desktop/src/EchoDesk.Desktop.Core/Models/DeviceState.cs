@@ -99,6 +99,10 @@ public sealed record FirmwareManagerState
     public string? CurrentVersion { get; init; }
     public string? AvailableVersion { get; init; }
     public string? ReleaseNotes { get; init; }
+    public bool ShowUnknownDevices { get; init; }
+    public string? SetupPhase { get; init; }
+    public string? SetupTargetPort { get; init; }
+    public bool SetupCompleted { get; init; }
     public IReadOnlyList<FirmwareDeviceCandidate> Devices { get; init; } = [];
 }
 
@@ -109,6 +113,9 @@ public sealed record FirmwareDeviceCandidate
     public string? Vid { get; init; }
     public string? Pid { get; init; }
     public string? Adapter { get; init; }
+    public string? UsbSerialNumber { get; init; }
+    public string IdentityStatus { get; init; } = "unknown";
+    public string DeviceMode { get; init; } = "candidate";
     public string? ChipFamily { get; init; }
     public ulong? FlashSizeBytes { get; init; }
     public bool EchoDeskHandshake { get; init; }

@@ -32,7 +32,7 @@ import Darwin
 // ============================================================
 
 #if ECHODESK_DESKTOP
-let kAppVersion = "0.2.6"
+let kAppVersion = "0.2.7"
 let kProductName = "EchoDesk Desktop"
 let kProductRepository = "andomatthew1234/EchoDesk"
 let kProductBundleIdentifier = "com.echodesk.desktop"
@@ -169,7 +169,7 @@ let kFirmwareCheckInterval: TimeInterval = 6 * 3600
 let kFirmwareUpdateBannerID = "firmware-update"
 let kFlashBaudRate = 460800
 #if ECHODESK_DESKTOP
-let kAppAssetName = "EchoDesk-Desktop-v0.2.6-macos-universal.zip"
+let kAppAssetName = "EchoDesk-Desktop-v0.2.7-macos-universal.zip"
 #else
 let kAppAssetName = "AIMonitor.zip"
 #endif
@@ -2634,6 +2634,16 @@ class SerialPortManager {
                   acceptedTypes.contains(type) else {
                 continue
             }
+            // EchoDesk v1 may emit unsolicited state while a command is in
+            // flight. Never let a stale response satisfy a newer operation.
+            if let expectedID = (payload["requestId"] as? NSNumber)?.uint64Value,
+               (json["requestId"] as? NSNumber)?.uint64Value != expectedID {
+                continue
+            }
+            if type == "echodesk_ack", let expectedCommand = payload["cmd"] as? String,
+               json["command"] as? String != expectedCommand {
+                continue
+            }
             return json
         }
         return nil
@@ -3969,9 +3979,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var menuBarStatusItem: NSStatusItem?
     private var menuBarQuickMenuObservation: NSObjectProtocol?
     private var updateChannelObservation: NSObjectProtocol?
-#if ECHODESK_DESKTOP
-    private var onboardingController: EchoDeskOnboardingController?
-#endif
     private var shownFirmwareUpdateNoticeKeys = Set<String>()
     /// Flash, der schon automatisch korrigiert wurde. Liegt die Erkennung
     /// daneben, flasht die App so nicht endlos hin und her.
@@ -4059,38 +4066,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsController = SettingsWindowController()
         settingsController.monitor = monitor
 #if ECHODESK_DESKTOP
-        if UserDefaults.standard.bool(forKey: "EchoDeskOnboardingCompletedV1") {
-            settingsController.show()
-        } else {
-            let onboarding = EchoDeskOnboardingController()
-            onboarding.onFinished = { [weak self] transport in
-                guard let self else { return }
-                self.settingsController.show()
-                if transport == .wifi {
-                    self.settingsController.showSection(.connection)
-                }
-                self.onboardingController = nil
-            }
-            onboardingController = onboarding
-            onboarding.show()
+        settingsController.show()
+        let defaults = UserDefaults.standard
+        let firstDesktopLaunch = !defaults.bool(forKey: "EchoDeskDesktopIntroducedV027")
+        let pendingUSBSetup = defaults.string(forKey: "EchoDeskPendingSetupPortV2") != nil
+            && defaults.integer(forKey: "EchoDeskGuidedSetupStepV2") != EchoDeskSetupStep.connect.rawValue
+        if firstDesktopLaunch || pendingUSBSetup {
+            settingsController.selectEchoDeskPage(.setup)
+            defaults.set(true, forKey: "EchoDeskDesktopIntroducedV027")
         }
 #else
         settingsController.show()
 #endif
         refreshMenuBarQuickMenu()
 
+#if ECHODESK_DESKTOP
+        NSLog("[App] %@ v%@ started (desktop window, CodexBar source)", kProductName, kAppVersion)
+#else
         NSLog("[App] %@ v%@ started (LSUIElement, CodexBar source)", kProductName, kAppVersion)
+#endif
     }
 
     /// Wird aufgerufen, wenn die App aus Spotlight/Finder erneut gestartet wird.
     /// Liefert true und öffnet das Settings-Fenster.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-#if ECHODESK_DESKTOP
-        if let onboardingController {
-            onboardingController.show()
-            return true
-        }
-#endif
         settingsController?.show()
         return true
     }
@@ -4105,6 +4104,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func refreshMenuBarQuickMenu() {
+#if ECHODESK_DESKTOP
+        // EchoDesk Desktop is a normal desktop app with persistent sidebar
+        // navigation. It intentionally does not expose the legacy menu-bar
+        // companion surface.
+        removeMenuBarStatusItem()
+        return
+#endif
         if Settings.shared.menuBarQuickMenuEnabled {
             ensureMenuBarStatusItem()
         } else {
@@ -4244,8 +4250,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // aber die Key-Equivalents — ⌘1 bis ⌘5 funktionieren also.
         let viewMenuItem = NSMenuItem()
         mainMenu.addItem(viewMenuItem)
-        let viewMenu = NSMenu(title: "Darstellung")
-        for section in SettingsWindowController.SettingsSection.allCases {
+        let viewMenu = NSMenu(title: kProductName == "EchoDesk Desktop" ? "View" : "Darstellung")
+#if ECHODESK_DESKTOP
+        let visibleSections: [SettingsWindowController.SettingsSection] = [
+            .overview, .display, .plugins, .connection, .updates,
+        ]
+#else
+        let visibleSections = SettingsWindowController.SettingsSection.allCases
+#endif
+        for section in visibleSections {
             let item = NSMenuItem(title: section.title,
                                   action: #selector(showSectionFromMenu(_:)),
                                   keyEquivalent: String(section.rawValue + 1))
@@ -4258,9 +4271,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let windowMenuItem = NSMenuItem()
         mainMenu.addItem(windowMenuItem)
-        let windowMenu = NSMenu(title: "Fenster")
+        let windowMenu = NSMenu(title: kProductName == "EchoDesk Desktop" ? "Window" : "Fenster")
 
-        let closeItem = NSMenuItem(title: "Schließen",
+        let closeItem = NSMenuItem(title: kProductName == "EchoDesk Desktop" ? "Close" : "Schließen",
                                    action: #selector(NSWindow.performClose(_:)),
                                    keyEquivalent: "w")
         closeItem.keyEquivalentModifierMask = [.command]
@@ -4323,16 +4336,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     ///      deshalb bleibt dort die Auswahl ILI9341/ST7789.
     ///   5. Variantenspezifisches Asset herunterladen (falls nicht gecached),
     ///      Variant im Profil persistieren, flashen.
-    func runFirmwareFlash() {
+    func runFirmwareFlash(completion: ((Bool, String) -> Void)? = nil) {
         let fw = FirmwareManager.shared
         guard fw.latestRelease != nil else {
             alert(title: L("release.none.title"), info: L("release.none.info"), style: .warning)
+            completion?(false, L("release.none.info"))
             return
         }
         guard let port = monitor.serialPort.connectedPort else {
-            alert(title: L("esp32.none.title"), info: L("esp32.none.info"), style: .warning); return
+            alert(title: L("esp32.none.title"), info: L("esp32.none.info"), style: .warning)
+            completion?(false, L("esp32.none.info"))
+            return
         }
-        guard !fw.isFlashing && !fw.isDownloading && !fw.isDetectingChip else { return }
+        guard !fw.isFlashing && !fw.isDownloading && !fw.isDetectingChip else {
+            completion?(false, "Another firmware operation is already running.")
+            return
+        }
 
         // Das ausgelesene Panel schlaegt die gemeldete Firmware-Variante: laeuft
         // die falsche Variante, flasht das Update gleich die richtige.
@@ -4343,14 +4362,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }()
         if let variant = reportedVariant, flashPreflight(port: port).canStart,
            variant != kDisplayVariantST7701 || fw.releaseHasAsset(for: kDisplayVariantST7701) {
-            confirmFlash(port: port, variant: variant)
+            confirmFlash(port: port, variant: variant, completion: completion)
             return
         }
 
         // Ohne esptool gibt es nichts zu erkennen; der Dialog zeigt dann,
         // was fehlt.
         guard fw.resolveEsptool() != nil else {
-            presentFlashDialog(port: port, detectedChip: nil)
+            presentFlashDialog(port: port, detectedChip: nil, completion: completion)
             return
         }
         monitor.serialPort.stopScanning()
@@ -4361,15 +4380,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                fw.releaseHasAsset(for: kDisplayVariantST7701),
                self.flashPreflight(port: port).canStart {
                 // Fuer den S3 gibt es genau ein Image — nichts zu waehlen.
-                self.confirmFlash(port: port, variant: kDisplayVariantST7701, detectedByChip: true)
+                self.confirmFlash(port: port, variant: kDisplayVariantST7701,
+                                  detectedByChip: true, completion: completion)
             } else if chip?.esptoolName == kFirmwareChipESP32.esptoolName,
                       fw.releaseDetectsPanel,
                       self.flashPreflight(port: port).canStart {
                 // Einer der CYDs. Die Firmware liest ihr Panel nach dem Start
                 // selbst aus; passt es nicht, flasht handlePanelReport nach.
-                self.confirmFlash(port: port, variant: kDisplayVariantDefault, detectedCYD: true)
+                self.confirmFlash(port: port, variant: kDisplayVariantDefault,
+                                  detectedCYD: true, completion: completion)
             } else {
-                self.presentFlashDialog(port: port, detectedChip: chip)
+                self.presentFlashDialog(port: port, detectedChip: chip, completion: completion)
             }
         }
     }
@@ -4395,7 +4416,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// fuehrt in den vollen Dialog — etwa wenn das Display nach einem Flash
     /// mit der falschen Variante rauscht.
     private func confirmFlash(port: String, variant: String,
-                              detectedByChip: Bool = false, detectedCYD: Bool = false) {
+                              detectedByChip: Bool = false, detectedCYD: Bool = false,
+                              completion: ((Bool, String) -> Void)? = nil) {
         let fw = FirmwareManager.shared
         let alert = NSAlert()
         alert.messageText = L("flash.confirm.title", fw.latestVersionDisplay)
@@ -4416,19 +4438,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case .alertFirstButtonReturn:
                 // Bewusst der Port von vorhin: nach der Chip-Erkennung verbindet
                 // sich der Scanner gerade erst neu.
-                self.performFlash(port: port, variant: variant)
+                self.performFlash(port: port, variant: variant, completion: completion)
                 if detectedCYD { self.autoPickedFlashAt = fw.lastFlashAt }
             case .alertThirdButtonReturn:
-                self.presentFlashDialog(port: port, detectedChip: firmwareChip(for: variant))
+                self.presentFlashDialog(port: port, detectedChip: firmwareChip(for: variant),
+                                        completion: completion)
             default:
-                break
+                completion?(false, "Firmware update cancelled.")
             }
         }
     }
 
     /// Voller Dialog mit Variantenwahl. `detectedChip` sperrt die Optionen,
     /// die zum ausgelesenen Chip nicht passen.
-    private func presentFlashDialog(port: String, detectedChip: FirmwareChip?) {
+    private func presentFlashDialog(port: String, detectedChip: FirmwareChip?,
+                                    completion: ((Bool, String) -> Void)? = nil) {
         let fw = FirmwareManager.shared
         let profileVariant = DeviceRegistry.shared.currentProfile()?.displayVariant
         var defaultVariant = profileVariant ?? kDisplayVariantDefault
@@ -4451,8 +4475,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                            s3Available: fw.releaseHasAsset(for: kDisplayVariantST7701),
                                            detectedChip: detectedChip) { [weak self] chosenVariant in
             guard let self = self else { return }
-            guard let variant = chosenVariant else { return }  // Abbrechen
-            self.performFlash(port: port, variant: variant)
+            guard let variant = chosenVariant else {
+                completion?(false, "Firmware update cancelled.")
+                return
+            }
+            self.performFlash(port: port, variant: variant, completion: completion)
         }
     }
 
@@ -4512,7 +4539,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Eigentliches Flashen inkl. Download des variantenspezifischen Assets.
     /// Ausgelagert aus `runFirmwareFlash`, damit der Dialog-Callback klar bleibt.
-    fileprivate func performFlash(port: String, variant: String) {
+    fileprivate func performFlash(port: String, variant: String,
+                                  completion: ((Bool, String) -> Void)? = nil) {
         let fw = FirmwareManager.shared
         fw.beginFlashAttempt(port: port, variant: variant)
 
@@ -4539,6 +4567,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         self?.abandonPanelCorrection()
                         self?.presentFlashRecovery(message: message, port: port, variant: variant)
                     }
+                    completion?(success, message)
                 }
             }
         }
@@ -4557,6 +4586,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self?.alert(title: L("download.failed"),
                                 info: error ?? "Unknown error",
                                 style: .warning)
+                    completion?(false, error ?? "Firmware download failed.")
                 }
             }
         }

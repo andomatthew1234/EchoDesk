@@ -4,7 +4,7 @@ SetCompressor /SOLID lzma
 SetCompressorDictSize 32
 
 !ifndef PRODUCT_VERSION
-  !define PRODUCT_VERSION "0.2.6"
+  !define PRODUCT_VERSION "0.2.7"
 !endif
 !ifndef PUBLISH_DIR
   !error "PUBLISH_DIR must point to the packaged EchoDesk Desktop directory"

@@ -24,6 +24,14 @@ public partial class MainWindow : Window
             {
                 GuidedWifiPasswordBox.Clear();
             }
+            if (args.PropertyName == nameof(MainViewModel.IsGuidedCompleteStep)
+                && viewModel.IsGuidedCompleteStep)
+            {
+                GuidedConfetti.BeginAnimation(
+                    OpacityProperty,
+                    new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(700))
+                    { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } });
+            }
         };
         Loaded += OnLoaded;
         SizeChanged += (_, _) =>

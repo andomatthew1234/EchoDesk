@@ -20,8 +20,9 @@ use tauri::{AppHandle, Manager};
 pub const MINI_MODEL: &str = "EchoDesk Mini";
 pub const MINI_HARDWARE_ID: &str = "freenove-fnk0114a-2p4";
 pub const MINI_REPORTED_MODEL: &str = "Freenove FNK0114A_2P4";
-pub const DESKTOP_VERSION: &str = "0.2.6";
+pub const DESKTOP_VERSION: &str = "0.2.7";
 const RECONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const SETUP_RECONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const PAUSE_TIMEOUT: Duration = Duration::from_secs(5);
 const SETTLE_DELAY: Duration = Duration::from_millis(500);
 const MAX_FIRMWARE_BYTES: u64 = 4 * 1024 * 1024;
@@ -34,6 +35,8 @@ pub struct FirmwareDevice {
     pub vid: Option<u16>,
     pub pid: Option<u16>,
     pub adapter: Option<String>,
+    pub usb_serial_number: Option<String>,
+    pub identity_status: String,
     pub chip_family: Option<String>,
     pub flash_size_bytes: Option<u64>,
     pub echo_desk_handshake: bool,
@@ -42,6 +45,7 @@ pub struct FirmwareDevice {
     pub setup_state: Option<String>,
     pub setup_version: Option<u64>,
     pub device_mode: String,
+    pub in_bootloader: bool,
     pub compatible: bool,
     pub requires_board_confirmation: bool,
 }
@@ -66,11 +70,21 @@ pub struct FirmwareManagerState {
     pub current_version: Option<String>,
     pub available_version: Option<String>,
     pub release_notes: Option<String>,
+    pub show_unknown_devices: bool,
+    pub setup_phase: Option<String>,
+    pub setup_target_port: Option<String>,
+    pub setup_completed: bool,
     pub devices: Vec<FirmwareDevice>,
     #[serde(skip)]
     cancel_requested: bool,
     #[serde(skip)]
     settings_backup: Option<Value>,
+    #[serde(skip)]
+    selected_vid: Option<u16>,
+    #[serde(skip)]
+    selected_pid: Option<u16>,
+    #[serde(skip)]
+    selected_usb_serial_number: Option<String>,
 }
 
 impl Default for FirmwareManagerState {
@@ -93,11 +107,25 @@ impl Default for FirmwareManagerState {
             current_version: None,
             available_version: None,
             release_notes: None,
+            show_unknown_devices: false,
+            setup_phase: None,
+            setup_target_port: None,
+            setup_completed: false,
             devices: Vec::new(),
             cancel_requested: false,
             settings_backup: None,
+            selected_vid: None,
+            selected_pid: None,
+            selected_usb_serial_number: None,
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScanRequest {
+    #[serde(default)]
+    pub reveal_unknown: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -264,6 +292,31 @@ fn discovery_classification(
     }
 }
 
+fn port_matches_pin(
+    expected_port: &str,
+    expected_vid: Option<u16>,
+    expected_pid: Option<u16>,
+    expected_serial: Option<&str>,
+    candidate: &aimonitor_serial::ports::PortCandidate,
+) -> bool {
+    if candidate.vid != expected_vid || candidate.pid != expected_pid {
+        return false;
+    }
+    match expected_serial {
+        Some(serial) => candidate.serial_number.as_deref() == Some(serial),
+        None => candidate.name == expected_port,
+    }
+}
+
+fn setup_pin_active(state: &FirmwareManagerState, port: &str) -> bool {
+    state.setup_target_port.as_deref() == Some(port)
+        && !matches!(state.setup_phase.as_deref(), Some("completed" | "cancelled"))
+}
+
+fn identity_is_visible(identity_status: &str, reveal_unknown: bool) -> bool {
+    identity_status != "unknown" || reveal_unknown
+}
+
 fn discovery_status(device_count: usize, selected_still_present: bool) -> &'static str {
     if device_count == 0 {
         "noDevice"
@@ -274,15 +327,42 @@ fn discovery_status(device_count: usize, selected_still_present: bool) -> &'stat
     }
 }
 
-fn enumerate(app: &AppHandle) -> Vec<FirmwareDevice> {
+fn enumerate(app: &AppHandle, reveal_unknown: bool) -> Vec<FirmwareDevice> {
     let connection = app.state::<AppState>().connection.lock().unwrap().clone();
+    let previous = app
+        .state::<AppState>()
+        .firmware_manager
+        .lock()
+        .unwrap()
+        .devices
+        .clone();
     aimonitor_serial::ports::list_ports()
         .into_iter()
-        .map(|port| {
+        .filter_map(|port| {
             let connected = connection.state == ConnectionState::Connected
                 && connection.port.as_deref() == Some(port.name.as_str());
             let proven = connected && reported_mini(app, &port.name);
             let reported = proven.then(|| reported_state(app, &port.name)).flatten();
+            let prior = previous.iter().find(|candidate| {
+                candidate.port == port.name
+                    && candidate.vid == port.vid
+                    && candidate.pid == port.pid
+                    && candidate.usb_serial_number == port.serial_number
+            });
+            let proven_bootloader = prior.is_some_and(|candidate| {
+                candidate.identity_status == "bootloader"
+                    && candidate.chip_family.as_deref() == Some("esp32")
+            });
+            let identity_status = if proven {
+                "verified"
+            } else if proven_bootloader {
+                "bootloader"
+            } else {
+                "unknown"
+            };
+            if !identity_is_visible(identity_status, reveal_unknown) {
+                return None;
+            }
             let setup_state = reported
                 .as_ref()
                 .and_then(|state| state.get("setupState"))
@@ -292,57 +372,74 @@ fn enumerate(app: &AppHandle) -> Vec<FirmwareDevice> {
                 .as_ref()
                 .and_then(|state| state.get("setupVersion"))
                 .and_then(Value::as_u64);
-            let device_mode = match setup_state.as_deref() {
-                Some("completed") => "configured",
-                Some(_) => "setup",
-                None if proven => "legacy",
-                None => "candidate",
+            let device_mode = match (setup_state.as_deref(), proven_bootloader) {
+                (Some("completed"), _) => "configured",
+                (Some(_), _) => "setup",
+                (None, true) => "bootloader",
+                (None, false) if proven => "legacy",
+                _ => "candidate",
             };
             let usb_serial_candidate = port.vid.is_some() && port.pid.is_some();
             let (compatible, requires_board_confirmation) =
                 discovery_classification(proven, usb_serial_candidate);
-            let firmware_version = connected
-                .then(|| connection.info.as_ref().map(|info| info.version.clone()))
-                .flatten();
+            let firmware_version = reported
+                .as_ref()
+                .and_then(|state| state.get("firmwareVersion"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| {
+                    connected
+                        .then(|| connection.info.as_ref().map(|info| info.version.clone()))
+                        .flatten()
+                });
             let product = port
                 .product
                 .clone()
                 .unwrap_or_else(|| "USB serial device".into());
-            FirmwareDevice {
+            Some(FirmwareDevice {
                 display_name: format!("{} — {}", port.name, product),
                 port: port.name,
                 vid: port.vid,
                 pid: port.pid,
                 adapter: port.chip.map(str::to_string),
-                chip_family: None,
-                flash_size_bytes: None,
+                usb_serial_number: port.serial_number,
+                identity_status: identity_status.into(),
+                chip_family: prior.and_then(|candidate| candidate.chip_family.clone()),
+                flash_size_bytes: prior.and_then(|candidate| candidate.flash_size_bytes),
                 echo_desk_handshake: proven,
                 firmware_version,
-                hardware_model: proven.then(|| MINI_MODEL.into()),
+                hardware_model: (proven || proven_bootloader).then(|| MINI_MODEL.into()),
                 setup_state,
                 setup_version,
                 device_mode: device_mode.into(),
-                compatible,
-                requires_board_confirmation,
-            }
+                in_bootloader: proven_bootloader,
+                compatible: compatible || proven_bootloader,
+                requires_board_confirmation: requires_board_confirmation && !proven_bootloader,
+            })
         })
         .collect()
 }
 
-pub fn scan(app: &AppHandle) -> FirmwareManagerState {
+pub fn scan(app: &AppHandle, request: ScanRequest) -> FirmwareManagerState {
     update_state(app, |state| {
         state.status = "scanning".into();
         state.error_code = None;
         state.error_message = None;
     });
-    let devices = enumerate(app);
+    let devices = enumerate(app, request.reveal_unknown);
     update_state(app, |state| {
+        state.show_unknown_devices = request.reveal_unknown;
         state.devices = devices;
         if let Some(selected) = &state.selected_port {
-            if !state.devices.iter().any(|device| &device.port == selected) {
+            if !state.devices.iter().any(|device| &device.port == selected)
+                && !setup_pin_active(state, selected)
+            {
                 state.selected_port = None;
                 state.selected_hardware_model = None;
                 state.board_confirmed = false;
+                state.selected_vid = None;
+                state.selected_pid = None;
+                state.selected_usb_serial_number = None;
             }
         }
         state.status = discovery_status(state.devices.len(), state.selected_port.is_some()).into();
@@ -393,7 +490,9 @@ pub fn select_device(
     if request.hardware_model != MINI_MODEL {
         return Err("unsupported_hardware_model".into());
     }
-    let mut devices = enumerate(app);
+    // Selection must be able to resolve an explicitly revealed candidate even
+    // when the normal scan is filtering unknown serial adapters.
+    let mut devices = enumerate(app, true);
     let device = devices
         .iter()
         .find(|device| device.port == request.port)
@@ -406,36 +505,44 @@ pub fn select_device(
         return Err("board_confirmation_required".into());
     }
 
-    let state = app.state::<AppState>();
-    if state.flashing.swap(true, Ordering::SeqCst) {
-        return Err("firmware_operation_running".into());
-    }
-    let mut guard = OperationGuard {
-        app: app.clone(),
-        resume: false,
+    // A versioned EchoDesk handshake is already authoritative. Probing it here
+    // toggles DTR/RTS, resets the ESP32 and was the source of the onboarding
+    // hang: setup_begin raced the temporary disconnect. Unknown candidates are
+    // still ROM-probed before they can become a pinned bootloader identity.
+    let chip = if device.echo_desk_handshake {
+        None
+    } else {
+        let state = app.state::<AppState>();
+        if state.flashing.swap(true, Ordering::SeqCst) {
+            return Err("firmware_operation_running".into());
+        }
+        let mut guard = OperationGuard {
+            app: app.clone(),
+            resume: false,
+        };
+        pause_serial(app)?;
+        guard.resume = true;
+        let probe = match probe_device(&request.port) {
+            Ok(Some(probe)) if probe.chip == TargetChip::Esp32 => probe,
+            Ok(Some(_)) => return Err("wrong_chip".into()),
+            Ok(None) => return Err("unsupported_chip".into()),
+            Err(error) => return Err(format!("bootloader_identification_failed:{error}")),
+        };
+        if probe.flash_size_bytes != Some(MAX_FIRMWARE_BYTES) {
+            return Err("wrong_flash_size".into());
+        }
+        if let Some(row) = devices.iter_mut().find(|row| row.port == request.port) {
+            row.flash_size_bytes = probe.flash_size_bytes;
+            row.chip_family = Some("esp32".into());
+            row.identity_status = "bootloader".into();
+            row.device_mode = "bootloader".into();
+            row.in_bootloader = true;
+            row.compatible = true;
+            row.requires_board_confirmation = false;
+            row.hardware_model = Some(MINI_MODEL.into());
+        }
+        Some("esp32".to_string())
     };
-    pause_serial(app)?;
-    guard.resume = true;
-    let probe = match probe_device(&request.port) {
-        Ok(Some(probe)) if probe.chip == TargetChip::Esp32 => probe,
-        Ok(Some(_)) => return Err("wrong_chip".into()),
-        Ok(None) => return Err("unsupported_chip".into()),
-        Err(error) => return Err(format!("bootloader_identification_failed:{error}")),
-    };
-    if probe.flash_size_bytes != Some(MAX_FIRMWARE_BYTES) {
-        return Err("wrong_flash_size".into());
-    }
-    let chip = Some("esp32".into());
-    if let Some(row) = devices.iter_mut().find(|row| row.port == request.port) {
-        row.flash_size_bytes = probe.flash_size_bytes;
-        row.chip_family = chip.clone();
-        row.compatible = true;
-        row.requires_board_confirmation = false;
-        row.hardware_model = Some(MINI_MODEL.into());
-    }
-    if chip.as_deref().is_some_and(|chip| chip != "esp32") {
-        return Err("wrong_chip".into());
-    }
 
     update_state(app, |state| {
         state.devices = devices;
@@ -446,10 +553,21 @@ pub fn select_device(
         {
             row.chip_family = chip.clone();
         }
+        if !state.show_unknown_devices {
+            state
+                .devices
+                .retain(|row| row.identity_status != "unknown");
+        }
         state.selected_port = Some(request.port);
         state.selected_hardware_model = Some(MINI_MODEL.into());
         state.board_confirmed = device.echo_desk_handshake || request.board_confirmed;
         state.current_version = device.firmware_version;
+        state.selected_vid = device.vid;
+        state.selected_pid = device.pid;
+        state.selected_usb_serial_number = device.usb_serial_number;
+        state.setup_phase = None;
+        state.setup_target_port = None;
+        state.setup_completed = false;
         state.status = "ready".into();
         state.error_code = None;
         state.error_message = None;
@@ -668,7 +786,7 @@ fn validate_setup_selection(
     {
         return Err("board_confirmation_required");
     }
-    if !present {
+    if !present && !setup_pin_active(selected, requested_port) {
         return Err("device_not_found");
     }
     Ok(())
@@ -679,9 +797,7 @@ fn selected_setup_port(
     request: &SetupPortRequest,
 ) -> Result<FirmwareManagerState, String> {
     let selected = snapshot(app);
-    let present = aimonitor_serial::ports::list_ports()
-        .iter()
-        .any(|item| item.name == request.port);
+    let present = selected_target_present(&selected, &request.port);
     validate_setup_selection(&selected, &request.port, present).map_err(str::to_string)?;
     Ok(selected)
 }
@@ -689,11 +805,55 @@ fn selected_setup_port(
 fn wait_for_reported_state(app: &AppHandle, port: &str, timeout: Duration) -> Option<Value> {
     let deadline = Instant::now() + timeout;
     loop {
-        if let Some(state) = reported_state(app, port) {
-            return Some(state);
+        let selected = snapshot(app);
+        let same_usb_target = aimonitor_serial::ports::list_ports()
+            .iter()
+            .find(|candidate| candidate.name == port)
+            .is_some_and(|candidate| {
+                port_matches_pin(
+                    port,
+                    selected.selected_vid,
+                    selected.selected_pid,
+                    selected.selected_usb_serial_number.as_deref(),
+                    candidate,
+                )
+            });
+        if same_usb_target {
+            if let Some(state) = reported_state(app, port) {
+                return Some(state);
+            }
         }
         if Instant::now() >= deadline {
             return None;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn selected_target_present(state: &FirmwareManagerState, port: &str) -> bool {
+    aimonitor_serial::ports::list_ports()
+        .iter()
+        .find(|candidate| candidate.name == port)
+        .is_some_and(|candidate| {
+            port_matches_pin(
+                port,
+                state.selected_vid,
+                state.selected_pid,
+                state.selected_usb_serial_number.as_deref(),
+                candidate,
+            )
+        })
+}
+
+fn wait_for_selected_target(app: &AppHandle, port: &str, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let state = snapshot(app);
+        if selected_target_present(&state, port) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -713,24 +873,52 @@ pub fn setup_begin(
         .iter()
         .find(|device| device.port == request.port)
         .is_some_and(|device| device.echo_desk_handshake);
-    if expected_handshake {
-        let state = wait_for_reported_state(app, &request.port, Duration::from_secs(6))
-            .ok_or_else(|| "setup_device_reconnect_timeout".to_string())?;
-        if state.get("setupVersion").and_then(Value::as_u64) == Some(1) {
-            request_device(app, "setup_begin", json!({}))?;
-        }
-    }
     update_state(app, |state| {
         state.operation = Some("guidedSetup".into());
-        state.message = Some(if expected_handshake {
-            "EchoDesk acknowledged the guided setup session.".into()
-        } else {
-            "Verified ESP32 selected; setup communication will begin after installation.".into()
-        });
+        state.setup_target_port = Some(request.port.clone());
+        state.setup_phase = Some("beginning".into());
+        state.setup_completed = false;
+        state.message = Some("Starting guided setup on the selected EchoDesk…".into());
         state.error_code = None;
         state.error_message = None;
     });
-    Ok(snapshot(app))
+    let result = (|| {
+        if expected_handshake {
+            let reported = reported_state(app, &request.port)
+                .ok_or_else(|| "setup_device_reconnect_timeout".to_string())?;
+            if reported.get("setupVersion").and_then(Value::as_u64) == Some(1) {
+                request_device(app, "setup_begin", json!({})).map(|_| "ready")
+            } else {
+                Ok("firmwareRequired")
+            }
+        } else {
+            Ok("firmwareRequired")
+        }
+    })();
+    match result {
+        Ok(phase) => {
+            update_state(app, |state| {
+                state.setup_phase = Some(phase.into());
+                state.message = Some(if phase == "ready" {
+                    "EchoDesk acknowledged the guided setup session.".into()
+                } else {
+                    "The selected device needs the bundled EchoDesk OS before setup can finish."
+                        .into()
+                });
+            });
+            Ok(snapshot(app))
+        }
+        Err(error) => {
+            update_state(app, |state| {
+                state.setup_phase = Some("retryableError".into());
+                state.message = Some(
+                    "EchoDesk disconnected while setup was starting. Reconnect the same device and retry."
+                        .into(),
+                );
+            });
+            Err(error)
+        }
+    }
 }
 
 /// Completes setup only after the same selected port has reconnected as a
@@ -740,14 +928,44 @@ pub fn setup_complete(
     request: SetupPortRequest,
 ) -> Result<FirmwareManagerState, String> {
     selected_setup_port(app, &request)?;
-    let state = wait_for_reported_state(app, &request.port, Duration::from_secs(6))
-        .ok_or_else(|| "setup_device_reconnect_timeout".to_string())?;
-    if state.get("setupVersion").and_then(Value::as_u64) != Some(1) {
-        return Err("setup_protocol_unavailable".into());
+    let current = snapshot(app);
+    if current.setup_completed
+        && current.setup_target_port.as_deref() == Some(request.port.as_str())
+    {
+        return Ok(current);
     }
-    request_device(app, "setup_complete", json!({}))?;
     update_state(app, |state| {
         state.operation = Some("guidedSetup".into());
+        state.setup_target_port = Some(request.port.clone());
+        state.setup_phase = Some("completing".into());
+        state.message = Some("Waiting for the selected EchoDesk to confirm setup…".into());
+        state.error_code = None;
+        state.error_message = None;
+    });
+    let result = (|| {
+        let reported = wait_for_reported_state(app, &request.port, SETUP_RECONNECT_TIMEOUT)
+            .ok_or_else(|| "setup_device_reconnect_timeout".to_string())?;
+        if reported.get("setupVersion").and_then(Value::as_u64) != Some(1) {
+            return Err("setup_protocol_unavailable".into());
+        }
+        if reported.get("setupState").and_then(Value::as_str) != Some("completed") {
+            request_device(app, "setup_complete", json!({}))?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        update_state(app, |state| {
+            state.setup_phase = Some("retryableError".into());
+            state.message = Some(
+                "Setup is waiting for the same EchoDesk to reconnect. Reconnect it and retry."
+                    .into(),
+            );
+        });
+        return Err(error);
+    }
+    update_state(app, |state| {
+        state.setup_phase = Some("completed".into());
+        state.setup_completed = true;
         state.message = Some("EchoDesk setup is complete.".into());
         state.error_code = None;
         state.error_message = None;
@@ -771,6 +989,9 @@ pub fn factory_reset(
     }
     request_device(app, "factory_reset", json!({}))?;
     update_state(app, |state| {
+        state.setup_target_port = Some(request.port);
+        state.setup_phase = Some("waitingForDesktop".into());
+        state.setup_completed = false;
         state.message = Some("Factory reset accepted. EchoDesk is restarting into setup.".into());
     });
     Ok(snapshot(app))
@@ -868,6 +1089,22 @@ fn run_install(
         app: app.clone(),
         resume: false,
     };
+    let guided = setup_pin_active(&snapshot(&app), &port);
+    if guided {
+        update_state(&app, |state| {
+            state.setup_phase = Some("waitingForReconnect".into());
+            state.message = Some(
+                "Waiting for the same EchoDesk to reconnect before installation…".into(),
+            );
+        });
+        if !wait_for_selected_target(&app, &port, SETUP_RECONNECT_TIMEOUT) {
+            return Err("setup_device_reconnect_timeout".into());
+        }
+        update_state(&app, |state| {
+            state.setup_phase = Some("installing".into());
+            state.message = Some("The selected EchoDesk is verified. Preparing EchoDesk OS…".into());
+        });
+    }
     let backup = backup_settings(&app);
     update_state(&app, |state| {
         state.settings_backup = backup.clone();
@@ -960,14 +1197,16 @@ fn run_install(
     let mut verified = false;
     while Instant::now() < deadline {
         let connection = state.connection.lock().unwrap().clone();
-        if reconnect_verified(
+        if selected_target_present(&snapshot(&app), &port)
+            && reconnect_verified(
             connection.state,
             connection.port.as_deref(),
             connection.info.as_ref().map(|info| info.version.as_str()),
             &port,
             &release.firmware_version,
             reported_mini(&app, &port),
-        ) {
+        )
+        {
             verified = true;
             break;
         }
@@ -983,6 +1222,13 @@ fn run_install(
                 "Firmware was written, but EchoDesk OS did not reconnect and verify in time."
                     .into(),
             );
+            if setup_pin_active(state, &port) {
+                state.setup_phase = Some("retryableError".into());
+                state.message = Some(
+                    "Firmware was written. Reconnect the same EchoDesk and retry setup completion."
+                        .into(),
+                );
+            }
         });
         return Ok(());
     }
@@ -1003,6 +1249,10 @@ fn run_install(
         state.current_version = Some(release.firmware_version);
         state.error_code = None;
         state.error_message = None;
+        if setup_pin_active(state, &port) {
+            state.setup_phase = Some("awaitingCompletion".into());
+            state.message = Some("EchoDesk OS is verified. Finishing device setup…".into());
+        }
     });
     Ok(())
 }
@@ -1023,12 +1273,11 @@ pub fn install(app: &AppHandle, request: InstallRequest) -> Result<FirmwareManag
     }
     let port = selected
         .selected_port
-        .filter(|port| {
-            aimonitor_serial::ports::list_ports()
-                .iter()
-                .any(|item| &item.name == port)
-        })
+        .clone()
         .ok_or_else(|| "device_not_found".to_string())?;
+    if !selected_target_present(&selected, &port) && !setup_pin_active(&selected, &port) {
+        return Err("device_not_found".into());
+    }
     if selected.selected_hardware_model.as_deref() != Some(MINI_MODEL) || !selected.board_confirmed
     {
         return Err("board_confirmation_required".into());
@@ -1052,12 +1301,20 @@ pub fn install(app: &AppHandle, request: InstallRequest) -> Result<FirmwareManag
             if let Err(error) = run_install(
                 worker_app.clone(),
                 request.mode,
-                port,
+                port.clone(),
                 InstallPolicy::Normal,
             ) {
                 let cancelled = error == "operation_cancelled";
                 update_state(&worker_app, |state| {
                     state.status = if cancelled { "cancelled" } else { "error" }.into();
+                    if setup_pin_active(state, &port) {
+                        state.setup_phase = Some(if cancelled {
+                            "cancelled"
+                        } else {
+                            "retryableError"
+                        }
+                        .into());
+                    }
                     if !cancelled {
                         let (code, message) = public_error(&error);
                         state.error_code = Some(code.into());
@@ -1268,6 +1525,23 @@ mod tests {
     }
 
     #[test]
+    fn scan_reveals_unknown_devices_only_when_explicitly_requested() {
+        let hidden: ScanRequest = serde_json::from_str(r#"{}"#).unwrap();
+        let revealed: ScanRequest =
+            serde_json::from_str(r#"{"revealUnknown":true}"#).unwrap();
+        assert!(!hidden.reveal_unknown);
+        assert!(revealed.reveal_unknown);
+        assert!(serde_json::from_str::<ScanRequest>(
+            r#"{"revealUnknown":true,"trustCh340":true}"#
+        )
+        .is_err());
+        assert!(!identity_is_visible("unknown", false));
+        assert!(identity_is_visible("unknown", true));
+        assert!(identity_is_visible("verified", false));
+        assert!(identity_is_visible("bootloader", false));
+    }
+
+    #[test]
     fn selection_rejects_arbitrary_fields_and_models() {
         assert!(serde_json::from_str::<SelectDeviceRequest>(
             r#"{"port":"COM5","hardwareModel":"EchoDesk Mini","boardConfirmed":true,"image":"evil.bin"}"#
@@ -1311,15 +1585,50 @@ mod tests {
             validate_setup_selection(&selected, "COM8", true),
             Err("setup_device_selection_changed")
         );
+        selected.setup_target_port = Some("COM7".into());
+        selected.setup_phase = Some("waitingForReconnect".into());
         assert_eq!(
             validate_setup_selection(&selected, "COM7", false),
-            Err("device_not_found")
+            Ok(())
         );
         selected.board_confirmed = false;
         assert_eq!(
             validate_setup_selection(&selected, "COM7", true),
             Err("board_confirmation_required")
         );
+    }
+
+    #[test]
+    fn setup_pin_rejects_a_different_usb_identity_on_the_same_port() {
+        let candidate = aimonitor_serial::ports::PortCandidate {
+            name: "COM7".into(),
+            vid: Some(0x1a86),
+            pid: Some(0x7523),
+            serial_number: Some("MINI-123".into()),
+            product: Some("USB-SERIAL CH340".into()),
+            chip: Some("CH340"),
+        };
+        assert!(port_matches_pin(
+            "COM7",
+            Some(0x1a86),
+            Some(0x7523),
+            Some("MINI-123"),
+            &candidate,
+        ));
+        assert!(!port_matches_pin(
+            "COM7",
+            Some(0x1a86),
+            Some(0x7523),
+            Some("OTHER"),
+            &candidate,
+        ));
+        assert!(!port_matches_pin(
+            "COM8",
+            Some(0x1a86),
+            Some(0x7523),
+            None,
+            &candidate,
+        ));
     }
 
     #[test]
@@ -1433,7 +1742,7 @@ mod tests {
 
     #[test]
     fn desktop_version_and_public_errors_are_stable() {
-        assert_eq!(DESKTOP_VERSION, "0.2.6");
+        assert_eq!(DESKTOP_VERSION, "0.2.7");
         assert!(aimonitor_core::semver::at_least(DESKTOP_VERSION, "0.2.0"));
         assert_eq!(public_error("wrong_flash_size").0, "wrong_hardware");
         assert_eq!(

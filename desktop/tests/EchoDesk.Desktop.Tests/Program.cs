@@ -14,7 +14,7 @@ internal static class Program
             MapperUsesOnlyReportedValues();
             FirmwareManagerMappingPreservesSafetyStates();
             MapperAcceptsNullOptionalNumericFields();
-            GuidedSetupBlankLegalStepAndPinnedSelection();
+            GuidedSetupStartsAtConnectAndPinsSelection();
             WifiSetupMappingAndGuidedPolicyAreAuthoritative();
             await BrokerRoundTripIsBoundedAndRevisionAware();
             Console.WriteLine("EchoDesk.Desktop.Tests: PASS");
@@ -51,26 +51,24 @@ internal static class Program
         Assert(device.SetupSsid == "EchoDesk-A1B2" && device.Port == 39321,
             "temporary setup network identity was lost");
 
-        var fixtureRoot = Path.Combine(Path.GetTempPath(), $"EchoDesk.WifiSetup.{Guid.NewGuid():N}");
-        try
-        {
-            var flow = new GuidedSetupFlow();
-            Assert(flow.MoveNext(), "Wi-Fi fixture did not pass the blank introductory step");
-            flow.SelectTransport(GuidedSetupTransport.Wifi);
-            Assert(flow.MoveNext() && flow.Step == GuidedSetupStep.SelectDevice, "Wi-Fi setup did not reach discovery");
-            flow.SelectWifi(device.DeviceId, state.WifiSetup.Devices);
-            Assert(flow.CanContinue && flow.MoveNext() && flow.PinnedWifiDeviceId == "mini-a",
-                "Wi-Fi setup target was not pinned");
-            flow.SelectWifi("another", [device with { DeviceId = "another" }]);
-            Assert(flow.PinnedWifiDeviceId == "mini-a", "pinned Wi-Fi target changed during provisioning");
-            Assert(!flow.CompleteWifi(true, "another"), "a different Wi-Fi device completed the flow");
-            Assert(flow.CompleteWifi(true, "mini-a") && flow.Step == GuidedSetupStep.Complete,
-                "authoritative Wi-Fi provisioning success did not complete the flow");
-        }
-        finally
-        {
-            if (Directory.Exists(fixtureRoot)) Directory.Delete(fixtureRoot, recursive: true);
-        }
+        var flow = new GuidedSetupFlow();
+        Assert(flow.Step == GuidedSetupStep.Connect, "Wi-Fi setup did not start at Connect");
+        flow.SelectTransport(GuidedSetupTransport.Wifi);
+        Assert(flow.Step == GuidedSetupStep.SelectDevice
+               && flow.WifiStep == GuidedWifiStep.JoinTemporaryNetwork,
+            "Wi-Fi setup did not start with the single network-join step");
+        Assert(flow.AdvanceWifi() && flow.WifiStep == GuidedWifiStep.FindDevice,
+            "Wi-Fi discovery step did not advance");
+        flow.SelectWifi(device.DeviceId, state.WifiSetup.Devices);
+        Assert(flow.AdvanceWifi() && flow.WifiStep == GuidedWifiStep.EnterCredentials,
+            "Wi-Fi credentials step did not advance");
+        Assert(flow.CanContinue && flow.BeginWifiProvisioning() && flow.PinnedWifiDeviceId == "mini-a",
+            "Wi-Fi setup target was not pinned");
+        flow.SelectWifi("another", [device with { DeviceId = "another" }]);
+        Assert(flow.PinnedWifiDeviceId == "mini-a", "pinned Wi-Fi target changed during provisioning");
+        Assert(!flow.CompleteWifi(true, "another"), "a different Wi-Fi device completed the flow");
+        Assert(flow.CompleteWifi(true, "mini-a") && flow.Step == GuidedSetupStep.Complete,
+            "authoritative Wi-Fi provisioning did not reach Welcome");
     }
 
     private static void FirmwareManagerMappingPreservesSafetyStates()
@@ -81,6 +79,7 @@ internal static class Program
           "brokerAvailable":true,"connection":"disconnected",
           "firmwareManager":{
             "available":true,"status":"selectionRequired","selectedPort":"COM7",
+            "showUnknownDevices":true,"setupPhase":"awaitingSettings","setupTargetPort":"COM7","setupCompleted":false,
             "selectedHardwareModel":"EchoDesk Mini","boardConfirmed":false,
             "writeCompleted":false,"reconnected":false,"currentVersion":"2.28.0",
             "availableVersion":"2.29.0","progressPercent":101,
@@ -88,7 +87,8 @@ internal static class Program
               "port":"COM7","displayName":"USB-SERIAL CH340","vid":"1A86","pid":"7523",
               "adapter":"CH340","chipFamily":"esp32","flashSizeBytes":4194304,
               "echoDeskHandshake":false,"compatible":true,"requiresBoardConfirmation":true,
-              "setupState":"notStarted","setupVersion":2,"inBootloader":false
+              "setupState":"notStarted","setupVersion":2,"deviceMode":"application",
+              "identityStatus":"unknown","usbSerialNumber":"USB-ABC-123"
             }]
           }
         }
@@ -101,24 +101,23 @@ internal static class Program
         Assert(state.FirmwareManager.Devices[0].RequiresBoardConfirmation, "generic CH340 confirmation requirement lost");
         Assert(state.FirmwareManager.Devices[0].SetupState == "notStarted", "guided setup state lost");
         Assert(state.FirmwareManager.Devices[0].SetupVersion == 2, "guided setup version lost");
+        Assert(state.FirmwareManager.ShowUnknownDevices, "unknown-device reveal state lost");
+        Assert(state.FirmwareManager.SetupPhase == "awaitingSettings"
+               && state.FirmwareManager.SetupTargetPort == "COM7" && !state.FirmwareManager.SetupCompleted,
+            "authoritative setup transition fields were not mapped");
+        Assert(state.FirmwareManager.Devices[0].IdentityStatus == "unknown"
+               && state.FirmwareManager.Devices[0].UsbSerialNumber == "USB-ABC-123",
+            "device identity fields were not mapped");
         Assert(!state.FirmwareManager.WriteCompleted && !state.FirmwareManager.Reconnected,
             "incomplete installation was incorrectly promoted to success");
     }
 
-    private static void GuidedSetupBlankLegalStepAndPinnedSelection()
+    private static void GuidedSetupStartsAtConnectAndPinsSelection()
     {
-        var fixtureRoot = Path.Combine(Path.GetTempPath(), $"EchoDesk.GuidedSetup.{Guid.NewGuid():N}");
-        try
-        {
-            Directory.CreateDirectory(fixtureRoot);
-            var documents = GuidedSetupLegalDocuments.Discover(fixtureRoot);
-            Assert(!documents.HasRequiredDocuments, "blank legal step unexpectedly discovered documents");
-
-            var flow = new GuidedSetupFlow();
-            Assert(flow.CanContinue, "blank Terms/Privacy step must allow Continue");
-            Assert(flow.MoveNext() && flow.Step == GuidedSetupStep.Connect,
-                "blank Terms/Privacy step did not advance");
-            Assert(flow.MoveNext() && flow.Step == GuidedSetupStep.SelectDevice, "connect step did not advance");
+        var flow = new GuidedSetupFlow();
+        Assert(flow.Step == GuidedSetupStep.Connect, "guided setup must begin at Connect without a hidden legal step");
+        flow.SelectTransport(GuidedSetupTransport.Usb);
+        Assert(flow.Step == GuidedSetupStep.SelectDevice, "USB choice did not reach device selection");
 
             var genericAdapter = new FirmwareDeviceCandidate
             {
@@ -129,13 +128,13 @@ internal static class Program
             {
                 Port = "COM7", DisplayName = "EchoDesk Mini A", Compatible = true,
                 ChipFamily = "esp32", EchoDeskHandshake = true,
-                HardwareModel = BrokerProtocol.EchoDeskMiniHardwareModel,
+                HardwareModel = BrokerProtocol.EchoDeskMiniHardwareModel, IdentityStatus = "verified",
             };
             var secondMini = new FirmwareDeviceCandidate
             {
                 Port = "COM9", DisplayName = "EchoDesk Mini B", Compatible = true,
                 ChipFamily = "esp32", EchoDeskHandshake = true,
-                HardwareModel = BrokerProtocol.EchoDeskMiniHardwareModel,
+                HardwareModel = BrokerProtocol.EchoDeskMiniHardwareModel, IdentityStatus = "verified",
             };
             var bootloaderCandidate = new FirmwareDeviceCandidate
             {
@@ -143,6 +142,10 @@ internal static class Program
                 RequiresBoardConfirmation = true,
             };
             var devices = new[] { genericAdapter, bootloaderCandidate, firstMini, secondMini };
+            Assert(GuidedSetupFlow.IsKnown(firstMini) && !GuidedSetupFlow.IsUnknown(firstMini),
+                "verified EchoDesk was not classified as known");
+            Assert(GuidedSetupFlow.IsUnknown(bootloaderCandidate),
+                "unidentified recovery candidate was not classified as unknown");
             flow.Select("COM3", devices);
             Assert(flow.SelectedPort is null, "generic serial adapter was accepted as an EchoDesk Mini");
             flow.Select("COM4", devices);
@@ -153,18 +156,18 @@ internal static class Program
             Assert(flow.CanContinue, "confirmed bootloader candidate remained blocked");
             flow.Select("COM7", devices);
             Assert(flow.SelectedPort == "COM7", "suitable device selection was not retained");
-            Assert(flow.MoveNext() && flow.PinnedPort == "COM7", "selection was not pinned before install");
+            Assert(flow.ConfirmDevice() && flow.PinnedPort == "COM7"
+                   && flow.Step == GuidedSetupStep.ChoosePath, "selection was not pinned before options");
             flow.Select("COM9", devices);
-            Assert(flow.PinnedPort == "COM7", "pinned setup target changed during installation");
-            Assert(!flow.Complete(writeVerified: true, reconnected: false, setupAcknowledged: true),
-                "incomplete install was promoted to success");
-            Assert(flow.Complete(writeVerified: true, reconnected: true, setupAcknowledged: true)
-                   && flow.Step == GuidedSetupStep.Complete, "verified install did not complete");
-        }
-        finally
-        {
-            if (Directory.Exists(fixtureRoot)) Directory.Delete(fixtureRoot, recursive: true);
-        }
+            Assert(flow.PinnedPort == "COM7", "pinned setup target changed after selection");
+            Assert(flow.StartUpdateCheck() && flow.Step == GuidedSetupStep.Install,
+                "check-for-updates choice did not reach update stage");
+            Assert(!flow.FinishInstall(writeVerified: true, reconnected: false),
+                "incomplete update was promoted to quick settings");
+            Assert(flow.FinishInstall(writeVerified: true, reconnected: true)
+                   && flow.Step == GuidedSetupStep.QuickSettings, "verified update did not reach quick settings");
+            Assert(flow.Complete() && flow.Step == GuidedSetupStep.Complete,
+                "quick settings did not reach Welcome");
     }
 
     private static void MapperAcceptsNullOptionalNumericFields()
@@ -232,6 +235,7 @@ internal static class Program
         var observedSet = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         var observedAiToggle = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         var observedFirmwareInstall = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observedFirmwareScan = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         var observedManualRecovery = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         var observedSetupBegin = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         var observedSetupComplete = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -259,6 +263,7 @@ internal static class Program
                 if (method == "set_settings") observedSet.TrySetResult(request);
                 if (method == "set_ai_usage_enabled") observedAiToggle.TrySetResult(request);
                 if (method == "firmware_install") observedFirmwareInstall.TrySetResult(request);
+                if (method == "firmware_scan") observedFirmwareScan.TrySetResult(request);
                 if (method == "firmware_manual_recovery") observedManualRecovery.TrySetResult(request);
                 if (method == "setup_begin") observedSetupBegin.TrySetResult(request);
                 if (method == "setup_complete") observedSetupComplete.TrySetResult(request);
@@ -374,6 +379,11 @@ internal static class Program
         var toggleParams = toggleRequest.GetProperty("params");
         Assert(toggleParams.EnumerateObject().Count() == 1, "AI usage toggle sent unexpected parameters");
         Assert(!toggleParams.GetProperty("enabled").GetBoolean(), "AI usage toggle value missing");
+        await client.ScanFirmwareDevicesAsync(true, serverReady.Token);
+        var scanRequest = await observedFirmwareScan.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var scanParams = scanRequest.GetProperty("params");
+        Assert(scanParams.EnumerateObject().Count() == 1 && scanParams.GetProperty("revealUnknown").GetBoolean(),
+            "firmware scan did not explicitly request unidentified devices");
         var prepared = await client.StartFirmwareOperationAsync("repair", serverReady.Token);
         Assert(prepared.FirmwareManager.Status == "preparing", "firmware operation response was not mapped");
         var firmwareRequest = await observedFirmwareInstall.Task.WaitAsync(TimeSpan.FromSeconds(2));

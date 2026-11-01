@@ -159,9 +159,12 @@ public static class BrokerStateMapper
                 {
                     Port = Text(device, "port")!,
                     DisplayName = Text(device, "displayName") ?? "Serial device",
-                    Vid = Text(device, "vid"),
-                    Pid = Text(device, "pid"),
+                    Vid = UsbIdentifier(device, "vid"),
+                    Pid = UsbIdentifier(device, "pid"),
                     Adapter = Text(device, "adapter"),
+                    UsbSerialNumber = BoundedText(device, "usbSerialNumber", 128),
+                    IdentityStatus = BoundedText(device, "identityStatus", 24) ?? "unknown",
+                    DeviceMode = BoundedText(device, "deviceMode", 24) ?? "candidate",
                     ChipFamily = Text(device, "chipFamily"),
                     FlashSizeBytes = ULong(device, "flashSizeBytes"),
                     EchoDeskHandshake = Bool(device, "echoDeskHandshake") ?? false,
@@ -198,6 +201,10 @@ public static class BrokerStateMapper
             CurrentVersion = Text(manager, "currentVersion"),
             AvailableVersion = Text(manager, "availableVersion"),
             ReleaseNotes = SafeLongText(manager, "releaseNotes", 4000),
+            ShowUnknownDevices = Bool(manager, "showUnknownDevices") ?? false,
+            SetupPhase = BoundedText(manager, "setupPhase", 40),
+            SetupTargetPort = BoundedText(manager, "setupTargetPort", 128),
+            SetupCompleted = Bool(manager, "setupCompleted") ?? false,
             Devices = devices,
         };
     }
@@ -252,6 +259,16 @@ public static class BrokerStateMapper
     private static int? Int(JsonElement node, string name) =>
         node.ValueKind == JsonValueKind.Object && node.TryGetProperty(name, out var value)
             && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) ? number : null;
+
+    private static string? UsbIdentifier(JsonElement node, string name)
+    {
+        if (node.ValueKind != JsonValueKind.Object || !node.TryGetProperty(name, out var value))
+            return null;
+        if (value.ValueKind == JsonValueKind.String) return value.GetString();
+        return value.ValueKind == JsonValueKind.Number && value.TryGetUInt16(out var number)
+            ? $"0x{number:X4}"
+            : null;
+    }
 
     private static ulong? ULong(JsonElement node, string name) =>
         node.ValueKind == JsonValueKind.Object && node.TryGetProperty(name, out var value)

@@ -232,7 +232,14 @@ fn dispatch(app: &AppHandle, request: &BrokerRequest) -> Result<Value, BrokerErr
             Ok(status(app))
         }
         "firmware_scan" => {
-            firmware_manager::scan(app);
+            let params: firmware_manager::ScanRequest =
+                serde_json::from_value(request.params.clone()).map_err(|_| {
+                    error(
+                        "invalid_request",
+                        "firmware_scan accepts only {revealUnknown: boolean}",
+                    )
+                })?;
+            firmware_manager::scan(app, params);
             Ok(status(app))
         }
         "firmware_check_updates" => {

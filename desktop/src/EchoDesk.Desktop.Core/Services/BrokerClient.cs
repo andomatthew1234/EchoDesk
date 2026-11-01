@@ -48,8 +48,10 @@ public sealed class BrokerClient : IAsyncDisposable
     public Task<BrokerState> SetAiUsageEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
         StateRequestAsync("set_ai_usage_enabled", new { enabled }, cancellationToken);
 
-    public Task<BrokerState> ScanFirmwareDevicesAsync(CancellationToken cancellationToken = default) =>
-        StateRequestAsync("firmware_scan", null, cancellationToken);
+    public Task<BrokerState> ScanFirmwareDevicesAsync(
+        bool revealUnknown = false,
+        CancellationToken cancellationToken = default) =>
+        StateRequestAsync("firmware_scan", new { revealUnknown }, cancellationToken);
 
     public Task<BrokerState> CheckFirmwareUpdatesAsync(CancellationToken cancellationToken = default) =>
         StateRequestAsync("firmware_check_updates", null, cancellationToken);
@@ -130,7 +132,7 @@ public sealed class BrokerClient : IAsyncDisposable
                 pipe = connected;
                 delay = TimeSpan.FromSeconds(1);
                 var readerTask = ReadLoopAsync(connected, cancellationToken);
-                await StateRequestAsync("hello", new { client = "EchoDesk Desktop", clientVersion = "0.2.6" }, cancellationToken)
+                await StateRequestAsync("hello", new { client = "EchoDesk Desktop", clientVersion = "0.2.7" }, cancellationToken)
                     .ConfigureAwait(false);
                 await readerTask.ConfigureAwait(false);
             }
@@ -232,6 +234,7 @@ public sealed class BrokerClient : IAsyncDisposable
                 "restart" => 8,
                 "firmware_scan" or "firmware_check_updates" or "firmware_select_device"
                     or "wifi_setup_discover" => 15,
+                "setup_begin" or "setup_complete" or "factory_reset" => 20,
                 "firmware_install" or "firmware_manual_recovery" or "firmware_cancel"
                     or "wifi_setup_provision" or "wifi_setup_cancel" => 30,
                 _ => 4,

@@ -20,7 +20,7 @@ your provider credentials.
 
 ## Install and run
 
-1. Extract `EchoDesk-Desktop-v0.2.6-win-x64.zip` completely.
+1. Extract `EchoDesk-Desktop-v0.2.7-win-x64.zip` completely.
 2. Run `install.ps1` from PowerShell for a current-user Start menu installation,
    or run `EchoDesk Desktop.exe` directly from the extracted folder.
 3. Connect the EchoDesk display by USB. The bundled host starts invisibly and
@@ -36,16 +36,17 @@ The self-contained build does not require a separately installed .NET runtime.
 Closing the window minimises to the tray by default. Use **Exit** in the tray to
 stop all bundled EchoDesk background processes and release the COM port.
 
-## Setup & Updates
+## Device recovery & updates
 
-The separate **Set up a new device** destination provides the customer-facing
-Terms → Connect → Select → Install → Ready flow. The Terms/Privacy step is kept
-in the sequence but intentionally contains no copy, links or acceptance gate;
-Continue moves directly to connection choice. See
+The separate **Setup new device** destination starts directly at Connect, keeps
+the selected device pinned, offers immediate setup or an update check, applies
+quick appearance and time-format settings, and finishes at Welcome. Unknown USB
+serial devices stay hidden until the customer opens troubleshooting. See
 [the guided setup design](../docs/guided-device-setup.md).
 
-The **Setup & Updates** destination provides first-time EchoDesk OS installation,
-updates, reinstall and guided recovery. It only accepts device candidates and
+The **Device recovery & updates** destination provides first-time EchoDesk OS installation,
+updates, fresh installation, repair and full recovery. Device selection always
+comes before the four clearly labelled actions. It only accepts device candidates and
 firmware metadata supplied by the local EchoDesk Host; the WPF interface does
 not accept paths, flash offsets or arbitrary flash commands from users.
 

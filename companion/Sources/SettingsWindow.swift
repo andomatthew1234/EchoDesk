@@ -125,6 +125,74 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskWiFiPasswordField: NSSecureTextField!
     var echoDeskWiFiProvisionButton: NSButton!
     var echoDeskWiFiCancelButton: NSButton!
+
+    // EchoDesk Desktop 0.2.7 parity shell. The mature USB/Wi-Fi/firmware
+    // owners remain below this presentation layer; these references are only
+    // the native desktop-window state and never duplicate hardware ownership.
+    var echoDeskSidebarButtons: [NSButton] = []
+    var echoDeskPageViews: [NSView] = []
+    var echoDeskSelectedPage: EchoDeskDesktopPage = .overview
+    var echoDeskConnectionDot: StatusIndicator!
+    var echoDeskSidebarConnectionDot: StatusIndicator!
+    var echoDeskSidebarConnectionLabel: NSTextField!
+    var echoDeskConnectionLabel: NSTextField!
+    var echoDeskConnectionDetail: NSTextField!
+    var echoDeskFirmwareLabel: NSTextField!
+    var echoDeskHardwareLabel: NSTextField!
+    var echoDeskActiveAppLabel: NSTextField!
+    var echoDeskComponentStatus: NSTextField!
+    var echoDeskComponentDetail: NSTextField!
+    var echoDeskComponentUpdated: NSTextField!
+    var echoDeskFooterStatus: NSTextField!
+    var echoDeskSetupViews: [NSView] = []
+    var echoDeskSetupStepLabels: [NSTextField] = []
+    var echoDeskSetupStep: EchoDeskSetupStep = .connect
+    var echoDeskSetupUSBPopup: NSPopUpButton!
+    var echoDeskSetupDeviceName: NSTextField!
+    var echoDeskSetupDeviceModel: NSTextField!
+    var echoDeskSetupDeviceFirmware: NSTextField!
+    var echoDeskSetupDeviceSerial: NSTextField!
+    var echoDeskSetupTroubleButton: NSButton!
+    var echoDeskShowUnknownDevices = false
+    var echoDeskSetupChoiceStatus: NSTextField!
+    var echoDeskSetupProgress: NSProgressIndicator!
+    var echoDeskSetupQuickTheme: NSSegmentedControl!
+    var echoDeskSetupQuickClockFormat: NSPopUpButton!
+    var echoDeskSetupCompletionTitle: NSTextField!
+    var echoDeskSetupCompletionDetail: NSTextField!
+    var echoDeskGuidedWiFiContainer: NSView!
+    var echoDeskGuidedWiFiStatus: NSTextField!
+    var echoDeskGuidedWiFiDevicePopup: NSPopUpButton!
+    var echoDeskGuidedWiFiCode: NSTextField!
+    var echoDeskGuidedWiFiSSID: NSTextField!
+    var echoDeskGuidedWiFiPassword: NSSecureTextField!
+    var echoDeskRecoveryDevicePopup: NSPopUpButton!
+    var echoDeskRecoveryActions: NSStackView!
+    var echoDeskRecoveryStatus: NSTextField!
+    var echoDeskRecoveryProgress: NSProgressIndicator!
+    var echoDeskRecoveryCompletion: NSView!
+    var echoDeskQuickTheme: NSSegmentedControl!
+    var echoDeskQuickClockFormat: NSPopUpButton!
+    var echoDeskSettingControls: [String: NSControl] = [:]
+    var echoDeskLastState: [String: Any]?
+    var echoDeskLastStatePort: String?
+    var echoDeskLastStateMAC: String?
+    var echoDeskObservedConnectionPort: String?
+    var echoDeskObservedConnectionMAC: String?
+    var echoDeskStateRequestInFlight = false
+    var echoDeskLastStateRequest = Date.distantPast
+    var echoDeskRequestID: UInt32 = 1
+    var echoDeskPendingSetupPort: String?
+    var echoDeskSetupBeginSent = false
+    var echoDeskSetupWaitingForFlash = false
+    var echoDeskSetupFlashSucceeded = false
+    var echoDeskApplyingDeferredSettings = false
+    var echoDeskPendingRecoveryPort: String?
+    var echoDeskPendingRecoveryDeviceMAC: String?
+    var echoDeskPendingRecoveryAction: Int?
+    var echoDeskRecoveryOperationStarted = false
+    var echoDeskRecoveryFlashSucceeded = false
+    var echoDeskRecoveryResetSent = false
 #endif
 
     // Rechte Spalte — Display
@@ -186,6 +254,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         case diagnostics
 
         var title: String {
+#if ECHODESK_DESKTOP
+            switch self {
+            case .overview: return "Overview"
+            case .display: return "Device Control"
+            case .plugins: return "Customisation"
+            case .connection: return "Setup new device"
+            case .updates: return "Device recovery & updates"
+            case .diagnostics: return "Diagnostics"
+            }
+#else
             switch self {
             case .overview: return "Übersicht"
             case .display: return "Display"
@@ -194,6 +272,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             case .updates: return "Updates"
             case .diagnostics: return "Diagnose"
             }
+#endif
         }
 
         /// SF Symbol fuer das Toolbar-Item. HIG: „Find icons to represent
@@ -309,6 +388,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     private func buildUI() {
         guard let content = window?.contentView else { return }
+
+#if ECHODESK_DESKTOP
+        buildEchoDeskDesktopUI(in: content)
+        return
+#endif
 
         installToolbar()
 
@@ -497,6 +581,18 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func showSection(_ section: SettingsSection) {
+#if ECHODESK_DESKTOP
+        let page: EchoDeskDesktopPage
+        switch section {
+        case .overview: page = .overview
+        case .display: page = .deviceControl
+        case .plugins: page = .customisation
+        case .connection: page = .setup
+        case .updates, .diagnostics: page = .recovery
+        }
+        selectEchoDeskPage(page)
+        return
+#endif
         for (index, view) in sectionViews.enumerated() {
             view.isHidden = index != section.rawValue
         }
@@ -936,6 +1032,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         updateOverviewGuidance()
         refreshLiveLabels()
+#if ECHODESK_DESKTOP
+        refreshEchoDeskDesktopState(forceStateRequest: true)
+#endif
     }
 
     /// Für Timer-Tick (Alter des letzten Updates).
@@ -974,6 +1073,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 fwProgressBar.doubleValue = Double(fw.flashWritePercent)
             }
         }
+#if ECHODESK_DESKTOP
+        refreshEchoDeskDesktopState(forceStateRequest: false)
+#endif
     }
 
     private func serialFrameReceiptText(_ receipt: SerialFrameReceipt?) -> String {
@@ -1021,6 +1123,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     @objc func showAbout() {
         let alert = NSAlert()
         alert.messageText = "\(kProductName) v\(kAppVersion)"
+#if ECHODESK_DESKTOP
+        alert.informativeText = """
+        The native macOS companion for EchoDesk Mini.
+
+        EchoDesk Desktop sends Codex usage to the touchscreen, manages device settings, guides USB and WiFi setup, and securely installs or recovers EchoDesk OS.
+
+        Repository: github.com/\(kProductRepository)
+
+        © 2026 EchoDesk contributors · MIT License
+        """
+#else
         alert.informativeText = """
         macOS-Hintergrund-App für das ESP32-Usage-Display.
 
@@ -1033,6 +1146,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         © 2026 Tobias Marks · MIT-Lizenz
         """
+#endif
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()

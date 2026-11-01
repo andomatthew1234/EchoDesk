@@ -58,6 +58,13 @@ fn recent_sample(fetched_at: Option<&DateTime<Utc>>, max_age: Duration) -> bool 
         age >= 0 && age <= max_age.as_secs() as i64
     })
 }
+
+fn echo_ack_is_terminal(method: &str) -> bool {
+    matches!(
+        method,
+        "restart" | "setup_begin" | "setup_complete" | "factory_reset"
+    )
+}
 /// Kurze Lesescheibe für die späte `info` nach `foreignFirmware`.
 const LATE_INFO_SLICE: Duration = Duration::from_millis(200);
 
@@ -1662,7 +1669,7 @@ impl Service {
             self.exchange_echo_desk(command, fields, &["echodesk_ack", "echodesk_error"])?;
         match response {
             DeviceMessage::EchoDeskError(value) => Err(value),
-            DeviceMessage::EchoDeskAck(value) if matches!(method, "restart" | "factory_reset") => {
+            DeviceMessage::EchoDeskAck(value) if echo_ack_is_terminal(method) => {
                 Ok(value)
             }
             DeviceMessage::EchoDeskAck(_) => {
@@ -2690,5 +2697,13 @@ mod tests {
             "setupUrl": "http://unsafe.invalid"
         }))
         .is_err());
+    }
+
+    #[test]
+    fn setup_ack_is_terminal_across_a_device_ui_restart() {
+        assert!(echo_ack_is_terminal("setup_begin"));
+        assert!(echo_ack_is_terminal("setup_complete"));
+        assert!(echo_ack_is_terminal("factory_reset"));
+        assert!(!echo_ack_is_terminal("set_settings"));
     }
 }

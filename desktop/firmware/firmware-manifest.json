@@ -17,7 +17,7 @@
       "sha256": "77DD25B6BB32CD059807135A9DB9577B7F7D39748F50BC7256C528BD45577175",
       "size": 1516400,
       "releaseNotes": "Adds optional Wi-Fi setup with a protected temporary network, on-screen pairing code, strict local discovery and provisioning, and authenticated LAN rediscovery. USB remains the default connection and recovery path.",
-      "minimumDesktopVersion": "0.2.6"
+      "minimumDesktopVersion": "0.2.7"
     }
   ]
 }

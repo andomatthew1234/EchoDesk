@@ -32,7 +32,7 @@ on:
         required: true
         default: false
       tag:
-        description: 'Existing release tag ending in v0.2.6 (only when uploading)'
+        description: 'Existing release tag ending in v0.2.7 (only when uploading)'
         type: string
         required: false
 
@@ -44,7 +44,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DESKTOP_VERSION: '0.2.6'
+  DESKTOP_VERSION: '0.2.7'
   CODEXBAR_VERSION: '0.70.0'
   CODEXBAR_ARCHIVE_SHA256: '79C3AA5B01B0CAD92BE0BED108CA1A97A901DF8B3998319272DBBDBA44FD3AE4'
   CODEXBAR_EXE_SHA256: 'F81570B0CD7593ABB9822EB2362F9B9EDA3A382A571457718EE37E664E9A62FC'
@@ -256,12 +256,12 @@ jobs:
       - name: Upload verified workflow artifact
         uses: actions/upload-artifact@v7
         with:
-          name: EchoDesk-Desktop-v0.2.6-Windows
+          name: EchoDesk-Desktop-v0.2.7-Windows
           path: |
-            desktop/dist/EchoDesk-Desktop-v0.2.6-win-x64.zip
-            desktop/dist/EchoDesk-Desktop-v0.2.6-win-x64.zip.sha256
-            desktop/dist/EchoDesk-Desktop-v0.2.6-win-x64-setup.exe
-            desktop/dist/EchoDesk-Desktop-v0.2.6-win-x64-setup.exe.sha256
+            desktop/dist/EchoDesk-Desktop-v0.2.7-win-x64.zip
+            desktop/dist/EchoDesk-Desktop-v0.2.7-win-x64.zip.sha256
+            desktop/dist/EchoDesk-Desktop-v0.2.7-win-x64-setup.exe
+            desktop/dist/EchoDesk-Desktop-v0.2.7-win-x64-setup.exe.sha256
             desktop/dist/EchoDesk-Desktop-win-x64/component-manifest.json
             desktop/dist/EchoDesk-Desktop-win-x64/firmware/firmware-manifest.json
             desktop/dist/EchoDesk-Desktop-win-x64/firmware/firmware-manifest.json.sha256
@@ -279,7 +279,7 @@ jobs:
       - name: Download verified build artifact
         uses: actions/download-artifact@v8
         with:
-          name: EchoDesk-Desktop-v0.2.6-Windows
+          name: EchoDesk-Desktop-v0.2.7-Windows
           path: release-assets
 
       - name: Validate explicit release target
@@ -289,7 +289,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ ! "$RELEASE_TAG" =~ (^|-)v0\.2\.0$ ]]; then
-            echo "::error::Release tag must end in v0.2.6; received '$RELEASE_TAG'."
+            echo "::error::Release tag must end in v0.2.7; received '$RELEASE_TAG'."
             exit 1
           fi
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null || {
@@ -304,8 +304,8 @@ jobs:
         run: |
           set -euo pipefail
           gh release upload "$RELEASE_TAG" \
-            release-assets/EchoDesk-Desktop-v0.2.6-win-x64.zip \
-            release-assets/EchoDesk-Desktop-v0.2.6-win-x64.zip.sha256 \
-            release-assets/EchoDesk-Desktop-v0.2.6-win-x64-setup.exe \
-            release-assets/EchoDesk-Desktop-v0.2.6-win-x64-setup.exe.sha256 \
+            release-assets/EchoDesk-Desktop-v0.2.7-win-x64.zip \
+            release-assets/EchoDesk-Desktop-v0.2.7-win-x64.zip.sha256 \
+            release-assets/EchoDesk-Desktop-v0.2.7-win-x64-setup.exe \
+            release-assets/EchoDesk-Desktop-v0.2.7-win-x64-setup.exe.sha256 \
             --repo "$GITHUB_REPOSITORY" --clobber

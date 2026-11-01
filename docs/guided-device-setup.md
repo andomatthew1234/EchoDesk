@@ -1,36 +1,33 @@
 # EchoDesk guided device setup
 
-EchoDesk Desktop 0.2.6 and EchoDesk OS 2.31.0 implement a coordinated first-run
+EchoDesk Desktop 0.2.7 and EchoDesk OS 2.31.0 implement a coordinated first-run
 flow for the Freenove FNK0114A_2P4 EchoDesk Mini. The WPF app never opens a COM
 port; the bundled EchoDesk Host remains the sole serial owner and the guided
 wizard reuses the existing firmware manager and flasher.
 
-## Blank Terms and Privacy step
-
-The first Desktop wizard step remains labelled **Terms** so the onboarding
-sequence and back-navigation remain stable. Its content is intentionally blank:
-there are no placeholder terms, privacy copy, document links or acceptance
-checkbox. Continue is enabled and advances to the USB/Wi-Fi connection choice.
-This avoids presenting invented legal text while keeping the requested
-onboarding step available for reviewed copy in a later release.
+The Desktop wizard begins at **Connect**. There is no hidden or blank legal
+step. Its active-step indicator follows Connect, Device, Options, Update,
+Settings and Ready.
 
 ## Customer flow
 
 1. A blank device shows **Hello.**, then language selection and the Desktop
    download prompt. English is persisted; the production download URL remains
    intentionally unset until `ECHODESK_SETUP_URL` is configured with HTTPS.
-2. Desktop passes through the blank Terms/Privacy step, then the device offers
-   USB (the default) or **Setup with Wi-Fi**. USB uses the continuously
+2. Desktop starts at the connection choice and offers USB (the default) or
+   **Setup with WiFi**. USB uses the continuously
    refreshed serial-device list and a proven EchoDesk handshake.
-3. An unproven supported USB serial adapter is labelled unidentified rather
+3. Known EchoDesk devices are shown by default. An unproven supported USB serial adapter is labelled unidentified rather
    than EchoDesk. The customer must confirm the physical FNK0114A_2P4 label;
-   the existing updater then positively probes an original ESP32 with 4 MB
+   unidentified candidates are revealed only through troubleshooting, then
+   the existing updater positively probes an original ESP32 with 4 MB
    flash before the device can be selected.
-4. The host pins the selected port, model and confirmation, starts a setup
-   session, and invokes the existing `firmware_install` operation in `install`
-   mode. Manifest, merged-image, SHA-256, chip, flash layout, write and
-   post-restart checks are unchanged.
-5. Desktop reports only host-supplied stages and measured percentages. A flash
+4. The host pins the selected port, model and USB serial identity and starts a
+   setup session. The customer may get started without a firmware write or
+   check for updates and install only when a newer release is available.
+5. Desktop offers Light/Dark appearance and 12/24-hour time format, then reports
+   completion only from the host's authoritative setup state. During an update,
+   Desktop reports only host-supplied stages and measured percentages. A flash
    disconnect is expected. Completion requires the write to finish, the same
    port to reconnect as a proven EchoDesk Mini on the expected firmware, and a
    version-1 setup acknowledgement.
@@ -90,7 +87,7 @@ cancel failures remain in the existing firmware manager and retain its safe
 retry/recovery behavior. The wizard never follows a different port after its
 selection is pinned and never declares success from a write alone.
 
-Automated coverage exercises the blank introductory step, multiple-device selection,
+Automated coverage exercises direct Connect startup, known/unknown device filtering, multiple-device selection,
 bootloader confirmation, setup handshakes, pinning, verified completion,
 factory reset, protocol validation, persistence and native state transitions.
 Build validation does not constitute a physical flash or touchscreen test.
