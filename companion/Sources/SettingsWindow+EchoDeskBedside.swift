@@ -1025,8 +1025,16 @@ extension SettingsWindowController {
             + Calendar.current.component(.minute, from: now)
         let start = bedsideMinute(echoDeskBedsideThemeStart?.dateValue ?? now)
         let end = bedsideMinute(echoDeskBedsideThemeEnd?.dateValue ?? now)
-        label.stringValue = isMinute(minute, inside: start, and: end)
+        label.stringValue = bedsideMinuteFallsInside(minute, start: start, end: end)
             ? "Currently: Dark" : "Currently: Light"
+    }
+
+    /// Mirrors the firmware's start-inclusive, end-exclusive schedule window.
+    /// Equal endpoints intentionally mean the setting is active all day.
+    private func bedsideMinuteFallsInside(_ value: Int, start: Int, end: Int) -> Bool {
+        if start == end { return true }
+        if start < end { return value >= start && value < end }
+        return value >= start || value < end
     }
 
     private func bedsideConfigWithCurrentDisplay() -> EchoDeskBedsideConfig {

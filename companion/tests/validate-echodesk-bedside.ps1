@@ -163,6 +163,9 @@ foreach ($timelineContract in @(
     'echoDeskBedsideRuntime["timeValid"] as? Bool != true',
     'echoDeskBedsideRuntime["timeValid"] as? Bool == true',
     'Waiting for a valid clock before applying the appearance schedule.',
+    'bedsideMinuteFallsInside(minute, start: start, end: end)',
+    'if start == end { return true }',
+    'if start < end { return value >= start && value < end }',
     'if self.echoDeskBedsidePendingConfig == nil {',
     'themeScheduleEnabled: true, themeManualDark: false'
 )) { Assert-Contains $bedside $timelineContract }
