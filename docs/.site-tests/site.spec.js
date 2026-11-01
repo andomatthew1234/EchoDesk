@@ -1,6 +1,7 @@
 const { test, expect } = require("@playwright/test");
 const os = require("node:os");
 const path = require("node:path");
+const siteBaseUrl = process.env.ECHODESK_SITE_BASE_URL || "http://127.0.0.1:4173/docs/";
 
 const sizes = [
   { name: "phone", width: 375, height: 812 },
@@ -146,7 +147,7 @@ test("core content remains visible without JavaScript", async ({ browser }) => {
     viewport: { width: 1440, height: 1000 }
   });
   const page = await context.newPage();
-  await page.goto("http://127.0.0.1:4173/docs/", { waitUntil: "networkidle" });
+  await page.goto(siteBaseUrl, { waitUntil: "networkidle" });
   await expect(page.locator("#features h2")).toBeVisible();
   await expect(page.locator("#utilities h2")).toBeVisible();
   await expect(page.locator(".reveal").first()).toHaveCSS("opacity", "1");
@@ -210,9 +211,9 @@ for (const size of sizes) {
     await expect(page.locator("h1")).toContainText("ready on desktop");
     await expect(page.locator('.desktop-nav a[aria-current="page"]')).toHaveText("Download");
     await expect(page.locator(".download-primary")).toHaveAttribute("href", "./download-windows.html");
-    await expect(page.locator(".download-portable")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.7/EchoDesk-Desktop-v0.2.7-win-x64.zip");
+    await expect(page.locator(".download-portable")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.10/EchoDesk-Desktop-v0.2.10-win-x64.zip");
     await expect(page.locator(".download-macos")).toHaveAttribute("href", "./download-macos.html");
-    await expect(page.locator(".download-macos-zip")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.7/EchoDesk-Desktop-v0.2.7-macos-universal.zip");
+    await expect(page.locator(".download-macos-zip")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.10/EchoDesk-Desktop-v0.2.10-macos-universal.zip");
     await expect(page.locator("[data-installer-sha256]")).toHaveText(/Pending final|^[A-F0-9]{64}$/);
     await expect(page.locator("[data-portable-sha256]")).toHaveText(/Pending final|^[A-F0-9]{64}$/);
     await expect(page.locator("[data-macos-dmg-sha256]")).toHaveText(/Pending final|^[A-F0-9]{64}$/);
@@ -233,15 +234,15 @@ const guidePages = [
   {
     name: "macOS",
     path: "./download-macos.html",
-    url: "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.7/EchoDesk-Desktop-v0.2.7-macos-universal.dmg",
-    filename: "EchoDesk-Desktop-v0.2.7-macos-universal.dmg",
+    url: "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.10/EchoDesk-Desktop-v0.2.10-macos-universal.dmg",
+    filename: "EchoDesk-Desktop-v0.2.10-macos-universal.dmg",
     steps: 6
   },
   {
     name: "Windows",
     path: "./download-windows.html",
-    url: "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.7/EchoDesk-Desktop-v0.2.7-win-x64-setup.exe",
-    filename: "EchoDesk-Desktop-v0.2.7-win-x64-setup.exe",
+    url: "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.10/EchoDesk-Desktop-v0.2.10-win-x64-setup.exe",
+    filename: "EchoDesk-Desktop-v0.2.10-win-x64-setup.exe",
     steps: 5
   }
 ];

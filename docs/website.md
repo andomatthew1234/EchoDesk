@@ -32,10 +32,10 @@ Then open `http://127.0.0.1:4173/docs/`.
 
 The download page targets these versioned GitHub Release assets:
 
-- `releases/download/v0.2.8/EchoDesk-Desktop-v0.2.8-win-x64-setup.exe`
-- `releases/download/v0.2.8/EchoDesk-Desktop-v0.2.8-win-x64.zip`
-- `releases/download/v0.2.8/EchoDesk-Desktop-v0.2.8-macos-universal.dmg`
-- `releases/download/v0.2.8/EchoDesk-Desktop-v0.2.8-macos-universal.zip`
+- `releases/download/v0.2.10/EchoDesk-Desktop-v0.2.10-win-x64-setup.exe`
+- `releases/download/v0.2.10/EchoDesk-Desktop-v0.2.10-win-x64.zip`
+- `releases/download/v0.2.10/EchoDesk-Desktop-v0.2.10-macos-universal.dmg`
+- `releases/download/v0.2.10/EchoDesk-Desktop-v0.2.10-macos-universal.zip`
 
 Upload only the final Windows files produced by `desktop/build.ps1` and the
 final universal macOS files produced by `companion/build.sh`. Update every
