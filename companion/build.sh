@@ -361,8 +361,10 @@ if [ "$PRODUCT_MODE" = "echodesk" ]; then
 
   APP_KB=$(du -sk "$SCRIPT_DIR/build/$APP_NAME.app" | awk '{print $1}')
   DMG_SIZE_KB=$((APP_KB + 65536))
+  # A blank image is UDRW by default. Newer hdiutil versions reject an
+  # explicit -format unless create is also given -srcfolder/-srcdevice.
   /usr/bin/hdiutil create -ov -size "${DMG_SIZE_KB}k" -fs HFS+ \
-    -volname "$APP_NAME" -format UDRW "$DMG_RW_PATH" >/dev/null || {
+    -volname "$APP_NAME" "$DMG_RW_PATH" >/dev/null || {
       echo "ERROR: Could not create the writable EchoDesk DMG"
       exit 1
     }
