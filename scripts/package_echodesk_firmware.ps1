@@ -31,6 +31,18 @@ function Assert-SemVer([string]$Value, [string]$Name) {
     Assert-That ($Value -match '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$') "Firmware manifest field '$Name' is not a supported semantic version."
 }
 
+function Get-CanonicalManifestHash([string]$Path) {
+    $text = [IO.File]::ReadAllText($Path)
+    $canonical = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($canonical)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        return [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', '')
+    } finally {
+        $sha.Dispose()
+    }
+}
+
 function Assert-MergedEsp32Image([byte[]]$Image) {
     Assert-That ($Image.Length -ge 0x11000 -and $Image.Length -le 0x400000) 'Firmware image is outside the supported EchoDesk Mini flash size.'
     Assert-That ($Image[0x1000] -eq 0xE9) 'Firmware image has no ESP32 bootloader at offset 0x1000.'
@@ -49,7 +61,7 @@ Assert-That (Test-Path -LiteralPath $checksumPath -PathType Leaf) "Signed-packag
 $checksumLine = (Get-Content -LiteralPath $checksumPath -Raw).Trim()
 Assert-That ($checksumLine -match '^([0-9A-Fa-f]{64})\s{2}firmware-manifest\.json$') 'Firmware manifest digest file has an invalid format.'
 $expectedManifestHash = $Matches[1].ToUpperInvariant()
-$actualManifestHash = (Get-FileHash -LiteralPath $ManifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
+$actualManifestHash = (Get-CanonicalManifestHash $ManifestPath).ToUpperInvariant()
 Assert-That ($actualManifestHash -eq $expectedManifestHash) 'Firmware manifest digest does not match; refusing to package it.'
 
 try {

@@ -6,7 +6,15 @@ $firmware = Join-Path $repositoryRoot 'dist\ai-monitor-freenove-fnk0114a-2p4.bin
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ("echodesk-firmware-test-" + [guid]::NewGuid().ToString('N'))
 
 function Write-ManifestDigest([string]$Path) {
-    $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    $text = [IO.File]::ReadAllText($Path)
+    $canonical = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($canonical)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = [BitConverter]::ToString($algorithm.ComputeHash($bytes)).Replace('-', '')
+    } finally {
+        $algorithm.Dispose()
+    }
     Set-Content -LiteralPath "$Path.sha256" -Value "$hash  firmware-manifest.json" -Encoding ascii
 }
 
