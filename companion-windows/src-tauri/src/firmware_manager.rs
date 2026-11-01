@@ -316,7 +316,10 @@ fn port_matches_pin(
 
 fn setup_pin_active(state: &FirmwareManagerState, port: &str) -> bool {
     state.setup_target_port.as_deref() == Some(port)
-        && !matches!(state.setup_phase.as_deref(), Some("completed" | "cancelled"))
+        && !matches!(
+            state.setup_phase.as_deref(),
+            Some("completed" | "cancelled")
+        )
 }
 
 fn identity_is_visible(identity_status: &str, reveal_unknown: bool) -> bool {
@@ -560,9 +563,7 @@ pub fn select_device(
             row.chip_family = chip.clone();
         }
         if !state.show_unknown_devices {
-            state
-                .devices
-                .retain(|row| row.identity_status != "unknown");
+            state.devices.retain(|row| row.identity_status != "unknown");
         }
         state.selected_port = Some(request.port);
         state.selected_hardware_model = Some(MINI_MODEL.into());
@@ -795,6 +796,19 @@ fn reconnect_verified(
         && actual_port == Some(expected_port)
         && actual_version == Some(expected_version)
         && proven_mini
+}
+
+fn update_handoff_supported(app: &AppHandle, port: &str, policy: InstallPolicy) -> bool {
+    if policy == InstallPolicy::Esp32OnlyRecovery {
+        return false;
+    }
+    let connection = app.state::<AppState>().connection.lock().unwrap().clone();
+    connection.state == ConnectionState::Connected
+        && connection.port.as_deref() == Some(port)
+        && connection
+            .info
+            .as_ref()
+            .is_some_and(|info| info.supports_echo_desk_update())
 }
 
 fn request_device(app: &AppHandle, method: &str, params: Value) -> Result<Value, String> {
@@ -1138,16 +1152,16 @@ fn run_install(
     if guided {
         update_state(&app, |state| {
             state.setup_phase = Some("waitingForReconnect".into());
-            state.message = Some(
-                "Waiting for the same EchoDesk to reconnect before installation…".into(),
-            );
+            state.message =
+                Some("Waiting for the same EchoDesk to reconnect before installation…".into());
         });
         if !wait_for_selected_target(&app, &port, SETUP_RECONNECT_TIMEOUT) {
             return Err("setup_device_reconnect_timeout".into());
         }
         update_state(&app, |state| {
             state.setup_phase = Some("installing".into());
-            state.message = Some("The selected EchoDesk is verified. Preparing EchoDesk OS…".into());
+            state.message =
+                Some("The selected EchoDesk is verified. Preparing EchoDesk OS…".into());
         });
     }
     let backup = backup_settings(&app);
@@ -1182,6 +1196,14 @@ fn run_install(
     validate_image(&release, &image)?;
     if cancelled(&app) {
         return Err("operation_cancelled".into());
+    }
+
+    if update_handoff_supported(&app, &port, policy) {
+        update_state(&app, |state| {
+            state.message = Some("Preparing the EchoDesk display for the OS update…".into());
+        });
+        request_device(&app, "prepare_update", json!({}))
+            .map_err(|error| format!("prepare_update_failed:{error}"))?;
     }
 
     pause_serial(&app)?;
@@ -1251,13 +1273,13 @@ fn run_install(
         let connection = state.connection.lock().unwrap().clone();
         if selected_target_present(&snapshot(&app), &port)
             && reconnect_verified(
-            connection.state,
-            connection.port.as_deref(),
-            connection.info.as_ref().map(|info| info.version.as_str()),
-            &port,
-            &release.firmware_version,
-            reported_mini(&app, &port),
-        )
+                connection.state,
+                connection.port.as_deref(),
+                connection.info.as_ref().map(|info| info.version.as_str()),
+                &port,
+                &release.firmware_version,
+                reported_mini(&app, &port),
+            )
         {
             verified = true;
             break;
@@ -1287,6 +1309,16 @@ fn run_install(
 
     if let Some(backup) = backup.as_ref() {
         restore_settings(&app, backup);
+    }
+    // Presentation follows successful flash verification. A missing display
+    // acknowledgement must never downgrade a verified installation.
+    if update_handoff_supported(&app, &port, policy) {
+        if let Err(error) = request_device(&app, "update_complete", json!({})) {
+            serial_service::log(
+                &app,
+                format!("EchoDesk OS update-complete screen unavailable: {error}"),
+            );
+        }
     }
     {
         let mut settings = state.settings.lock().unwrap();
@@ -1360,12 +1392,14 @@ pub fn install(app: &AppHandle, request: InstallRequest) -> Result<FirmwareManag
                 update_state(&worker_app, |state| {
                     state.status = if cancelled { "cancelled" } else { "error" }.into();
                     if setup_pin_active(state, &port) {
-                        state.setup_phase = Some(if cancelled {
-                            "cancelled"
-                        } else {
-                            "retryableError"
-                        }
-                        .into());
+                        state.setup_phase = Some(
+                            if cancelled {
+                                "cancelled"
+                            } else {
+                                "retryableError"
+                            }
+                            .into(),
+                        );
                     }
                     if !cancelled {
                         let (code, message) = public_error(&error);
@@ -1524,6 +1558,10 @@ pub fn public_error(internal: &str) -> (&'static str, &'static str) {
             "bootloader_unavailable",
             "EchoDesk could not identify the ESP32 bootloader. Reconnect the device and follow recovery mode instructions.",
         ),
+        "prepare_update_failed" => (
+            "update_screen_unavailable",
+            "EchoDesk OS could not confirm the on-device update screen. Reconnect the device and try again.",
+        ),
         "flash_write_failed" => (
             "write_failed",
             "The firmware write did not complete. Keep the device connected and use Repair.",
@@ -1583,14 +1621,13 @@ mod tests {
     #[test]
     fn scan_reveals_unknown_devices_only_when_explicitly_requested() {
         let hidden: ScanRequest = serde_json::from_str(r#"{}"#).unwrap();
-        let revealed: ScanRequest =
-            serde_json::from_str(r#"{"revealUnknown":true}"#).unwrap();
+        let revealed: ScanRequest = serde_json::from_str(r#"{"revealUnknown":true}"#).unwrap();
         assert!(!hidden.reveal_unknown);
         assert!(revealed.reveal_unknown);
-        assert!(serde_json::from_str::<ScanRequest>(
-            r#"{"revealUnknown":true,"trustCh340":true}"#
-        )
-        .is_err());
+        assert!(
+            serde_json::from_str::<ScanRequest>(r#"{"revealUnknown":true,"trustCh340":true}"#)
+                .is_err()
+        );
         assert!(!identity_is_visible("unknown", false));
         assert!(identity_is_visible("unknown", true));
         assert!(identity_is_visible("verified", false));
@@ -1643,10 +1680,7 @@ mod tests {
         );
         selected.setup_target_port = Some("COM7".into());
         selected.setup_phase = Some("waitingForReconnect".into());
-        assert_eq!(
-            validate_setup_selection(&selected, "COM7", false),
-            Ok(())
-        );
+        assert_eq!(validate_setup_selection(&selected, "COM7", false), Ok(()));
         selected.board_confirmed = false;
         assert_eq!(
             validate_setup_selection(&selected, "COM7", true),

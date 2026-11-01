@@ -241,6 +241,14 @@ pub struct DeviceInfo {
     pub music_visualizer_protocol: Option<u32>,
     /// EchoDesk Desktop remote-control and two-way settings contract.
     pub echo_desk_control_protocol: Option<u32>,
+    /// EchoDesk OS host-update handoff screens and acknowledgements.
+    pub echo_desk_update_protocol: Option<u32>,
+    /// EchoDesk stopwatch/countdown/focus control contract.
+    pub echo_desk_clock_protocol: Option<u32>,
+    /// EchoDesk bounded Notification Stack contract.
+    pub echo_desk_notification_protocol: Option<u32>,
+    /// EchoDesk configurable PC Dashboard contract.
+    pub echo_desk_pc_dashboard_protocol: Option<u32>,
     pub wifi_configured: Option<bool>,
     pub wifi_connected: Option<bool>,
     pub time_synced: Option<bool>,
@@ -322,6 +330,22 @@ impl DeviceInfo {
                 .get("echoDeskControlProtocol")
                 .and_then(Value::as_u64)
                 .map(|n| n as u32),
+            echo_desk_update_protocol: v
+                .get("echoDeskUpdateProtocol")
+                .and_then(Value::as_u64)
+                .map(|n| n as u32),
+            echo_desk_clock_protocol: v
+                .get("echoDeskClockProtocol")
+                .and_then(Value::as_u64)
+                .map(|n| n as u32),
+            echo_desk_notification_protocol: v
+                .get("echoDeskNotificationProtocol")
+                .and_then(Value::as_u64)
+                .map(|n| n as u32),
+            echo_desk_pc_dashboard_protocol: v
+                .get("echoDeskPcDashboardProtocol")
+                .and_then(Value::as_u64)
+                .map(|n| n as u32),
             wifi_configured: v.get("wifiConfigured").and_then(Value::as_bool),
             wifi_connected: v.get("wifiConnected").and_then(Value::as_bool),
             time_synced: v.get("timeSynced").and_then(Value::as_bool),
@@ -387,6 +411,22 @@ impl DeviceInfo {
         self.echo_desk_control_protocol.unwrap_or(0) >= 1
     }
 
+    pub fn supports_echo_desk_update(&self) -> bool {
+        self.supports_echo_desk_control() && self.echo_desk_update_protocol.unwrap_or(0) >= 1
+    }
+
+    pub fn supports_echo_desk_clock(&self) -> bool {
+        self.supports_echo_desk_control() && self.echo_desk_clock_protocol.unwrap_or(0) >= 1
+    }
+
+    pub fn supports_echo_desk_notifications(&self) -> bool {
+        self.supports_echo_desk_control() && self.echo_desk_notification_protocol.unwrap_or(0) >= 1
+    }
+
+    pub fn supports_echo_desk_pc_dashboard(&self) -> bool {
+        self.supports_echo_desk_control() && self.echo_desk_pc_dashboard_protocol.unwrap_or(0) >= 1
+    }
+
     pub fn max_frame_bytes(&self) -> usize {
         self.max_frame_bytes.unwrap_or(MAX_FRAME_BYTES)
     }
@@ -429,6 +469,12 @@ pub enum DeviceMessage {
         enabled: bool,
     },
     EchoDeskState(Value),
+    EchoDeskClockState(Value),
+    EchoDeskClockConfigRequest {
+        mode: String,
+    },
+    EchoDeskNotificationsState(Value),
+    EchoDeskPcDashboardState(Value),
     EchoDeskAck(Value),
     EchoDeskError(Value),
     Other(Value),
@@ -490,8 +536,10 @@ impl DeviceMessage {
                 let version = v.get("version").and_then(Value::as_u64).unwrap_or(0);
                 let generation = v.get("generation").and_then(Value::as_u64).unwrap_or(0);
                 let action = v.get("action").and_then(Value::as_str).unwrap_or("");
-                if version == 1 && generation > 0 &&
-                    matches!(action, "toggle" | "previous" | "next") {
+                if version == 1
+                    && generation > 0
+                    && matches!(action, "toggle" | "previous" | "next")
+                {
                     DeviceMessage::MusicControl {
                         version: version as u8,
                         generation,
@@ -526,6 +574,39 @@ impl DeviceMessage {
                 }
             }
             "echodesk_state" => DeviceMessage::EchoDeskState(v),
+            "echodesk_clock_state" => {
+                if v.get("version").and_then(Value::as_u64) == Some(1) {
+                    DeviceMessage::EchoDeskClockState(v)
+                } else {
+                    DeviceMessage::Other(v)
+                }
+            }
+            "echodesk_clock_config_request" => {
+                let mode = v.get("mode").and_then(Value::as_str).unwrap_or("");
+                if v.get("version").and_then(Value::as_u64) == Some(1)
+                    && matches!(mode, "countdown" | "focus")
+                {
+                    DeviceMessage::EchoDeskClockConfigRequest {
+                        mode: mode.to_string(),
+                    }
+                } else {
+                    DeviceMessage::Other(v)
+                }
+            }
+            "echodesk_notifications_state" => {
+                if v.get("version").and_then(Value::as_u64) == Some(1) {
+                    DeviceMessage::EchoDeskNotificationsState(v)
+                } else {
+                    DeviceMessage::Other(v)
+                }
+            }
+            "echodesk_pc_dashboard_state" => {
+                if v.get("version").and_then(Value::as_u64) == Some(1) {
+                    DeviceMessage::EchoDeskPcDashboardState(v)
+                } else {
+                    DeviceMessage::Other(v)
+                }
+            }
             "echodesk_ack" => DeviceMessage::EchoDeskAck(v),
             "echodesk_error" => DeviceMessage::EchoDeskError(v),
             _ => DeviceMessage::Other(v),
@@ -545,6 +626,10 @@ impl DeviceMessage {
             DeviceMessage::MusicVisualizer { .. } => "music_visualizer",
             DeviceMessage::MusicBackgroundRequest { .. } => "music_background_request",
             DeviceMessage::EchoDeskState(_) => "echodesk_state",
+            DeviceMessage::EchoDeskClockState(_) => "echodesk_clock_state",
+            DeviceMessage::EchoDeskClockConfigRequest { .. } => "echodesk_clock_config_request",
+            DeviceMessage::EchoDeskNotificationsState(_) => "echodesk_notifications_state",
+            DeviceMessage::EchoDeskPcDashboardState(_) => "echodesk_pc_dashboard_state",
             DeviceMessage::EchoDeskAck(_) => "echodesk_ack",
             DeviceMessage::EchoDeskError(_) => "echodesk_error",
             DeviceMessage::Other(_) => "other",
@@ -739,15 +824,11 @@ mod tests {
         assert!(info.supports_music_background());
         assert!(info.supports_music_visualizer());
         assert!(matches!(
-            DeviceMessage::parse_line(
-                r#"{"type":"music_visualizer","version":1,"enabled":true}"#
-            ),
+            DeviceMessage::parse_line(r#"{"type":"music_visualizer","version":1,"enabled":true}"#),
             Some(DeviceMessage::MusicVisualizer { enabled: true, .. })
         ));
         assert!(matches!(
-            DeviceMessage::parse_line(
-                r#"{"type":"music_visualizer","version":2,"enabled":true}"#
-            ),
+            DeviceMessage::parse_line(r#"{"type":"music_visualizer","version":2,"enabled":true}"#),
             Some(DeviceMessage::Other(_))
         ));
         assert!(matches!(
@@ -761,10 +842,12 @@ mod tests {
     #[test]
     fn parses_echodesk_desktop_capability_and_responses() {
         let info = DeviceInfo::from_value(&serde_json::json!({
-            "type": "info", "version": "2.28.0", "echoDeskControlProtocol": 1
+            "type": "info", "version": "2.28.0", "echoDeskControlProtocol": 1,
+            "echoDeskUpdateProtocol": 1
         }))
         .unwrap();
         assert!(info.supports_echo_desk_control());
+        assert!(info.supports_echo_desk_update());
         assert!(matches!(
             DeviceMessage::parse_line(
                 r#"{"type":"echodesk_state","version":1,"requestId":4,"revision":9}"#
@@ -906,6 +989,78 @@ mod tests {
         );
         assert!(matches!(
             DeviceMessage::parse_line(r#"{"type":"view_state","active":1}"#),
+            Some(DeviceMessage::Other(_))
+        ));
+    }
+
+    #[test]
+    fn parses_versioned_clock_messages_and_rejects_unbounded_requests() {
+        let state = DeviceMessage::parse_line(
+            r#"{"type":"echodesk_clock_state","version":1,"revision":4,"activeMode":"countdown","stopwatch":{"status":"idle","elapsedMs":0},"countdown":{"status":"running","durationSeconds":300,"remainingSeconds":240,"progressPermille":200},"focus":{"status":"idle","phase":"focus","focusMinutes":25,"breakMinutes":5,"rounds":4,"currentRound":1,"remainingSeconds":1500,"progressPermille":0}}"#,
+        );
+        assert!(matches!(
+            state.as_ref(),
+            Some(DeviceMessage::EchoDeskClockState(_))
+        ));
+        assert_eq!(state.unwrap().type_name(), "echodesk_clock_state");
+
+        assert!(matches!(
+            DeviceMessage::parse_line(
+                r#"{"type":"echodesk_clock_config_request","version":1,"mode":"focus"}"#
+            ),
+            Some(DeviceMessage::EchoDeskClockConfigRequest { ref mode }) if mode == "focus"
+        ));
+        assert!(matches!(
+            DeviceMessage::parse_line(
+                r#"{"type":"echodesk_clock_config_request","version":1,"mode":"time"}"#
+            ),
+            Some(DeviceMessage::Other(_))
+        ));
+        assert!(matches!(
+            DeviceMessage::parse_line(
+                r#"{"type":"echodesk_clock_config_request","version":2,"mode":"countdown"}"#
+            ),
+            Some(DeviceMessage::Other(_))
+        ));
+    }
+
+    #[test]
+    fn parses_versioned_notification_state_and_capability() {
+        let info = DeviceInfo::from_value(&serde_json::json!({
+            "type":"info", "version":"2.32.0", "mac":"aa:bb:cc:dd:ee:ff",
+            "echoDeskControlProtocol":1, "echoDeskNotificationProtocol":1
+        }))
+        .unwrap();
+        assert!(info.supports_echo_desk_notifications());
+        let message = DeviceMessage::parse_line(
+            r#"{"type":"echodesk_notifications_state","version":1,"requestId":7,"revision":2,"enabled":true,"count":1,"notifications":[{"id":4,"timestamp":1700000000,"source":"Mail","title":"Hello","body":"World"}]}"#,
+        );
+        assert!(matches!(
+            message,
+            Some(DeviceMessage::EchoDeskNotificationsState(_))
+        ));
+        assert!(matches!(
+            DeviceMessage::parse_line(r#"{"type":"echodesk_notifications_state","version":2}"#),
+            Some(DeviceMessage::Other(_))
+        ));
+    }
+
+    #[test]
+    fn parses_pc_dashboard_capability_and_state() {
+        let info = DeviceInfo::from_value(&serde_json::json!({
+            "type":"info", "version":"2.33.0", "mac":"aa:bb:cc:dd:ee:ff",
+            "echoDeskControlProtocol":1, "echoDeskPcDashboardProtocol":1
+        }))
+        .unwrap();
+        assert!(info.supports_echo_desk_pc_dashboard());
+        assert!(matches!(
+            DeviceMessage::parse_line(
+                r#"{"type":"echodesk_pc_dashboard_state","version":1,"requestId":7,"revision":2,"metrics":["cpu","ram"]}"#
+            ),
+            Some(DeviceMessage::EchoDeskPcDashboardState(_))
+        ));
+        assert!(matches!(
+            DeviceMessage::parse_line(r#"{"type":"echodesk_pc_dashboard_state","version":2}"#),
             Some(DeviceMessage::Other(_))
         ));
     }

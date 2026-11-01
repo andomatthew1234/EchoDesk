@@ -20,7 +20,8 @@ Requirements:
 - macOS 14 or later with current Xcode command-line tools
 - Rust and `rustup` for the universal display-plugin helper
 - Internet access to retrieve Espressif's signed universal esptool binaries
-- `desktop/firmware/echodesk-mini/2.31.0/echodesk-os.bin` with the pinned hash
+- Internet access to retrieve the pinned arm64 and x86_64 CodexBar CLI archives
+- `desktop/firmware/echodesk-mini/2.32.0/echodesk-os.bin` with the pinned hash
 
 Run:
 
@@ -61,3 +62,24 @@ credential held in the macOS Keychain. Passwords are not persisted by the
 desktop app.
 
 Firmware is never flashed automatically by the build or onboarding flow.
+
+## Native telemetry
+
+The macOS app collects CPU, memory and network throughput with public Darwin
+APIs and sends the same Performance v1 payload used on Windows. macOS does not
+provide a public system-temperature API, so temperature and GPU fields remain
+unavailable rather than being fabricated.
+
+Now Playing supports Apple Music and Spotify through their public Apple-event
+dictionaries. macOS may ask for Automation permission the first time either
+application is queried or controlled. Other players produce a live empty state
+instead of incorrectly claiming that EchoDesk Desktop is not running.
+
+Codex usage is provided by the pinned universal helper inside
+`Contents/Helpers/CodexBarCLI`; users do not need Homebrew or a separate
+CodexBar installation. Codex requests explicitly select the OAuth source.
+
+Before a compatible Mini enters its ROM bootloader, Desktop requests a static
+“Updating EchoDesk OS” warning. The request is bounded and non-fatal for legacy
+or recovery firmware. After a verified update reconnects at the expected
+version, Desktop asks the new firmware to show the short completion screen.

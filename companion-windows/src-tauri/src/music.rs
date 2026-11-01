@@ -6,6 +6,7 @@
 use crate::serial_service::Job;
 use crate::state::AppState;
 use base64::Engine;
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
@@ -117,11 +118,30 @@ pub struct MusicCommand {
     pub action: MusicAction,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MusicHealth {
+    pub status: String,
+    pub last_sample_at: Option<DateTime<Utc>>,
+    pub error: Option<String>,
+}
+
+impl Default for MusicHealth {
+    fn default() -> Self {
+        Self {
+            status: "starting".into(),
+            last_sample_at: None,
+            error: None,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct FeedState {
     latest: Option<MusicSnapshot>,
     notification_pending: bool,
     commands: VecDeque<MusicCommand>,
+    health: MusicHealth,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -134,6 +154,9 @@ impl MusicFeed {
         let (lock, _) = &*self.inner;
         let mut state = lock.lock().unwrap();
         state.latest = Some(snapshot);
+        state.health.status = "live".into();
+        state.health.last_sample_at = Some(Utc::now());
+        state.health.error = None;
         if state.notification_pending {
             false
         } else {
@@ -169,6 +192,25 @@ impl MusicFeed {
         let (lock, wake) = &*self.inner;
         let guard = lock.lock().unwrap();
         drop(wake.wait_timeout(guard, duration));
+    }
+
+    pub fn mark_starting(&self) {
+        let (lock, _) = &*self.inner;
+        let mut state = lock.lock().unwrap();
+        state.health.status = "starting".into();
+        state.health.error = None;
+    }
+
+    pub fn mark_unavailable(&self) {
+        let (lock, _) = &*self.inner;
+        let mut state = lock.lock().unwrap();
+        state.health.status = "unavailable".into();
+        state.health.error = Some("Windows media sessions are unavailable.".into());
+    }
+
+    pub fn health(&self) -> MusicHealth {
+        let (lock, _) = &*self.inner;
+        lock.lock().unwrap().health.clone()
     }
 }
 
@@ -327,12 +369,14 @@ fn run_windows(app: AppHandle) {
     let feed = app.state::<AppState>().music.clone();
     let mut retry = Duration::from_secs(1);
     loop {
+        feed.mark_starting();
         match GlobalSystemMediaTransportControlsSessionManager::RequestAsync()
             .and_then(|operation| operation.get())
         {
             Ok(manager) => {
                 crate::serial_service::log(&app, "Windows media sessions available");
                 if let Err(error) = run_manager(&app, &feed, manager) {
+                    feed.mark_unavailable();
                     crate::serial_service::log(
                         &app,
                         format!("Windows media session restart: {error}"),
@@ -342,6 +386,7 @@ fn run_windows(app: AppHandle) {
             }
             Err(error) => {
                 publish_snapshot(&app, &feed, MusicSnapshot::empty(1));
+                feed.mark_unavailable();
                 crate::serial_service::log(
                     &app,
                     format!("Windows media sessions unavailable: {error}"),
@@ -711,6 +756,22 @@ mod tests {
             is_current: false,
             index,
         }
+    }
+
+    #[test]
+    fn feed_reports_live_and_unavailable_health_without_exposing_host_details() {
+        let feed = MusicFeed::default();
+        assert_eq!(feed.health().status, "starting");
+        assert!(feed.publish(MusicSnapshot::empty(1)));
+        assert_eq!(feed.health().status, "live");
+        assert!(feed.health().last_sample_at.is_some());
+        feed.mark_unavailable();
+        let health = feed.health();
+        assert_eq!(health.status, "unavailable");
+        assert_eq!(
+            health.error.as_deref(),
+            Some("Windows media sessions are unavailable.")
+        );
     }
 
     #[test]

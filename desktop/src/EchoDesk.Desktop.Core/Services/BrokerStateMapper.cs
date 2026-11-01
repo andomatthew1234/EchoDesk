@@ -82,10 +82,115 @@ public static class BrokerStateMapper
             Device = device,
             LastError = lastError,
             AiUsage = ParseAiUsage(payload),
+            Performance = ParseTelemetryComponent(payload, "performance"),
+            NowPlaying = ParseTelemetryComponent(payload, "nowPlaying"),
+            Clock = ParseClock(payload),
+            NotificationStack = ParseNotificationStack(payload),
+            PcDashboard = ParsePcDashboard(payload),
             FirmwareManager = ParseFirmwareManager(payload),
             WifiSetup = ParseWifiSetup(payload),
         };
     }
+
+    private static PcDashboardState ParsePcDashboard(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("pcDashboard", out var dashboard) || dashboard.ValueKind != JsonValueKind.Object)
+            return PcDashboardState.Unavailable;
+        var metrics = dashboard.TryGetProperty("state", out var state) && state.ValueKind == JsonValueKind.Object
+            ? Strings(state, "metrics") : [];
+        string[] allowed = ["battery", "microphone", "storage", "ram", "cpu", "gpu", "networkDown", "networkUp", "cpuTemperature", "gpuTemperature", "motherboardTemperature"];
+        var metricsValid = metrics.Count is >= 1 and <= 4
+                           && metrics.Distinct(StringComparer.Ordinal).Count() == metrics.Count
+                           && metrics.All(allowed.Contains);
+        return new PcDashboardState
+        {
+            Available = Bool(dashboard, "available") ?? false,
+            Protocol = Int(dashboard, "protocol") ?? 0,
+            Revision = dashboard.TryGetProperty("state", out state) && state.ValueKind == JsonValueKind.Object ? ULong(state, "revision") ?? 0 : 0,
+            Metrics = metricsValid ? metrics : ["cpu", "ram", "battery", "storage"],
+        };
+    }
+
+    private static NotificationStackState ParseNotificationStack(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("components", out var components)
+            || components.ValueKind != JsonValueKind.Object
+            || !components.TryGetProperty("notificationStack", out var component)
+            || component.ValueKind != JsonValueKind.Object)
+            return NotificationStackState.Unavailable;
+        return new NotificationStackState
+        {
+            Available = true,
+            Enabled = Bool(component, "enabled") ?? false,
+            Status = BoundedText(component, "status", 40) ?? "unavailable",
+            Permission = BoundedText(component, "permission", 40) ?? "notRequested",
+            Message = BoundedText(component, "message", 256),
+            ForwardedCount = ULong(component, "forwardedCount") ?? 0,
+            AvailableSources = Strings(component, "availableSources").Take(32).ToArray(),
+            ExcludedSources = Strings(component, "excludedSources").Take(32).ToArray(),
+        };
+    }
+
+    private static ClockUtilityState ParseClock(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("clock", out var clock) || clock.ValueKind != JsonValueKind.Object)
+            return ClockUtilityState.Unavailable;
+        var available = Bool(clock, "available") ?? false;
+        var protocol = Int(clock, "protocol") ?? 0;
+        if (!clock.TryGetProperty("state", out var state) || state.ValueKind != JsonValueKind.Object)
+            return new ClockUtilityState
+            {
+                Available = available,
+                Protocol = protocol,
+                ConfigRequestMode = ClockMode(Text(clock, "configRequestMode"), false),
+                ConfigRequestSequence = ULong(clock, "configRequestSequence") ?? 0,
+            };
+        var stopwatch = state.TryGetProperty("stopwatch", out var sw) ? sw : default;
+        var countdown = state.TryGetProperty("countdown", out var cd) ? cd : default;
+        var focus = state.TryGetProperty("focus", out var fs) ? fs : default;
+        return new ClockUtilityState
+        {
+            Available = available,
+            Protocol = protocol,
+            ConfigRequestMode = ClockMode(Text(clock, "configRequestMode"), false),
+            ConfigRequestSequence = ULong(clock, "configRequestSequence") ?? 0,
+            Revision = ULong(state, "revision") ?? 0,
+            ActiveMode = ClockMode(Text(state, "activeMode"), true) ?? "time",
+            Stopwatch = new ClockStopwatchState
+            {
+                Status = ClockStatus(Text(stopwatch, "status")),
+                ElapsedMs = Math.Min(ULong(stopwatch, "elapsedMs") ?? 0, 604_800_000),
+            },
+            Countdown = new ClockCountdownState
+            {
+                Status = ClockStatus(Text(countdown, "status")),
+                DurationSeconds = Math.Clamp(Int(countdown, "durationSeconds") ?? 300, 1, 86400),
+                RemainingSeconds = Math.Clamp(Int(countdown, "remainingSeconds") ?? 300, 0, 86400),
+                ProgressPermille = Math.Clamp(Int(countdown, "progressPermille") ?? 0, 0, 1000),
+            },
+            Focus = new ClockFocusState
+            {
+                Status = ClockStatus(Text(focus, "status")),
+                Phase = Text(focus, "phase") is "break" or "complete" ? Text(focus, "phase")! : "focus",
+                FocusMinutes = Math.Clamp(Int(focus, "focusMinutes") ?? 25, 1, 180),
+                BreakMinutes = Math.Clamp(Int(focus, "breakMinutes") ?? 5, 1, 60),
+                Rounds = Math.Clamp(Int(focus, "rounds") ?? 4, 1, 12),
+                CurrentRound = Math.Clamp(Int(focus, "currentRound") ?? 1, 0, 12),
+                RemainingSeconds = Math.Clamp(Int(focus, "remainingSeconds") ?? 1500, 0, 10800),
+                ProgressPermille = Math.Clamp(Int(focus, "progressPermille") ?? 0, 0, 1000),
+            },
+        };
+    }
+
+    private static string ClockStatus(string? value) =>
+        value is "running" or "paused" or "complete" ? value : "idle";
+
+    private static string? ClockMode(string? value, bool includeTime) => value switch
+    {
+        "stopwatch" or "countdown" or "focus" => value,
+        "time" when includeTime => value,
+        _ => null,
+    };
 
     private static WifiSetupState ParseWifiSetup(JsonElement payload)
     {
@@ -234,6 +339,30 @@ public static class BrokerStateMapper
             Fetching = Bool(component, "fetching") ?? false,
             Source = Text(component, "source"),
             CliVersion = Text(component, "cliVersion"),
+            DiagnosticCode = BoundedText(component, "diagnosticCode", 64),
+            ExitCode = Int(component, "exitCode"),
+            DiagnosticDetail = BoundedText(component, "diagnosticDetail", 256),
+            StderrSummary = BoundedText(component, "stderrSummary", 256),
+        };
+    }
+
+    private static TelemetryComponentState ParseTelemetryComponent(JsonElement payload, string name)
+    {
+        if (!payload.TryGetProperty("components", out var components)
+            || components.ValueKind != JsonValueKind.Object
+            || !components.TryGetProperty(name, out var component)
+            || component.ValueKind != JsonValueKind.Object)
+        {
+            return TelemetryComponentState.Unavailable;
+        }
+
+        return new TelemetryComponentState
+        {
+            Available = true,
+            Status = BoundedText(component, "status", 40) ?? "unavailable",
+            LastSampleAt = DateTime(component, "lastSampleAt"),
+            Error = BoundedText(component, "error", 256),
+            CapabilityNegotiated = Bool(component, "capabilityNegotiated") ?? false,
         };
     }
 

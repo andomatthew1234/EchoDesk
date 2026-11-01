@@ -33,7 +33,8 @@ foreach ($copy in @(
     'Repair and reset EchoDesk OS if on older firmware', 'Fully reset EchoDesk without checks',
     'Setup EchoDesk Now',
     'Welcome to the EchoDesk Desktop app', 'Setup your first EchoDesk now?',
-    'Continue', 'Yes', 'Not now'
+    'Continue', 'Yes', 'Not now', 'My device', 'Notification Stack',
+    'Set up notifications', 'APP NOTIFICATIONS ONLY'
 )) { Assert-Contains $source $copy }
 
 foreach ($stateFeature in @(
@@ -51,8 +52,25 @@ foreach ($stateFeature in @(
     'EchoDeskFirstRunOnboardingCompletedV1', 'presentEchoDeskFirstRunOnboardingIfNeeded',
     'completeEchoDeskFirstRunOnboarding(openSetup: true)',
     'completeEchoDeskFirstRunOnboarding(openSetup: false)',
-    'UserDefaults.standard.set(true, forKey: echoDeskFirstRunOnboardingKey)'
+    'UserDefaults.standard.set(true, forKey: echoDeskFirstRunOnboardingKey)',
+    '("myDevice", "My device", "desktopcomputer")',
+    'buttons.forEach { $0.isEnabled = ready && supportedApps.contains(app) }',
+    'showEchoDeskClockUtility(requestedMode:',
+    '"cmd": "echodesk_clock_get_state", "version": 1, "requestId": request',
+    'sendEchoDeskCommand("echodesk_clock_control"',
+    '"durationSeconds": minutes * 60',
+    '"focusMinutes": focus', '"breakMinutes": pause', '"rounds": rounds',
+    'UNUserNotificationCenter.current().getDeliveredNotifications',
+    "macOS has no public API for reading other apps’ Notification Centre history.",
+    'sendEchoDeskCommand("echodesk_notifications_push"'
 )) { Assert-Contains $source $stateFeature }
+
+foreach ($clockBridge in @(
+    'case "echodesk_clock_config_request":',
+    'self?.onClockConfigRequest?(mode)',
+    'showEchoDeskClockUtility(requestedMode: mode)',
+    'deviceEchoDeskClockProtocol = json["echoDeskClockProtocol"] as? Int'
+)) { Assert-Contains $main $clockBridge }
 
 $onboardingStart = $source.IndexOf('private func presentEchoDeskFirstRunOnboardingIfNeeded')
 $onboardingEnd = $source.IndexOf('private func buildEchoDeskSidebar', $onboardingStart)
@@ -102,6 +120,9 @@ if ($source.Contains('Terms & Privacy') -or $source.Contains('IsGuidedTermsStep'
 }
 Assert-Contains $main 'let kAppVersion = "0.2.8"'
 Assert-Contains $main 'removeMenuBarStatusItem()'
+Assert-Contains $main 'var availableUpdateAsset: GitHubAsset?'
+Assert-Contains $main '$0.name.hasPrefix("EchoDesk-Desktop-v")'
+Assert-Contains $main '$0.name.hasSuffix("-macos-universal.zip")'
 Assert-Contains $build 'APP_VERSION="0.2.8"'
 Assert-Contains $build 'SettingsWindow+EchoDeskDesktop.swift'
 Assert-Contains $workflow 'EchoDesk-Desktop-v0.2.8-macos-universal'

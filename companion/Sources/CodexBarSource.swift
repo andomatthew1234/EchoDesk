@@ -333,18 +333,21 @@ final class CodexBarSource {
 
     /// Suchpfade fuer das Binary.
     ///
-    /// Wichtig: Das CLI ist KEIN eigenstaendiges Homebrew-Formula, sondern liegt
-    /// im App-Bundle (`CodexBar.app/Contents/Helpers/CodexBarCLI`, ~32 MB); das
-    /// Cask legt in /opt/homebrew/bin nur einen Symlink dorthin. Deshalb steht
-    /// der direkte Bundle-Pfad mit in der Liste — dann funktioniert es auch bei
-    /// Nutzern ohne Homebrew, die die App per DMG installiert haben.
-    static let cliSearchPaths = [
+    /// EchoDesk packages the pinned helper in its own app bundle. External
+    /// CodexBar/Homebrew paths remain fallbacks for development and the
+    /// unbranded companion, but never take precedence over the verified copy.
+    static var cliSearchPaths: [String] {
+        let bundled = (Bundle.main.bundlePath as NSString)
+            .appendingPathComponent("Contents/Helpers/CodexBarCLI")
+        return [
+        bundled,
         "/opt/homebrew/bin/codexbar",
         "/usr/local/bin/codexbar",
         "/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI",
         NSString("~/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI").expandingTildeInPath,
         "/usr/bin/codexbar",
-    ]
+        ]
+    }
 
     private(set) var provider: String
     private(set) var status: CodexBarStatus = .notYet
@@ -535,7 +538,14 @@ final class CodexBarSource {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = ["usage", "--provider", provider, "--json"]
+        var arguments = ["usage", "--provider", provider, "--json"]
+        // OAuth avoids browser-cookie probing for Codex and behaves identically
+        // in the packaged Windows and macOS companions. Other providers keep
+        // their own supported default source.
+        if provider == CodexBarProvider.codex.rawValue {
+            arguments += ["--source", "oauth"]
+        }
+        process.arguments = arguments
         let stdout = Pipe()
         let stderr = Pipe()
         process.standardOutput = stdout

@@ -1,16 +1,17 @@
 //! Tauri-Hülle der AI-Monitor-App: Tray, Einstellungsfenster, Abrufzyklus.
 //! Die Fachlogik liegt in `aimonitor-core`.
 
-mod claude_code;
 mod audio_visualizer;
+mod claude_code;
 mod commands;
 mod desktop_broker;
-mod flash;
 mod firmware_manager;
 mod firmware_updates;
-mod plugins;
-mod performance;
+mod flash;
 mod music;
+mod notifications;
+mod performance;
+mod plugins;
 mod poll;
 mod registry;
 mod serial_service;
@@ -20,8 +21,8 @@ mod state;
 mod timezone;
 mod tray;
 mod updates;
-mod window;
 mod wifi_setup;
+mod window;
 
 use aimonitor_core::Source;
 use settings::Settings;
@@ -79,11 +80,12 @@ fn dev_action(app: tauri::AppHandle, action: String) {
                     }
                     // AIMONITOR_DEV_AUTOPICKED=1 flasht wie die eigene Standard-Wahl der
                     // App, um das Nachflashen nach dem Panel-Abgleich zu testen.
-                    let origin = if std::env::var("AIMONITOR_DEV_AUTOPICKED").is_ok_and(|v| v == "1") {
-                        flash::FlashOrigin::AutoPicked
-                    } else {
-                        flash::FlashOrigin::User
-                    };
+                    let origin =
+                        if std::env::var("AIMONITOR_DEV_AUTOPICKED").is_ok_and(|v| v == "1") {
+                            flash::FlashOrigin::AutoPicked
+                        } else {
+                            flash::FlashOrigin::User
+                        };
                     match flash::run_origin(&app, variant, origin) {
                         Ok(o) => println!(
                             "[dev] flash_firmware: {}",
@@ -95,7 +97,13 @@ fn dev_action(app: tauri::AppHandle, action: String) {
                 "detect" => {
                     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
                     while std::time::Instant::now() < deadline
-                        && app.state::<AppState>().connection.lock().unwrap().port.is_none()
+                        && app
+                            .state::<AppState>()
+                            .connection
+                            .lock()
+                            .unwrap()
+                            .port
+                            .is_none()
                     {
                         std::thread::sleep(std::time::Duration::from_millis(500));
                     }
@@ -153,8 +161,8 @@ pub fn run() {
             // ohne den Umweg über das Tray-Menü.
             if !internal_host
                 && std::env::var("AIMONITOR_OPEN_SETTINGS")
-                .map(|v| v == "1")
-                .unwrap_or(false)
+                    .map(|v| v == "1")
+                    .unwrap_or(false)
             {
                 window::open_settings(&handle);
             }
@@ -169,6 +177,7 @@ pub fn run() {
             performance::start(handle.clone());
             music::start(handle.clone());
             audio_visualizer::start(handle.clone());
+            notifications::start(handle.clone());
             poll::start_timer(handle);
             Ok(())
         })

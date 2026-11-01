@@ -20,9 +20,14 @@
 #include "providers.h"
 #include "plugin_scene.h"
 #if defined(ECHODESK_OS)
+#include "echodesk_clock.h"
 #include "echodesk_control.h"
+#include "echodesk_notifications.h"
 #include "echodesk_setup.h"
+#include "echodesk_update.h"
+#include "my_device_health.h"
 #include "performance_data.h"
+#include "pc_dashboard.h"
 #include "music_data.h"
 #include "now_playing_layout.h"
 #include "ui_echodesk.h"
@@ -107,6 +112,12 @@ static bool host_tz_set = false;
 #if defined(ECHODESK_OS)
 static uint32_t echodesk_settings_revision = 1;
 static bool echodesk_state_dirty = false;
+static bool echodesk_update_ack_pending = false;
+static uint32_t echodesk_update_request_id = 0;
+static const char *echodesk_update_command = nullptr;
+static uint32_t echodesk_clock_last_emitted_revision = 0;
+static uint32_t echodesk_clock_last_stream_ms = 0;
+static constexpr uint32_t ECHODESK_CLOCK_STREAM_INTERVAL_MS = 1000;
 #endif
 
 static void print_view_state();
@@ -153,6 +164,40 @@ void serial_echodesk_state_changed() {
     echodesk_state_dirty = true;
 #endif
 }
+
+#if defined(ECHODESK_OS)
+bool serial_echodesk_clock_request_configuration(EchoDeskClockMode mode) {
+    if (mode != EchoDeskClockMode::COUNTDOWN && mode != EchoDeskClockMode::FOCUS) {
+        return false;
+    }
+    MyDeviceHealthSnapshot health{};
+    my_device_health_capture(millis(), health);
+    if (health.desktop.state != MyDeviceHealthState::LIVE) return false;
+
+    JsonDocument event;
+    event["type"] = "echodesk_clock_config_request";
+    event["version"] = ECHODESK_CLOCK_PROTOCOL_VERSION;
+    event["mode"] = echodesk_clock_mode_name(mode);
+    serializeJson(event, Serial);
+    Serial.println();
+    return true;
+}
+
+bool serial_echodesk_pc_dashboard_apply_local_config(
+    const PcDashboardConfig &config) {
+    const PcDashboardResult result =
+        pc_dashboard_set_config(config, pc_dashboard_revision());
+    if (result != PcDashboardResult::OK) return false;
+    g_config.pc_dashboard_metric_count = config.count;
+    for (uint8_t i = 0; i < PC_DASHBOARD_WIDGET_LIMIT; ++i) {
+        g_config.pc_dashboard_metrics[i] =
+            static_cast<uint8_t>(config.metrics[i]);
+    }
+    config_save(g_config);
+    serial_echodesk_state_changed();
+    return true;
+}
+#endif
 
 // ============================================================
 // Provider helpers
@@ -482,6 +527,9 @@ static void handle_set_language(JsonDocument &doc) {
 
 // --- get_info ---
 static void handle_get_info() {
+#if defined(ECHODESK_OS)
+    my_device_health_note_host_activity(millis());
+#endif
     const char *orient;
     switch (g_config.orientation) {
         case ORIENTATION_LANDSCAPE_LEFT:  orient = "landscape_left";  break;
@@ -504,7 +552,9 @@ static void handle_get_info() {
         "\"musicBackgroundProtocol\":1,\"musicVisualizerProtocol\":1,";
     const char *echodesk_control_capability =
         "\"echoDeskControlProtocol\":1,\"echoDeskSetupProtocol\":1,"
-        "\"echoDeskWifiSetupProtocol\":1,";
+        "\"echoDeskWifiSetupProtocol\":1,\"echoDeskUpdateProtocol\":1,"
+        "\"echoDeskClockProtocol\":1,\"echoDeskNotificationProtocol\":1,"
+        "\"echoDeskPcDashboardProtocol\":1,";
 #else
     const char *echodesk_capabilities = "";
     const char *echodesk_control_capability = "";
@@ -558,7 +608,8 @@ static void print_echodesk_state(uint32_t request_id = 0,
     }
     JsonArray apps = response["supportedApps"].to<JsonArray>();
     for (const char *app : {"home", "codex", "clock", "performance",
-                            "nowPlaying", "settings"}) {
+                            "nowPlaying", "notificationStack", "pcDashboard", "myDevice",
+                            "settings"}) {
         apps.add(app);
     }
     JsonObject settings = response["settings"].to<JsonObject>();
@@ -579,6 +630,11 @@ static void print_echodesk_state(uint32_t request_id = 0,
         echodesk_codex_display_name(g_config.codex_preferred_display);
     settings["performanceDefaultView"] =
         echodesk_performance_view_name(g_config.performance_default_view);
+    JsonArray pc_dashboard_metrics = settings["pcDashboardMetrics"].to<JsonArray>();
+    const PcDashboardConfig &pc_dashboard_config = pc_dashboard_get_config();
+    for (uint8_t i = 0; i < pc_dashboard_config.count; ++i) {
+        pc_dashboard_metrics.add(pc_dashboard_metric_name(pc_dashboard_config.metrics[i]));
+    }
     JsonArray unsupported = response["unsupportedSettings"].to<JsonArray>();
     (void)unsupported;
     serializeJson(response, Serial);
@@ -586,12 +642,154 @@ static void print_echodesk_state(uint32_t request_id = 0,
 }
 
 static void print_echodesk_ack(uint32_t request_id, const char *command) {
+#if defined(ECHODESK_OS)
+    my_device_health_note_host_activity(millis());
+#endif
     JsonDocument response;
     response["type"] = "echodesk_ack";
     response["version"] = ECHODESK_CONTROL_VERSION;
     response["requestId"] = request_id;
     response["command"] = command;
     response["revision"] = echodesk_settings_revision;
+    serializeJson(response, Serial);
+    Serial.println();
+}
+
+static void print_echodesk_clock_state(uint32_t request_id = 0,
+                                       bool include_request_id = false) {
+    EchoDeskClockSnapshot snapshot{};
+    echodesk_clock_capture(millis(), snapshot);
+    JsonDocument response;
+    response["type"] = "echodesk_clock_state";
+    response["version"] = ECHODESK_CLOCK_PROTOCOL_VERSION;
+    if (include_request_id) response["requestId"] = request_id;
+    response["revision"] = snapshot.revision;
+    response["activeMode"] = echodesk_clock_mode_name(snapshot.active_mode);
+
+    JsonObject stopwatch = response["stopwatch"].to<JsonObject>();
+    stopwatch["status"] = echodesk_clock_status_name(snapshot.stopwatch.status);
+    stopwatch["elapsedMs"] = snapshot.stopwatch.elapsed_ms;
+
+    JsonObject countdown = response["countdown"].to<JsonObject>();
+    countdown["status"] = echodesk_clock_status_name(snapshot.countdown.status);
+    countdown["durationSeconds"] = snapshot.countdown.duration_seconds;
+    countdown["remainingSeconds"] = snapshot.countdown.remaining_seconds;
+    countdown["progressPermille"] = snapshot.countdown.progress_per_mille;
+
+    JsonObject focus = response["focus"].to<JsonObject>();
+    focus["status"] = echodesk_clock_status_name(snapshot.focus.status);
+    focus["phase"] = echodesk_focus_phase_name(snapshot.focus.phase);
+    focus["focusMinutes"] = snapshot.focus.focus_minutes;
+    focus["breakMinutes"] = snapshot.focus.break_minutes;
+    focus["rounds"] = snapshot.focus.rounds;
+    focus["currentRound"] = snapshot.focus.current_round;
+    focus["remainingSeconds"] = snapshot.focus.remaining_seconds;
+    focus["progressPermille"] = snapshot.focus.progress_per_mille;
+
+    serializeJson(response, Serial);
+    Serial.println();
+    echodesk_clock_last_emitted_revision = snapshot.revision;
+    echodesk_clock_last_stream_ms = millis();
+}
+
+static void print_echodesk_notifications_state(uint32_t request_id = 0,
+                                               bool include_request_id = false) {
+    EchoDeskNotificationSnapshot snapshot{};
+    echodesk_notifications_capture(snapshot);
+    JsonDocument response;
+    response["type"] = "echodesk_notifications_state";
+    response["version"] = ECHODESK_NOTIFICATION_PROTOCOL_VERSION;
+    if (include_request_id) response["requestId"] = request_id;
+    response["revision"] = snapshot.revision;
+    response["enabled"] = snapshot.enabled;
+    response["count"] = snapshot.count;
+    JsonArray notifications = response["notifications"].to<JsonArray>();
+    for (size_t i = 0; i < snapshot.count; ++i) {
+        const EchoDeskNotificationItem &item = snapshot.items[i];
+        JsonObject encoded = notifications.add<JsonObject>();
+        encoded["id"] = item.id;
+        encoded["timestamp"] = item.timestamp_epoch_seconds;
+        encoded["source"] = item.source;
+        encoded["title"] = item.title;
+        encoded["body"] = item.body;
+    }
+    serializeJson(response, Serial);
+    Serial.println();
+}
+
+static const char *pc_dashboard_host_state_name(PcDashboardConnectionState state) {
+    switch (state) {
+        case PcDashboardConnectionState::LIVE: return "live";
+        case PcDashboardConnectionState::STALE: return "stale";
+        case PcDashboardConnectionState::DISCONNECTED: return "disconnected";
+        case PcDashboardConnectionState::NEVER_RECEIVED:
+        default: return "neverReceived";
+    }
+}
+
+static const char *pc_dashboard_performance_state_name(
+    PerformanceConnectionState state) {
+    switch (state) {
+        case PerformanceConnectionState::LIVE: return "live";
+        case PerformanceConnectionState::STALE: return "stale";
+        case PerformanceConnectionState::DISCONNECTED: return "disconnected";
+        case PerformanceConnectionState::NEVER_RECEIVED:
+        default: return "neverReceived";
+    }
+}
+
+static void print_echodesk_pc_dashboard_state(uint32_t request_id = 0,
+                                               bool include_request_id = false) {
+    PcDashboardSnapshot snapshot{};
+    pc_dashboard_capture(millis(), snapshot);
+    JsonDocument response;
+    response["type"] = "echodesk_pc_dashboard_state";
+    response["version"] = PC_DASHBOARD_PROTOCOL_VERSION;
+    if (include_request_id) response["requestId"] = request_id;
+    response["revision"] = snapshot.revision;
+    JsonArray metrics = response["metrics"].to<JsonArray>();
+    for (uint8_t i = 0; i < snapshot.config.count; ++i) {
+        metrics.add(pc_dashboard_metric_name(snapshot.config.metrics[i]));
+    }
+    response["hostState"] = pc_dashboard_host_state_name(snapshot.host_state);
+    response["performanceState"] =
+        pc_dashboard_performance_state_name(snapshot.performance_state);
+    JsonObject host = response["host"].to<JsonObject>();
+    if (snapshot.has_host_sample) {
+        host["timestamp"] = snapshot.host.timestamp_epoch;
+        if (snapshot.host.valid_mask & PC_DASH_HOST_BATTERY) {
+            host["batteryPct"] = snapshot.host.battery_pct;
+            host["charging"] = snapshot.host.charging;
+        }
+        if (snapshot.host.valid_mask & PC_DASH_HOST_MICROPHONE) {
+            host["microphoneInUse"] = snapshot.host.microphone_in_use;
+        }
+        if (snapshot.host.valid_mask & PC_DASH_HOST_STORAGE) {
+            host["storageUsedBytes"] = snapshot.host.storage_used_bytes;
+            host["storageTotalBytes"] = snapshot.host.storage_total_bytes;
+        }
+    }
+    JsonObject performance = response["performance"].to<JsonObject>();
+    if (snapshot.has_performance_sample) {
+        performance["timestamp"] = snapshot.performance.timestamp_epoch;
+        if (snapshot.performance.metric_valid_mask & PERF_METRIC_CPU)
+            performance["cpuPct"] = snapshot.performance.cpu_pct;
+        if (snapshot.performance.metric_valid_mask & PERF_METRIC_GPU)
+            performance["gpuPct"] = snapshot.performance.gpu_pct;
+        if (snapshot.performance.metric_valid_mask & PERF_METRIC_RAM)
+            performance["ramPct"] = snapshot.performance.ram_pct;
+        if (snapshot.performance.metric_valid_mask & PERF_METRIC_NETWORK_DOWN)
+            performance["networkDownBps"] = snapshot.performance.network_down_bps;
+        if (snapshot.performance.metric_valid_mask & PERF_METRIC_NETWORK_UP)
+            performance["networkUpBps"] = snapshot.performance.network_up_bps;
+        if (snapshot.performance.temperature_valid_mask & PERF_TEMP_CPU)
+            performance["cpuTemperatureC"] = snapshot.performance.cpu_temp_c;
+        if (snapshot.performance.temperature_valid_mask & PERF_TEMP_GPU)
+            performance["gpuTemperatureC"] = snapshot.performance.gpu_temp_c;
+        if (snapshot.performance.temperature_valid_mask & PERF_TEMP_MOTHERBOARD)
+            performance["motherboardTemperatureC"] =
+                snapshot.performance.motherboard_temp_c;
+    }
     serializeJson(response, Serial);
     Serial.println();
 }
@@ -636,7 +834,258 @@ static bool echodesk_setup_request(JsonDocument &doc, uint32_t &request_id) {
 static void handle_echodesk_get_state(JsonDocument &doc) {
     uint32_t request_id;
     if (!echodesk_request_header(doc, request_id)) return;
+    my_device_health_note_host_activity(millis());
     print_echodesk_state(request_id, true);
+}
+
+static void handle_echodesk_clock_get_state(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_request_header(doc, request_id)) return;
+    if (doc.size() != 3) {
+        print_echodesk_error(request_id, "invalid_request",
+                             "clock state accepts only cmd, version and requestId");
+        return;
+    }
+    my_device_health_note_host_activity(millis());
+    print_echodesk_clock_state(request_id, true);
+}
+
+static const char *clock_result_message(EchoDeskClockResult result) {
+    switch (result) {
+        case EchoDeskClockResult::INVALID_MODE: return "invalid clock mode";
+        case EchoDeskClockResult::INVALID_ACTION: return "action is unsupported for this mode";
+        case EchoDeskClockResult::INVALID_CONFIG: return "clock configuration is out of range";
+        case EchoDeskClockResult::INVALID_STATE: return "clock action is invalid in the current state";
+        case EchoDeskClockResult::OK: return "accepted";
+    }
+    return "invalid clock request";
+}
+
+static void handle_echodesk_clock_control(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_request_header(doc, request_id)) return;
+    if (!doc["action"].is<const char *>() || !doc["mode"].is<const char *>()) {
+        print_echodesk_error(request_id, "invalid_request",
+                             "clock action and mode are required");
+        return;
+    }
+
+    EchoDeskClockCommand command{};
+    if (!echodesk_clock_parse_action(doc["action"].as<const char *>(), command.action) ||
+        !echodesk_clock_parse_mode(doc["mode"].as<const char *>(), command.mode)) {
+        print_echodesk_error(request_id, "invalid_request",
+                             "clock action or mode is invalid");
+        return;
+    }
+
+    if (command.action == EchoDeskClockAction::CONFIGURE) {
+        if (command.mode == EchoDeskClockMode::COUNTDOWN) {
+            if (doc.size() != 6 || !doc["durationSeconds"].is<uint32_t>()) {
+                print_echodesk_error(request_id, "invalid_request",
+                                     "countdown configuration requires durationSeconds only");
+                return;
+            }
+            command.duration_seconds = doc["durationSeconds"].as<uint32_t>();
+        } else if (command.mode == EchoDeskClockMode::FOCUS) {
+            if (doc.size() != 8 || !doc["focusMinutes"].is<uint16_t>() ||
+                !doc["breakMinutes"].is<uint16_t>() || !doc["rounds"].is<uint8_t>()) {
+                print_echodesk_error(request_id, "invalid_request",
+                                     "focus configuration requires focusMinutes, breakMinutes and rounds only");
+                return;
+            }
+            command.focus_minutes = doc["focusMinutes"].as<uint16_t>();
+            command.break_minutes = doc["breakMinutes"].as<uint16_t>();
+            command.rounds = doc["rounds"].as<uint8_t>();
+        } else {
+            print_echodesk_error(request_id, "invalid_request",
+                                 "only countdown and focus can be configured");
+            return;
+        }
+    } else if (doc.size() != 5) {
+        print_echodesk_error(request_id, "invalid_request",
+                             "clock action accepts only action and mode");
+        return;
+    }
+
+    const EchoDeskClockResult result = echodesk_clock_apply(command, millis());
+    if (result != EchoDeskClockResult::OK) {
+        print_echodesk_error(request_id,
+                             result == EchoDeskClockResult::INVALID_STATE
+                                 ? "invalid_state" : "invalid_request",
+                             clock_result_message(result));
+        return;
+    }
+    // print_echodesk_ack is the single accepted-command activity hook. Invalid
+    // requests above never make a disconnected Desktop appear live.
+    print_echodesk_ack(request_id, "echodesk_clock_control");
+    print_echodesk_clock_state();
+}
+
+static bool notification_request_size(JsonDocument &doc, uint32_t request_id,
+                                      size_t expected, const char *message) {
+    if (doc.size() == expected) return true;
+    print_echodesk_error(request_id, "invalid_request", message);
+    return false;
+}
+
+static void handle_echodesk_notifications_get_state(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_request_header(doc, request_id) ||
+        !notification_request_size(doc, request_id, 3,
+                                   "notification state accepts only cmd, version and requestId")) {
+        return;
+    }
+    my_device_health_note_host_activity(millis());
+    print_echodesk_notifications_state(request_id, true);
+}
+
+static void handle_echodesk_notifications_set_enabled(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_request_header(doc, request_id) ||
+        !notification_request_size(doc, request_id, 4,
+                                   "notification setup requires enabled only")) {
+        return;
+    }
+    if (!doc["enabled"].is<bool>()) {
+        print_echodesk_error(request_id, "invalid_request", "enabled must be boolean");
+        return;
+    }
+    echodesk_notifications_set_enabled(doc["enabled"].as<bool>());
+    print_echodesk_ack(request_id, "echodesk_notifications_set_enabled");
+    print_echodesk_notifications_state();
+}
+
+static void handle_echodesk_notifications_push(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_request_header(doc, request_id) ||
+        !notification_request_size(
+            doc, request_id, 8,
+            "notification push requires id, timestamp, source, title and body only")) {
+        return;
+    }
+    if (!doc["id"].is<uint32_t>() || !doc["timestamp"].is<uint64_t>() ||
+        !doc["source"].is<const char *>() || !doc["title"].is<const char *>() ||
+        !doc["body"].is<const char *>()) {
+        print_echodesk_error(request_id, "invalid_request",
+                             "notification fields have invalid types");
+        return;
+    }
+    EchoDeskNotificationInput input{};
+    input.id = doc["id"].as<uint32_t>();
+    input.timestamp_epoch_seconds = doc["timestamp"].as<uint64_t>();
+    input.source = doc["source"].as<const char *>();
+    input.title = doc["title"].as<const char *>();
+    input.body = doc["body"].as<const char *>();
+    const EchoDeskNotificationResult result = echodesk_notifications_push(input);
+    if (result != EchoDeskNotificationResult::OK) {
+        const char *code = result == EchoDeskNotificationResult::NOT_ENABLED
+            ? "disabled" : "invalid_request";
+        print_echodesk_error(request_id, code,
+                             echodesk_notification_result_message(result));
+        return;
+    }
+    print_echodesk_ack(request_id, "echodesk_notifications_push");
+    print_echodesk_notifications_state();
+}
+
+static void handle_echodesk_notifications_dismiss(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_request_header(doc, request_id) ||
+        !notification_request_size(doc, request_id, 4,
+                                   "notification dismiss requires id only")) {
+        return;
+    }
+    if (!doc["id"].is<uint32_t>()) {
+        print_echodesk_error(request_id, "invalid_request", "id must be numeric");
+        return;
+    }
+    const EchoDeskNotificationResult result =
+        echodesk_notifications_dismiss(doc["id"].as<uint32_t>());
+    if (result != EchoDeskNotificationResult::OK) {
+        print_echodesk_error(request_id,
+                             result == EchoDeskNotificationResult::NOT_FOUND
+                                 ? "not_found" : "invalid_request",
+                             echodesk_notification_result_message(result));
+        return;
+    }
+    print_echodesk_ack(request_id, "echodesk_notifications_dismiss");
+    print_echodesk_notifications_state();
+}
+
+static void handle_echodesk_notifications_clear(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_request_header(doc, request_id) ||
+        !notification_request_size(doc, request_id, 3,
+                                   "notification clear accepts only cmd, version and requestId")) {
+        return;
+    }
+    echodesk_notifications_clear();
+    print_echodesk_ack(request_id, "echodesk_notifications_clear");
+    print_echodesk_notifications_state();
+}
+
+static void handle_echodesk_pc_dashboard_get_state(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_request_header(doc, request_id)) return;
+    if (doc.size() != 3) {
+        print_echodesk_error(request_id, "invalid_request",
+                             "PC Dashboard state accepts only cmd, version and requestId");
+        return;
+    }
+    my_device_health_note_host_activity(millis());
+    print_echodesk_pc_dashboard_state(request_id, true);
+}
+
+static void persist_pc_dashboard_config(const PcDashboardConfig &config) {
+    g_config.pc_dashboard_metric_count = config.count;
+    for (uint8_t i = 0; i < PC_DASHBOARD_WIDGET_LIMIT; ++i) {
+        g_config.pc_dashboard_metrics[i] = static_cast<uint8_t>(config.metrics[i]);
+    }
+    config_save(g_config);
+}
+
+static void handle_echodesk_pc_dashboard_set_config(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_request_header(doc, request_id)) return;
+    if (doc.size() != 5 || !doc["baseRevision"].is<uint32_t>() ||
+        !doc["metrics"].is<JsonArrayConst>()) {
+        print_echodesk_error(request_id, "invalid_request",
+                             "PC Dashboard configuration requires baseRevision and metrics only");
+        return;
+    }
+    JsonArrayConst encoded = doc["metrics"].as<JsonArrayConst>();
+    PcDashboardConfig config{};
+    if (encoded.size() < PC_DASHBOARD_MIN_WIDGETS ||
+        encoded.size() > PC_DASHBOARD_MAX_WIDGETS) {
+        print_echodesk_error(request_id, "invalid_request",
+                             "select between one and four PC Dashboard metrics");
+        return;
+    }
+    config.count = static_cast<uint8_t>(encoded.size());
+    uint8_t index = 0;
+    for (JsonVariantConst value : encoded) {
+        if (!value.is<const char *>() ||
+            !pc_dashboard_metric_from_name(value.as<const char *>(),
+                                           config.metrics[index++])) {
+            print_echodesk_error(request_id, "invalid_request",
+                                 "unknown PC Dashboard metric");
+            return;
+        }
+    }
+    const PcDashboardResult result = pc_dashboard_set_config(
+        config, doc["baseRevision"].as<uint32_t>());
+    if (result != PcDashboardResult::OK) {
+        print_echodesk_error(
+            request_id,
+            result == PcDashboardResult::STALE_REVISION
+                ? "stale_revision" : "invalid_request",
+            pc_dashboard_result_message(result));
+        return;
+    }
+    persist_pc_dashboard_config(config);
+    serial_echodesk_state_changed();
+    print_echodesk_ack(request_id, "echodesk_pc_dashboard_set_config");
+    print_echodesk_pc_dashboard_state();
 }
 
 static void handle_echodesk_open_app(JsonDocument &doc) {
@@ -877,6 +1326,28 @@ static void handle_echodesk_factory_reset(JsonDocument &doc) {
     print_echodesk_ack(request_id, "echodesk_factory_reset");
     ui_echodesk_setup_state_changed();
 }
+
+static void handle_echodesk_update_screen(JsonDocument &doc,
+                                          const char *command) {
+    uint32_t request_id;
+    if (!echodesk_setup_request(doc, request_id)) return;
+    if (echodesk_update_ack_pending) {
+        print_echodesk_error(request_id, "busy", "update screen is already pending");
+        return;
+    }
+    EchoDeskUpdateScreen screen = EchoDeskUpdateScreen::NONE;
+    uint32_t dismiss_after_ms = 0;
+    if (!echodesk_update_parse_command(command, screen, dismiss_after_ms) ||
+        !ui_echodesk_request_update_screen(screen, dismiss_after_ms)) {
+        print_echodesk_error(request_id, "busy", "update screen is unavailable");
+        return;
+    }
+    echodesk_update_ack_pending = true;
+    echodesk_update_request_id = request_id;
+    echodesk_update_command = screen == EchoDeskUpdateScreen::COMPLETE
+        ? "echodesk_update_complete"
+        : "echodesk_prepare_update";
+}
 #endif
 
 // --- reboot ---
@@ -1047,6 +1518,24 @@ static bool parse_command(JsonDocument &doc) {
 #if defined(ECHODESK_OS)
     } else if (strcmp(cmd, "echodesk_get_state") == 0) {
         handle_echodesk_get_state(doc);
+    } else if (strcmp(cmd, "echodesk_clock_get_state") == 0) {
+        handle_echodesk_clock_get_state(doc);
+    } else if (strcmp(cmd, "echodesk_clock_control") == 0) {
+        handle_echodesk_clock_control(doc);
+    } else if (strcmp(cmd, "echodesk_notifications_get_state") == 0) {
+        handle_echodesk_notifications_get_state(doc);
+    } else if (strcmp(cmd, "echodesk_notifications_set_enabled") == 0) {
+        handle_echodesk_notifications_set_enabled(doc);
+    } else if (strcmp(cmd, "echodesk_notifications_push") == 0) {
+        handle_echodesk_notifications_push(doc);
+    } else if (strcmp(cmd, "echodesk_notifications_dismiss") == 0) {
+        handle_echodesk_notifications_dismiss(doc);
+    } else if (strcmp(cmd, "echodesk_notifications_clear") == 0) {
+        handle_echodesk_notifications_clear(doc);
+    } else if (strcmp(cmd, "echodesk_pc_dashboard_get_state") == 0) {
+        handle_echodesk_pc_dashboard_get_state(doc);
+    } else if (strcmp(cmd, "echodesk_pc_dashboard_set_config") == 0) {
+        handle_echodesk_pc_dashboard_set_config(doc);
     } else if (strcmp(cmd, "echodesk_open_app") == 0) {
         handle_echodesk_open_app(doc);
     } else if (strcmp(cmd, "echodesk_set_settings") == 0) {
@@ -1059,6 +1548,9 @@ static bool parse_command(JsonDocument &doc) {
         handle_echodesk_setup_complete(doc);
     } else if (strcmp(cmd, "echodesk_factory_reset") == 0) {
         handle_echodesk_factory_reset(doc);
+    } else if (strcmp(cmd, "echodesk_prepare_update") == 0 ||
+               strcmp(cmd, "echodesk_update_complete") == 0) {
+        handle_echodesk_update_screen(doc, cmd);
 #endif
     } else if (strcmp(cmd, "reboot") == 0) {
         handle_reboot();
@@ -1276,6 +1768,111 @@ static void parse_credits(JsonObject usage) {
 // ============================================================
 // Helper: parse JSON and update state
 // ============================================================
+#if defined(ECHODESK_OS)
+enum class PcDashboardFrameResult : uint8_t {
+    NOT_PC_DASHBOARD = 0,
+    ACCEPTED,
+    REJECTED,
+};
+
+static bool pc_dashboard_frame_key_allowed(const char *key) {
+    static const char *allowed[] = {
+        "type", "version", "timestamp", "connected", "batteryPct",
+        "charging", "microphoneInUse", "storageUsedBytes",
+        "storageTotalBytes", "frameId", "schemaVersion",
+    };
+    for (const char *candidate : allowed) {
+        if (strcmp(key, candidate) == 0) return true;
+    }
+    return false;
+}
+
+static PcDashboardFrameResult parse_pc_dashboard_frame(
+    JsonDocument &doc, uint32_t now_ms, const char **error_out) {
+    if (error_out) *error_out = nullptr;
+    const char *type = doc["type"] | "";
+    if (strcmp(type, "pc_dashboard_sample") != 0) {
+        return PcDashboardFrameResult::NOT_PC_DASHBOARD;
+    }
+    auto reject = [&](const char *message) {
+        if (error_out) *error_out = message;
+        return PcDashboardFrameResult::REJECTED;
+    };
+    if (!doc["version"].is<uint8_t>() ||
+        doc["version"].as<uint8_t>() != PC_DASHBOARD_PROTOCOL_VERSION) {
+        return reject("unsupported PC Dashboard version");
+    }
+    for (JsonPairConst pair : doc.as<JsonObjectConst>()) {
+        if (!pc_dashboard_frame_key_allowed(pair.key().c_str())) {
+            return reject("unknown PC Dashboard sample field");
+        }
+    }
+    if ((!doc["frameId"].isNull() && !doc["frameId"].is<int>()) ||
+        (!doc["schemaVersion"].isNull() &&
+         !doc["schemaVersion"].is<uint8_t>())) {
+        return reject("invalid PC Dashboard transport metadata");
+    }
+    if (!doc["connected"].isNull() && !doc["connected"].is<bool>()) {
+        return reject("PC Dashboard connected must be boolean");
+    }
+    if (doc["connected"].is<bool>() && !doc["connected"].as<bool>()) {
+        const size_t metadata = (!doc["frameId"].isNull() ? 1u : 0u) +
+                                (!doc["schemaVersion"].isNull() ? 1u : 0u);
+        if (doc.size() != 3u + metadata) {
+            return reject("disconnected PC Dashboard sample has extra fields");
+        }
+        pc_dashboard_mark_disconnected();
+        return PcDashboardFrameResult::ACCEPTED;
+    }
+    if (!doc["timestamp"].is<uint32_t>()) {
+        return reject("invalid PC Dashboard timestamp");
+    }
+
+    PcDashboardHostSample sample{};
+    sample.timestamp_epoch = doc["timestamp"].as<uint32_t>();
+    const bool battery_pct_present = !doc["batteryPct"].isNull();
+    const bool charging_present = !doc["charging"].isNull();
+    if (battery_pct_present != charging_present) {
+        return reject("PC Dashboard battery fields must be paired");
+    }
+    if (battery_pct_present) {
+        if (!doc["batteryPct"].is<float>() || !doc["charging"].is<bool>()) {
+            return reject("invalid PC Dashboard battery fields");
+        }
+        sample.battery_pct = doc["batteryPct"].as<float>();
+        sample.charging = doc["charging"].as<bool>();
+        sample.valid_mask |= PC_DASH_HOST_BATTERY;
+    }
+    if (!doc["microphoneInUse"].isNull()) {
+        if (!doc["microphoneInUse"].is<bool>()) {
+            return reject("invalid PC Dashboard microphone field");
+        }
+        sample.microphone_in_use = doc["microphoneInUse"].as<bool>();
+        sample.valid_mask |= PC_DASH_HOST_MICROPHONE;
+    }
+    const bool storage_used_present = !doc["storageUsedBytes"].isNull();
+    const bool storage_total_present = !doc["storageTotalBytes"].isNull();
+    if (storage_used_present != storage_total_present) {
+        return reject("PC Dashboard storage fields must be paired");
+    }
+    if (storage_used_present) {
+        if (!doc["storageUsedBytes"].is<uint64_t>() ||
+            !doc["storageTotalBytes"].is<uint64_t>()) {
+            return reject("invalid PC Dashboard storage fields");
+        }
+        sample.storage_used_bytes = doc["storageUsedBytes"].as<uint64_t>();
+        sample.storage_total_bytes = doc["storageTotalBytes"].as<uint64_t>();
+        sample.valid_mask |= PC_DASH_HOST_STORAGE;
+    }
+    const PcDashboardResult result =
+        pc_dashboard_ingest_host_sample(sample, now_ms);
+    if (result != PcDashboardResult::OK) {
+        return reject(pc_dashboard_result_message(result));
+    }
+    return PcDashboardFrameResult::ACCEPTED;
+}
+#endif
+
 static void parse_json(const char *json_str) {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, json_str);
@@ -1309,6 +1906,29 @@ static void parse_json(const char *json_str) {
     }
 
 #if defined(ECHODESK_OS)
+    const char *pc_dashboard_error = nullptr;
+    const PcDashboardFrameResult pc_dashboard_result =
+        parse_pc_dashboard_frame(doc, millis(), &pc_dashboard_error);
+    if (pc_dashboard_result != PcDashboardFrameResult::NOT_PC_DASHBOARD) {
+        if (pc_dashboard_result == PcDashboardFrameResult::REJECTED) {
+            print_frame_error(frame_id, schema_version,
+                              pc_dashboard_error ? pc_dashboard_error
+                                                 : "invalid PC Dashboard frame");
+        } else {
+            my_device_health_note_host_activity(millis());
+            new_data_flag = true;
+            if (frame_id >= 0) {
+                Serial.printf("{\"type\":\"ack\",\"frameId\":%d,\"schemaVersion\":%d,"
+                              "\"message\":\"accepted\",\"bytes\":%u,"
+                              "\"pcDashboardVersion\":%u,\"heap\":%u}\n",
+                              frame_id, schema_version, (unsigned)frame_bytes,
+                              (unsigned)PC_DASHBOARD_PROTOCOL_VERSION,
+                              (unsigned)ESP.getFreeHeap());
+            }
+        }
+        return;
+    }
+
     // Music metadata, bounded artwork/background chunks, and compact real-audio
     // bands use the same single-owner AIM1 transport as usage and performance
     // frames. They are consumed before the legacy parser so existing payload
@@ -1321,6 +1941,7 @@ static void parse_json(const char *json_str) {
             print_frame_error(frame_id, schema_version,
                               music_error ? music_error : "invalid music frame");
         } else {
+            my_device_health_note_host_activity(millis());
             new_data_flag = true;
             if (frame_id >= 0) {
                 Serial.printf("{\"type\":\"ack\",\"frameId\":%d,\"schemaVersion\":%d,"
@@ -1345,13 +1966,16 @@ static void parse_json(const char *json_str) {
         if (performance_result == PerformanceParseResult::REJECTED) {
             print_frame_error(frame_id, schema_version,
                               performance_error ? performance_error : "invalid performance frame");
-        } else if (frame_id >= 0) {
-            Serial.printf("{\"type\":\"ack\",\"frameId\":%d,\"schemaVersion\":%d,"
-                          "\"message\":\"accepted\",\"bytes\":%u,"
-                          "\"performanceVersion\":%u,\"heap\":%u}\n",
-                          frame_id, schema_version, (unsigned)frame_bytes,
-                          (unsigned)PERFORMANCE_PROTOCOL_VERSION,
-                          (unsigned)ESP.getFreeHeap());
+        } else {
+            my_device_health_note_host_activity(millis());
+            if (frame_id >= 0) {
+                Serial.printf("{\"type\":\"ack\",\"frameId\":%d,\"schemaVersion\":%d,"
+                              "\"message\":\"accepted\",\"bytes\":%u,"
+                              "\"performanceVersion\":%u,\"heap\":%u}\n",
+                              frame_id, schema_version, (unsigned)frame_bytes,
+                              (unsigned)PERFORMANCE_PROTOCOL_VERSION,
+                              (unsigned)ESP.getFreeHeap());
+            }
         }
         return;
     }
@@ -1404,6 +2028,9 @@ static void parse_json(const char *json_str) {
                       frame_id, (unsigned)frame_bytes, (unsigned)ESP.getFreeHeap());
         last_host_frame_ms = millis();
         host_frame_seen = true;
+#if defined(ECHODESK_OS)
+        my_device_health_note_host_activity(millis());
+#endif
         if (index == active_view) new_data_flag = true;
         return;
     }
@@ -1478,6 +2105,9 @@ static void parse_json(const char *json_str) {
         state = view_states[active_view];
         last_host_frame_ms = millis();
         host_frame_seen = true;
+#if defined(ECHODESK_OS)
+        my_device_health_note_codex_activity(millis());
+#endif
         if (frame_view == active_view) new_data_flag = true;
         return;
     }
@@ -1538,6 +2168,9 @@ static void parse_json(const char *json_str) {
     state = view_states[active_view];
     last_host_frame_ms = millis();
     host_frame_seen = true;
+#if defined(ECHODESK_OS)
+    my_device_health_note_codex_activity(millis());
+#endif
     if (frame_view == active_view) new_data_flag = true;
 }
 
@@ -1553,7 +2186,21 @@ void serial_receiver_init() {
     host_frame_seen = false;
 #if defined(ECHODESK_OS)
     performance_data_init();
+    PcDashboardConfig initial_pc_dashboard{};
+    initial_pc_dashboard.count = g_config.pc_dashboard_metric_count;
+    for (uint8_t i = 0; i < PC_DASHBOARD_WIDGET_LIMIT; ++i) {
+        initial_pc_dashboard.metrics[i] =
+            static_cast<PcDashboardMetric>(g_config.pc_dashboard_metrics[i]);
+    }
+    pc_dashboard_init(initial_pc_dashboard);
     music_data_init();
+    my_device_health_init();
+    echodesk_clock_init(millis());
+    echodesk_notifications_init();
+    EchoDeskClockSnapshot initial_clock{};
+    echodesk_clock_capture(millis(), initial_clock);
+    echodesk_clock_last_emitted_revision = initial_clock.revision;
+    echodesk_clock_last_stream_ms = millis();
 #endif
     last_host_frame_ms = 0;
     memset(&state, 0, sizeof(state));
@@ -1711,6 +2358,34 @@ void serial_receiver_tick() {
         }
     }
 #if defined(ECHODESK_OS)
+    const uint32_t clock_now_ms = millis();
+    EchoDeskClockSnapshot clock_snapshot{};
+    echodesk_clock_capture(clock_now_ms, clock_snapshot);
+    if (clock_snapshot.revision != echodesk_clock_last_emitted_revision) {
+        print_echodesk_clock_state();
+    } else if (clock_now_ms - echodesk_clock_last_stream_ms >=
+                   ECHODESK_CLOCK_STREAM_INTERVAL_MS &&
+               (clock_snapshot.stopwatch.status == EchoDeskClockStatus::RUNNING ||
+                clock_snapshot.countdown.status == EchoDeskClockStatus::RUNNING ||
+                clock_snapshot.focus.status == EchoDeskClockStatus::RUNNING)) {
+        echodesk_clock_last_stream_ms = clock_now_ms;
+        MyDeviceHealthSnapshot health{};
+        my_device_health_capture(clock_now_ms, health);
+        if (health.desktop.state == MyDeviceHealthState::LIVE) {
+            print_echodesk_clock_state();
+        }
+    }
+    const bool update_screen_rendered =
+        ui_echodesk_take_update_screen_rendered();
+    if (echodesk_update_should_ack(echodesk_update_ack_pending,
+                                   update_screen_rendered)) {
+        print_echodesk_ack(echodesk_update_request_id,
+                           echodesk_update_command);
+        Serial.flush();
+        echodesk_update_ack_pending = false;
+        echodesk_update_request_id = 0;
+        echodesk_update_command = nullptr;
+    }
     if (echodesk_state_dirty) {
         echodesk_state_dirty = false;
         print_echodesk_state();

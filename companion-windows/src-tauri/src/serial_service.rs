@@ -62,8 +62,22 @@ fn recent_sample(fetched_at: Option<&DateTime<Utc>>, max_age: Duration) -> bool 
 fn echo_ack_is_terminal(method: &str) -> bool {
     matches!(
         method,
-        "restart" | "setup_begin" | "setup_complete" | "factory_reset"
+        "restart"
+            | "setup_begin"
+            | "setup_complete"
+            | "factory_reset"
+            | "prepare_update"
+            | "update_complete"
     )
+}
+
+fn update_ack_matches(method: &str, value: &Value) -> bool {
+    let expected = match method {
+        "prepare_update" => "echodesk_prepare_update",
+        "update_complete" => "echodesk_update_complete",
+        _ => return true,
+    };
+    value.get("command").and_then(Value::as_str) == Some(expected)
 }
 /// Kurze Lesescheibe für die späte `info` nach `foreignFirmware`.
 const LATE_INFO_SLICE: Duration = Duration::from_millis(200);
@@ -830,7 +844,25 @@ impl Service {
         self.music_visualizer_requested = false;
         let app_state = self.app.state::<AppState>();
         let had_echo_desk_state = app_state.echo_desk_state.lock().unwrap().take().is_some();
-        if had_echo_desk_state {
+        let had_clock_state = app_state
+            .echo_desk_clock_state
+            .lock()
+            .unwrap()
+            .take()
+            .is_some();
+        let had_clock_request = app_state
+            .echo_desk_clock_config_request
+            .lock()
+            .unwrap()
+            .take()
+            .is_some();
+        let had_notification_state = app_state
+            .echo_desk_notification_state
+            .lock()
+            .unwrap()
+            .take()
+            .is_some();
+        if had_echo_desk_state || had_clock_state || had_clock_request || had_notification_state {
             app_state
                 .desktop_broker_revision
                 .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
@@ -1045,15 +1077,45 @@ impl Service {
         }
         let mut echo_desk_changed = false;
         for message in echo_desk_events {
-            if let DeviceMessage::EchoDeskState(value) = message {
-                if self.store_echo_desk_state(value).is_ok() {
-                    // Device-originated events include both persistent touch
-                    // changes and host brightness previews. Update the live
-                    // profile but never write devices.json from an event;
-                    // confirmed persistent broker requests save explicitly.
-                    self.sync_profile_from_echo_state(false);
+            match message {
+                DeviceMessage::EchoDeskState(value) => {
+                    if self.store_echo_desk_state(value).is_ok() {
+                        // Device-originated events include both persistent touch
+                        // changes and host brightness previews. Update the live
+                        // profile but never write devices.json from an event;
+                        // confirmed persistent broker requests save explicitly.
+                        self.sync_profile_from_echo_state(false);
+                        echo_desk_changed = true;
+                    }
+                }
+                DeviceMessage::EchoDeskClockState(value) => {
+                    if self.store_clock_state(value).is_ok() {
+                        echo_desk_changed = true;
+                    }
+                }
+                DeviceMessage::EchoDeskClockConfigRequest { mode } => {
+                    let state = self.app.state::<AppState>();
+                    let mut request = state.echo_desk_clock_config_request.lock().unwrap();
+                    *request = Some(mode);
+                    state
+                        .echo_desk_clock_config_sequence
+                        .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                    state
+                        .desktop_broker_revision
+                        .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
                     echo_desk_changed = true;
                 }
+                DeviceMessage::EchoDeskNotificationsState(value) => {
+                    if self.store_notification_state(value).is_ok() {
+                        echo_desk_changed = true;
+                    }
+                }
+                DeviceMessage::EchoDeskPcDashboardState(value) => {
+                    if self.store_pc_dashboard_state(value).is_ok() {
+                        echo_desk_changed = true;
+                    }
+                }
+                _ => {}
             }
         }
         if echo_desk_changed {
@@ -1233,7 +1295,16 @@ impl Service {
         if let Some(value) = object.get("defaultApp") {
             if !matches!(
                 value.as_str(),
-                Some("home" | "codex" | "clock" | "performance" | "nowPlaying" | "settings")
+                Some(
+                    "home"
+                        | "codex"
+                        | "clock"
+                        | "performance"
+                        | "nowPlaying"
+                        | "myDevice"
+                        | "notificationStack"
+                        | "settings"
+                )
             ) {
                 return Err(Self::desktop_error(
                     "invalid_request",
@@ -1306,12 +1377,15 @@ impl Service {
             .get("activeApp")
             .and_then(Value::as_str)
             .ok_or_else(|| Self::desktop_error("invalid_state", "active app is missing"))?;
-        const APPS: [&str; 6] = [
+        const APPS: [&str; 9] = [
             "home",
             "codex",
             "clock",
             "performance",
             "nowPlaying",
+            "myDevice",
+            "notificationStack",
+            "pcDashboard",
             "settings",
         ];
         if !APPS.contains(&active) {
@@ -1518,6 +1592,9 @@ impl Service {
             .ok_or_else(|| Self::desktop_error("timeout", "EchoDesk command timed out"))?;
         let value = match &response {
             DeviceMessage::EchoDeskState(value)
+            | DeviceMessage::EchoDeskClockState(value)
+            | DeviceMessage::EchoDeskNotificationsState(value)
+            | DeviceMessage::EchoDeskPcDashboardState(value)
             | DeviceMessage::EchoDeskAck(value)
             | DeviceMessage::EchoDeskError(value) => value,
             _ => {
@@ -1554,9 +1631,516 @@ impl Service {
         }
     }
 
+    fn validate_clock_state(value: &Value) -> bool {
+        let status = |node: &Value| {
+            node.get("status")
+                .and_then(Value::as_str)
+                .is_some_and(|status| matches!(status, "idle" | "running" | "paused" | "complete"))
+        };
+        let bounded = |node: &Value, key: &str, maximum: u64| {
+            node.get(key)
+                .and_then(Value::as_u64)
+                .is_some_and(|value| value <= maximum)
+        };
+        let stopwatch = value.get("stopwatch").unwrap_or(&Value::Null);
+        let countdown = value.get("countdown").unwrap_or(&Value::Null);
+        let focus = value.get("focus").unwrap_or(&Value::Null);
+        matches!(
+            value.get("activeMode").and_then(Value::as_str),
+            Some("time" | "stopwatch" | "countdown" | "focus")
+        ) && status(stopwatch)
+            && bounded(stopwatch, "elapsedMs", 7 * 24 * 60 * 60 * 1000)
+            && status(countdown)
+            && bounded(countdown, "durationSeconds", 86400)
+            && bounded(countdown, "remainingSeconds", 86400)
+            && bounded(countdown, "progressPermille", 1000)
+            && status(focus)
+            && matches!(
+                focus.get("phase").and_then(Value::as_str),
+                Some("focus" | "break" | "complete")
+            )
+            && bounded(focus, "focusMinutes", 180)
+            && bounded(focus, "breakMinutes", 60)
+            && bounded(focus, "rounds", 12)
+            && bounded(focus, "currentRound", 12)
+            && bounded(focus, "remainingSeconds", 180 * 60)
+            && bounded(focus, "progressPermille", 1000)
+    }
+
+    fn store_clock_state(&mut self, mut value: Value) -> Result<Value, Value> {
+        if value.to_string().len() > 4096
+            || value.get("version").and_then(Value::as_u64) != Some(1)
+            || value.get("revision").and_then(Value::as_u64).is_none()
+            || !Self::validate_clock_state(&value)
+        {
+            return Err(Self::desktop_error(
+                "invalid_state",
+                "invalid EchoDesk clock state",
+            ));
+        }
+        if let Some(object) = value.as_object_mut() {
+            object.remove("type");
+            object.remove("version");
+            object.remove("requestId");
+        }
+        let state = self.app.state::<AppState>();
+        let mut cached = state.echo_desk_clock_state.lock().unwrap();
+        let incoming_revision = value.get("revision").and_then(Value::as_u64).unwrap_or(0);
+        if cached
+            .as_ref()
+            .and_then(|current| current.get("revision"))
+            .and_then(Value::as_u64)
+            .is_some_and(|current| incoming_revision < current)
+        {
+            return Err(Self::desktop_error(
+                "stale_state",
+                "older clock state ignored",
+            ));
+        }
+        let changed = cached.as_ref() != Some(&value);
+        *cached = Some(value.clone());
+        if changed {
+            state
+                .desktop_broker_revision
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
+        Ok(value)
+    }
+
+    fn refresh_clock_state(&mut self) -> Result<Value, Value> {
+        if !matches!(&self.state, LinkState::Connected(info) if info.supports_echo_desk_clock()) {
+            return Err(Self::desktop_error(
+                "unsupported",
+                "Connected firmware does not support Clock controls",
+            ));
+        }
+        let response = self.exchange_echo_desk(
+            "echodesk_clock_get_state",
+            serde_json::Map::new(),
+            &["echodesk_clock_state", "echodesk_error"],
+        )?;
+        match response {
+            DeviceMessage::EchoDeskClockState(value) => self.store_clock_state(value),
+            DeviceMessage::EchoDeskError(value) => Err(value),
+            _ => Err(Self::desktop_error(
+                "invalid_response",
+                "clock state response expected",
+            )),
+        }
+    }
+
+    fn valid_pc_dashboard_metrics(value: &Value) -> bool {
+        const METRICS: [&str; 11] = [
+            "battery",
+            "microphone",
+            "storage",
+            "ram",
+            "cpu",
+            "gpu",
+            "networkDown",
+            "networkUp",
+            "cpuTemperature",
+            "gpuTemperature",
+            "motherboardTemperature",
+        ];
+        let Some(metrics) = value.as_array() else {
+            return false;
+        };
+        if !(1..=4).contains(&metrics.len()) {
+            return false;
+        }
+        let mut seen = std::collections::HashSet::new();
+        metrics.iter().all(|metric| {
+            metric
+                .as_str()
+                .is_some_and(|id| METRICS.contains(&id) && seen.insert(id))
+        })
+    }
+
+    fn store_pc_dashboard_state(&mut self, mut value: Value) -> Result<Value, Value> {
+        if value.to_string().len() > 1024
+            || value.get("version").and_then(Value::as_u64) != Some(1)
+            || value.get("revision").and_then(Value::as_u64).is_none()
+            || !value
+                .get("metrics")
+                .is_some_and(Self::valid_pc_dashboard_metrics)
+        {
+            return Err(Self::desktop_error(
+                "invalid_state",
+                "invalid PC Dashboard state",
+            ));
+        }
+        if let Some(object) = value.as_object_mut() {
+            object.remove("type");
+            object.remove("version");
+            object.remove("requestId");
+        }
+        let state = self.app.state::<AppState>();
+        let mut cached = state.echo_desk_pc_dashboard_state.lock().unwrap();
+        let incoming = value.get("revision").and_then(Value::as_u64).unwrap_or(0);
+        if cached
+            .as_ref()
+            .and_then(|v| v.get("revision"))
+            .and_then(Value::as_u64)
+            .is_some_and(|v| incoming < v)
+        {
+            return Err(Self::desktop_error(
+                "stale_state",
+                "older PC Dashboard state ignored",
+            ));
+        }
+        let changed = cached.as_ref() != Some(&value);
+        *cached = Some(value.clone());
+        if changed {
+            state
+                .desktop_broker_revision
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
+        Ok(value)
+    }
+
+    fn refresh_pc_dashboard_state(&mut self) -> Result<Value, Value> {
+        if !matches!(&self.state, LinkState::Connected(info) if info.supports_echo_desk_pc_dashboard())
+        {
+            return Err(Self::desktop_error(
+                "unsupported",
+                "Connected firmware does not support PC Dashboard",
+            ));
+        }
+        let response = self.exchange_echo_desk(
+            "echodesk_pc_dashboard_get_state",
+            serde_json::Map::new(),
+            &["echodesk_pc_dashboard_state", "echodesk_error"],
+        )?;
+        match response {
+            DeviceMessage::EchoDeskPcDashboardState(value) => self.store_pc_dashboard_state(value),
+            DeviceMessage::EchoDeskError(value) => Err(value),
+            _ => Err(Self::desktop_error(
+                "invalid_response",
+                "PC Dashboard state expected",
+            )),
+        }
+    }
+
+    fn validate_notification_state(value: &Value) -> bool {
+        let Some(items) = value.get("notifications").and_then(Value::as_array) else {
+            return false;
+        };
+        if items.len() > 12 || value.get("enabled").and_then(Value::as_bool).is_none() {
+            return false;
+        }
+        items.iter().all(|item| {
+            let bounded = |key: &str, max: usize| {
+                item.get(key)
+                    .and_then(Value::as_str)
+                    .is_some_and(|s| s.len() <= max)
+            };
+            item.get("id")
+                .and_then(Value::as_u64)
+                .is_some_and(|id| id > 0 && id <= u32::MAX as u64)
+                && item.get("timestamp").and_then(Value::as_u64).is_some()
+                && bounded("source", 32)
+                && bounded("title", 64)
+                && bounded("body", 160)
+        })
+    }
+
+    fn store_notification_state(&mut self, mut value: Value) -> Result<Value, Value> {
+        if value.to_string().len() > 4096
+            || value.get("version").and_then(Value::as_u64) != Some(1)
+            || value.get("revision").and_then(Value::as_u64).is_none()
+            || !Self::validate_notification_state(&value)
+        {
+            return Err(Self::desktop_error(
+                "invalid_state",
+                "invalid EchoDesk notification state",
+            ));
+        }
+        if let Some(object) = value.as_object_mut() {
+            object.remove("type");
+            object.remove("version");
+            object.remove("requestId");
+        }
+        let state = self.app.state::<AppState>();
+        let mut cached = state.echo_desk_notification_state.lock().unwrap();
+        let incoming = value.get("revision").and_then(Value::as_u64).unwrap_or(0);
+        if cached
+            .as_ref()
+            .and_then(|v| v.get("revision"))
+            .and_then(Value::as_u64)
+            .is_some_and(|current| incoming < current)
+        {
+            return Err(Self::desktop_error(
+                "stale_state",
+                "older notification state ignored",
+            ));
+        }
+        let changed = cached.as_ref() != Some(&value);
+        *cached = Some(value.clone());
+        if changed {
+            state
+                .desktop_broker_revision
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
+        Ok(value)
+    }
+
+    fn refresh_notification_state(&mut self) -> Result<Value, Value> {
+        if !matches!(&self.state, LinkState::Connected(info) if info.supports_echo_desk_notifications())
+        {
+            return Err(Self::desktop_error(
+                "unsupported",
+                "Connected firmware does not support Notification Stack",
+            ));
+        }
+        match self.exchange_echo_desk(
+            "echodesk_notifications_get_state",
+            serde_json::Map::new(),
+            &["echodesk_notifications_state", "echodesk_error"],
+        )? {
+            DeviceMessage::EchoDeskNotificationsState(value) => {
+                self.store_notification_state(value)
+            }
+            DeviceMessage::EchoDeskError(value) => Err(value),
+            _ => Err(Self::desktop_error(
+                "invalid_response",
+                "notification state response expected",
+            )),
+        }
+    }
+
     fn echo_desk_control(&mut self, method: &str, params: Value) -> Result<Value, Value> {
+        if method == "notifications_get_state" {
+            return self.refresh_notification_state();
+        }
+        if matches!(
+            method,
+            "notifications_set_enabled"
+                | "notifications_push"
+                | "notifications_dismiss"
+                | "notifications_clear"
+        ) {
+            if !matches!(&self.state, LinkState::Connected(info) if info.supports_echo_desk_notifications())
+            {
+                return Err(Self::desktop_error(
+                    "unsupported",
+                    "Connected firmware does not support Notification Stack",
+                ));
+            }
+            let object = params.as_object().ok_or_else(|| {
+                Self::desktop_error("invalid_request", "notification params must be an object")
+            })?;
+            let valid = match method {
+                "notifications_set_enabled" => {
+                    object.len() == 1 && object.get("enabled").and_then(Value::as_bool).is_some()
+                }
+                "notifications_push" => {
+                    object.len() == 5
+                        && object
+                            .get("id")
+                            .and_then(Value::as_u64)
+                            .is_some_and(|v| v > 0 && v <= u32::MAX as u64)
+                        && object.get("timestamp").and_then(Value::as_u64).is_some()
+                        && object
+                            .get("source")
+                            .and_then(Value::as_str)
+                            .is_some_and(|v| !v.is_empty() && v.len() <= 32)
+                        && object
+                            .get("title")
+                            .and_then(Value::as_str)
+                            .is_some_and(|v| !v.is_empty() && v.len() <= 64)
+                        && object
+                            .get("body")
+                            .and_then(Value::as_str)
+                            .is_some_and(|v| v.len() <= 160)
+                }
+                "notifications_dismiss" => {
+                    object.len() == 1
+                        && object
+                            .get("id")
+                            .and_then(Value::as_u64)
+                            .is_some_and(|v| v > 0 && v <= u32::MAX as u64)
+                }
+                "notifications_clear" => object.is_empty(),
+                _ => false,
+            };
+            if !valid {
+                return Err(Self::desktop_error(
+                    "invalid_request",
+                    "notification command fields are invalid",
+                ));
+            }
+            let command = match method {
+                "notifications_set_enabled" => "echodesk_notifications_set_enabled",
+                "notifications_push" => "echodesk_notifications_push",
+                "notifications_dismiss" => "echodesk_notifications_dismiss",
+                _ => "echodesk_notifications_clear",
+            };
+            let response = self.exchange_echo_desk(
+                command,
+                object.clone(),
+                &["echodesk_ack", "echodesk_error"],
+            )?;
+            match response {
+                DeviceMessage::EchoDeskError(value) => return Err(value),
+                DeviceMessage::EchoDeskAck(value)
+                    if value.get("command").and_then(Value::as_str) == Some(command) => {}
+                _ => {
+                    return Err(Self::desktop_error(
+                        "invalid_response",
+                        "notification acknowledgement expected",
+                    ))
+                }
+            }
+            return self.refresh_notification_state();
+        }
+        if method == "clock_get_state" {
+            return self.refresh_clock_state();
+        }
+        if method == "pc_dashboard_get_state" {
+            return self.refresh_pc_dashboard_state();
+        }
+        if method == "pc_dashboard_set_metrics" {
+            if !matches!(&self.state, LinkState::Connected(info) if info.supports_echo_desk_pc_dashboard())
+            {
+                return Err(Self::desktop_error(
+                    "unsupported",
+                    "Connected firmware does not support PC Dashboard",
+                ));
+            }
+            let object = params.as_object().ok_or_else(|| {
+                Self::desktop_error("invalid_request", "PC Dashboard params must be an object")
+            })?;
+            if object.len() != 2
+                || object.get("baseRevision").and_then(Value::as_u64).is_none()
+                || !object
+                    .get("metrics")
+                    .is_some_and(Self::valid_pc_dashboard_metrics)
+            {
+                return Err(Self::desktop_error(
+                    "invalid_request",
+                    "PC Dashboard requires baseRevision and 1-4 unique metrics",
+                ));
+            }
+            let mut fields = serde_json::Map::new();
+            fields.insert("baseRevision".into(), object["baseRevision"].clone());
+            fields.insert("metrics".into(), object["metrics"].clone());
+            let response = self.exchange_echo_desk(
+                "echodesk_pc_dashboard_set_config",
+                fields,
+                &["echodesk_ack", "echodesk_error"],
+            )?;
+            match response {
+                DeviceMessage::EchoDeskError(value) => return Err(value),
+                DeviceMessage::EchoDeskAck(value)
+                    if value.get("command").and_then(Value::as_str)
+                        == Some("echodesk_pc_dashboard_set_config") => {}
+                _ => {
+                    return Err(Self::desktop_error(
+                        "invalid_response",
+                        "PC Dashboard acknowledgement expected",
+                    ))
+                }
+            }
+            return self.refresh_pc_dashboard_state();
+        }
+        if method == "clock_control" {
+            if !matches!(&self.state, LinkState::Connected(info) if info.supports_echo_desk_clock())
+            {
+                return Err(Self::desktop_error(
+                    "unsupported",
+                    "Connected firmware does not support Clock controls",
+                ));
+            }
+            let object = params.as_object().ok_or_else(|| {
+                Self::desktop_error("invalid_request", "clock params must be an object")
+            })?;
+            let action = object
+                .get("action")
+                .and_then(Value::as_str)
+                .filter(|value| {
+                    matches!(
+                        *value,
+                        "select" | "start" | "pause" | "reset" | "skip" | "configure"
+                    )
+                })
+                .ok_or_else(|| Self::desktop_error("invalid_request", "clock action is invalid"))?;
+            let mode = object
+                .get("mode")
+                .and_then(Value::as_str)
+                .filter(|value| matches!(*value, "time" | "stopwatch" | "countdown" | "focus"))
+                .ok_or_else(|| Self::desktop_error("invalid_request", "clock mode is invalid"))?;
+            let allowed = match action {
+                "configure" if mode == "countdown" => {
+                    object.len() == 3
+                        && object
+                            .get("durationSeconds")
+                            .and_then(Value::as_u64)
+                            .is_some_and(|value| (1..=86400).contains(&value))
+                }
+                "configure" if mode == "focus" => {
+                    object.len() == 5
+                        && object
+                            .get("focusMinutes")
+                            .and_then(Value::as_u64)
+                            .is_some_and(|value| (1..=180).contains(&value))
+                        && object
+                            .get("breakMinutes")
+                            .and_then(Value::as_u64)
+                            .is_some_and(|value| (1..=60).contains(&value))
+                        && object
+                            .get("rounds")
+                            .and_then(Value::as_u64)
+                            .is_some_and(|value| (1..=12).contains(&value))
+                }
+                "configure" => false,
+                _ => object.len() == 2,
+            };
+            if !allowed {
+                return Err(Self::desktop_error(
+                    "invalid_request",
+                    "clock control fields are invalid",
+                ));
+            }
+            let mut fields = serde_json::Map::new();
+            for (key, value) in object {
+                fields.insert(key.clone(), value.clone());
+            }
+            let response = self.exchange_echo_desk(
+                "echodesk_clock_control",
+                fields,
+                &["echodesk_ack", "echodesk_error"],
+            )?;
+            match response {
+                DeviceMessage::EchoDeskError(value) => return Err(value),
+                DeviceMessage::EchoDeskAck(value)
+                    if value.get("command").and_then(Value::as_str)
+                        == Some("echodesk_clock_control") => {}
+                _ => {
+                    return Err(Self::desktop_error(
+                        "invalid_response",
+                        "clock acknowledgement expected",
+                    ))
+                }
+            }
+            self.app
+                .state::<AppState>()
+                .echo_desk_clock_config_request
+                .lock()
+                .unwrap()
+                .take();
+            return self.refresh_clock_state();
+        }
         let mut fields = serde_json::Map::new();
         let mut persist_profile = false;
+        if matches!(method, "prepare_update" | "update_complete")
+            && !matches!(&self.state, LinkState::Connected(info) if info.supports_echo_desk_update())
+        {
+            return Err(Self::desktop_error(
+                "unsupported",
+                "Connected firmware does not support EchoDesk OS update screens",
+            ));
+        }
         let command = match method {
             "get_state" => return self.refresh_echo_desk_state(),
             "open_app" => {
@@ -1575,7 +2159,15 @@ impl Service {
                     .filter(|app| {
                         matches!(
                             *app,
-                            "home" | "codex" | "clock" | "performance" | "nowPlaying" | "settings"
+                            "home"
+                                | "codex"
+                                | "clock"
+                                | "performance"
+                                | "nowPlaying"
+                                | "myDevice"
+                                | "notificationStack"
+                                | "pcDashboard"
+                                | "settings"
                         )
                     })
                     .ok_or_else(|| Self::desktop_error("invalid_request", "app is invalid"))?;
@@ -1657,6 +2249,20 @@ impl Service {
                     _ => "echodesk_factory_reset",
                 }
             }
+            "prepare_update" | "update_complete" => {
+                if !(params.is_null() || params.as_object().is_some_and(|params| params.is_empty()))
+                {
+                    return Err(Self::desktop_error(
+                        "invalid_request",
+                        "update display commands take no device parameters",
+                    ));
+                }
+                if method == "prepare_update" {
+                    "echodesk_prepare_update"
+                } else {
+                    "echodesk_update_complete"
+                }
+            }
             _ => {
                 return Err(Self::desktop_error(
                     "unsupported",
@@ -1670,7 +2276,14 @@ impl Service {
         match response {
             DeviceMessage::EchoDeskError(value) => Err(value),
             DeviceMessage::EchoDeskAck(value) if echo_ack_is_terminal(method) => {
-                Ok(value)
+                if !update_ack_matches(method, &value) {
+                    Err(Self::desktop_error(
+                        "invalid_response",
+                        "EchoDesk update acknowledgement command mismatch",
+                    ))
+                } else {
+                    Ok(value)
+                }
             }
             DeviceMessage::EchoDeskAck(_) => {
                 let state = self.refresh_echo_desk_state()?;
@@ -1834,6 +2447,20 @@ impl Service {
                 self.transmit(&info, payload, frame_id, "performance", "Hardware helper")
             }
             Err(e) => self.log_event(format!("Performance frame rejected: {e}")),
+        }
+        if info.supports_echo_desk_pc_dashboard() {
+            let dashboard_frame_id = self.frame_ids.next();
+            match sample.pc_dashboard_payload(dashboard_frame_id) {
+                Ok(Some(payload)) => self.transmit(
+                    &info,
+                    payload,
+                    dashboard_frame_id,
+                    "pc-dashboard",
+                    "Windows system APIs",
+                ),
+                Ok(None) => {}
+                Err(e) => self.log_event(format!("PC Dashboard frame rejected: {e}")),
+            }
         }
     }
 
@@ -2625,7 +3252,7 @@ mod tests {
                 "nowPlayingLayout": "carPlay",
                 "nowPlayingBackground": "audioBars",
                 "nowPlayingBackgroundCustomized": true,
-                "defaultApp": "codex",
+                "defaultApp": "myDevice",
                 "clockFormat": "24h",
                 "timezone": "Australia/Melbourne",
                 "codexPercentageMode": "remaining",
@@ -2704,6 +3331,16 @@ mod tests {
         assert!(echo_ack_is_terminal("setup_begin"));
         assert!(echo_ack_is_terminal("setup_complete"));
         assert!(echo_ack_is_terminal("factory_reset"));
+        assert!(echo_ack_is_terminal("prepare_update"));
+        assert!(echo_ack_is_terminal("update_complete"));
         assert!(!echo_ack_is_terminal("set_settings"));
+        assert!(update_ack_matches(
+            "prepare_update",
+            &json!({"command":"echodesk_prepare_update"})
+        ));
+        assert!(!update_ack_matches(
+            "prepare_update",
+            &json!({"command":"echodesk_update_complete"})
+        ));
     }
 }

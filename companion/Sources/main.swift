@@ -1083,6 +1083,18 @@ class AppUpdateManager {
         return "v\(normalizeVersion(release.tag_name))"
     }
 
+    var availableUpdateAsset: GitHubAsset? {
+        guard let release = latestRelease else { return nil }
+#if ECHODESK_DESKTOP
+        return release.assets.first {
+            $0.name.hasPrefix("EchoDesk-Desktop-v") &&
+                $0.name.hasSuffix("-macos-universal.zip")
+        }
+#else
+        return release.assets.first { $0.name == kAppAssetName }
+#endif
+    }
+
     private var currentAppReleaseTag: String {
 #if ECHODESK_DESKTOP
         return "v\(kAppVersion)"
@@ -1147,13 +1159,7 @@ class AppUpdateManager {
 
     func downloadAndInstall(completion: @escaping (Bool, String) -> Void) {
         guard let release = latestRelease else { completion(false, L("release.none.title")); return }
-        guard let asset = release.assets.first(where: {
-#if ECHODESK_DESKTOP
-            $0.name.hasPrefix("EchoDesk-Desktop-v") && $0.name.hasSuffix("-macos-universal.zip")
-#else
-            $0.name == kAppAssetName
-#endif
-        }) else {
+        guard let asset = availableUpdateAsset else {
             if let htmlUrl = release.html_url, let url = URL(string: htmlUrl) { NSWorkspace.shared.open(url) }
             completion(true, L("common.open_browser")); return
         }
@@ -2127,6 +2133,11 @@ class SerialPortManager {
     /// `view_state`-Zeile, ohne dass wir gefragt haben. Wird auf dem
     /// Main-Thread aufgerufen.
     var onViewState: (([String: Any]) -> Void)?
+    /// Reverse Now Playing controls are delivered by the firmware as ordinary
+    /// newline JSON. The native telemetry adapter executes them; the serial
+    /// manager remains the only owner of the port.
+    var onMusicControl: (([String: Any]) -> Void)?
+    var onClockConfigRequest: (([String: Any]) -> Void)?
     /// Angefangene Zeile aus `drainInput()`, damit ein Ereignis, das genau
     /// waehrend des Leerens ankommt, nicht zerschnitten verloren geht.
     private var unsolicitedLine = [UInt8]()
@@ -2134,6 +2145,12 @@ class SerialPortManager {
     var deviceSerialTransport: String?
     var deviceMaxFrameBytes: Int?
     var deviceSceneProtocol: Int?
+    var devicePerformanceProtocol: Int?
+    var deviceMusicProtocol: Int?
+    var deviceEchoDeskUpdateProtocol: Int?
+    var deviceEchoDeskClockProtocol: Int?
+    var deviceEchoDeskNotificationProtocol: Int?
+    var deviceEchoDeskPcDashboardProtocol: Int?
     /// Vom Geraet ausgelesener Display-Controller (`panel`, ab FW 2.23.0).
     /// Anders als `display` beschreibt er die Hardware, nicht die Firmware.
     var devicePanel: String?
@@ -2367,6 +2384,12 @@ class SerialPortManager {
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     self.deviceMaxFrameBytes = json["maxFrameBytes"] as? Int
                     self.deviceSceneProtocol = json["sceneProtocol"] as? Int
+                    self.devicePerformanceProtocol = json["performanceProtocol"] as? Int
+                    self.deviceMusicProtocol = json["musicProtocol"] as? Int
+                    self.deviceEchoDeskUpdateProtocol = json["echoDeskUpdateProtocol"] as? Int
+                    self.deviceEchoDeskClockProtocol = json["echoDeskClockProtocol"] as? Int
+                    self.deviceEchoDeskNotificationProtocol = json["echoDeskNotificationProtocol"] as? Int
+                    self.deviceEchoDeskPcDashboardProtocol = json["echoDeskPcDashboardProtocol"] as? Int
                     self.devicePanel = Self.reportedPanel(in: json)
                     Settings.shared.installedFirmwareVersion = "v\(version)"
                     NSLog("[Serial] ESP32 firmware: v%@ (state=connected)", version)
@@ -2454,6 +2477,12 @@ class SerialPortManager {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 self.deviceMaxFrameBytes = json["maxFrameBytes"] as? Int
                 self.deviceSceneProtocol = json["sceneProtocol"] as? Int
+                self.devicePerformanceProtocol = json["performanceProtocol"] as? Int
+                self.deviceMusicProtocol = json["musicProtocol"] as? Int
+                self.deviceEchoDeskUpdateProtocol = json["echoDeskUpdateProtocol"] as? Int
+                self.deviceEchoDeskClockProtocol = json["echoDeskClockProtocol"] as? Int
+                self.deviceEchoDeskNotificationProtocol = json["echoDeskNotificationProtocol"] as? Int
+                self.deviceEchoDeskPcDashboardProtocol = json["echoDeskPcDashboardProtocol"] as? Int
                 self.devicePanel = Self.reportedPanel(in: json)
                 Settings.shared.installedFirmwareVersion = "v\(version)"
                 let reportedMAC = (json["mac"] as? String)?
@@ -2512,6 +2541,12 @@ class SerialPortManager {
         deviceSerialTransport = nil
         deviceMaxFrameBytes = nil
         deviceSceneProtocol = nil
+        devicePerformanceProtocol = nil
+        deviceMusicProtocol = nil
+        deviceEchoDeskUpdateProtocol = nil
+        deviceEchoDeskClockProtocol = nil
+        deviceEchoDeskNotificationProtocol = nil
+        deviceEchoDeskPcDashboardProtocol = nil
         devicePanel = nil
         lastDisconnectAt = Date()
         connectionGeneration &+= 1
@@ -2803,14 +2838,26 @@ class SerialPortManager {
         }
     }
 
-    /// Reicht eine `view_state`-Zeile an `onViewState` weiter; alles andere
-    /// bleibt unbeachtet.
+    /// Routes bounded reverse messages without creating a second reader for
+    /// the port. Unknown input remains ignored for forward compatibility.
     private func routeUnsolicited(_ line: String) {
-        guard line.hasPrefix("{"), line.contains("\"view_state\""),
-              let data = line.data(using: .utf8),
+        guard line.hasPrefix("{"), let data = line.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              json["type"] as? String == "view_state" else { return }
-        DispatchQueue.main.async { [weak self] in self?.onViewState?(json) }
+              let type = json["type"] as? String else { return }
+        switch type {
+        case "view_state":
+            DispatchQueue.main.async { [weak self] in self?.onViewState?(json) }
+        case "music_control":
+            guard json["version"] as? Int == 1 else { return }
+            DispatchQueue.main.async { [weak self] in self?.onMusicControl?(json) }
+        case "echodesk_clock_config_request":
+            guard json["version"] as? Int == 1,
+                  let mode = json["mode"] as? String,
+                  mode == "countdown" || mode == "focus" else { return }
+            DispatchQueue.main.async { [weak self] in self?.onClockConfigRequest?(json) }
+        default:
+            break
+        }
     }
 
     /// Ab v1.30.0: regelmaessig aufgerufen, damit Touch-Wechsel am Geraet auch
@@ -2851,6 +2898,7 @@ class UsageMonitor {
     var onOutdatedFirmwareDetected: ((_ deviceName: String, _ installedVersion: String, _ latestVersion: String) -> Void)?
     /// Nach jedem Connect: gemeldetes Panel und laufende Firmware-Variante.
     var onPanelReported: ((_ panel: String?, _ firmwareVariant: String?) -> Void)?
+    var onClockConfigRequest: ((_ mode: String) -> Void)?
     private var heartbeatTimer: Timer?
     /// Ausstehender, gebuendelter Usage-/Notice-Frame (siehe scheduleUsageSend).
     private var pendingUsageSend: DispatchWorkItem?
@@ -2868,6 +2916,12 @@ class UsageMonitor {
     private var configuredConnectionGeneration = -1
     private var viewEventTimer: Timer?
     private let intelligentViews = IntelligentViews()
+    private var pendingUpdateCompletionVersion: String?
+#if ECHODESK_DESKTOP
+    private lazy var echoDeskTelemetry = EchoDeskTelemetry { [weak self] kind, payload in
+        DispatchQueue.main.async { self?.sendTelemetryFrame(kind: kind, payload: payload) }
+    }
+#endif
 
     init() {
         self.serialPort = SerialPortManager()
@@ -3208,6 +3262,7 @@ class UsageMonitor {
             self.sendBrightnessToESP32(Settings.shared.lastKnownBrightness)
             self.configureViewsAfterConnect()
             self.sendUsageToESP32()
+            self.sendPendingFirmwareUpdateCompletionIfNeeded()
             if self.pendingDiagnosticAfterNextConnect && self.serialPort.state == .connected {
                 self.pendingDiagnosticAfterNextConnect = false
                 self.serialLinkDetail = L("serial.testframe.sending")
@@ -3225,6 +3280,20 @@ class UsageMonitor {
         }
         serialPort.startScanning()
 
+        // Native Music/Spotify and system-performance producers publish into
+        // the same serial owner as usage frames. Unsupported firmware is
+        // capability-gated in sendTelemetryFrame.
+#if ECHODESK_DESKTOP
+        serialPort.onMusicControl = { [weak self] message in
+            self?.echoDeskTelemetry.handleMusicControl(message)
+        }
+        serialPort.onClockConfigRequest = { [weak self] message in
+            guard let mode = message["mode"] as? String else { return }
+            self?.onClockConfigRequest?(mode)
+        }
+        echoDeskTelemetry.start()
+#endif
+
         // CodexBar zuletzt starten (nachdem Callbacks gesetzt sind)
         codexBar.start()
         reconcileViewSources()
@@ -3233,7 +3302,10 @@ class UsageMonitor {
         // Frame-Versand liest sie sonst niemand.
         serialPort.onViewState = { [weak self] json in self?.applyDeviceViewState(json) }
         viewEventTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self, self.serialPort.isReadyForCommands, self.firmwareSupportsViews() else { return }
+            guard let self = self, self.serialPort.isReadyForCommands,
+                  self.firmwareSupportsViews()
+                    || (self.serialPort.deviceMusicProtocol ?? 0) >= 1
+                    || (self.serialPort.deviceEchoDeskClockProtocol ?? 0) >= 1 else { return }
             self.serialSendQueue.async { self.serialPort.pollUnsolicitedInput() }
         }
 
@@ -3252,6 +3324,11 @@ class UsageMonitor {
         codexBar.stop()
         viewSources.values.forEach { $0.stop() }
         pollingViewProviders.removeAll()
+#if ECHODESK_DESKTOP
+        echoDeskTelemetry.stop()
+        serialPort.onMusicControl = nil
+        serialPort.onClockConfigRequest = nil
+#endif
         serialPort.stopScanning()
     }
 
@@ -3266,12 +3343,87 @@ class UsageMonitor {
         }
     }
 
+    /// Ask compatible firmware to render its static update warning before the
+    /// serial port is released to the ESP32 ROM bootloader. Failure is
+    /// intentionally non-fatal: recovery and legacy firmware must still flash.
+    func prepareForFirmwareUpdate(completion: @escaping (Bool) -> Void) {
+        guard serialPort.isReadyForCommands,
+              (serialPort.deviceEchoDeskUpdateProtocol ?? 0) >= 1 else {
+            completion(false)
+            return
+        }
+        let requestID = max(1, Int(Date().timeIntervalSince1970 * 1000) & 0x7fff_ffff)
+        serialPort.performJSONCommand([
+            "cmd": "echodesk_prepare_update", "version": 1, "requestId": requestID,
+        ], acceptedTypes: ["echodesk_ack"], timeout: 2.0) { response in
+            completion(response?["command"] as? String == "echodesk_prepare_update")
+        }
+    }
+
+    func queueFirmwareUpdateCompletion(expectedVersion: String?) {
+        // A manually selected image has no trusted version metadata. The empty
+        // sentinel still permits the one-shot completion screen after the
+        // successful, immediate reconnect without inventing a version.
+        pendingUpdateCompletionVersion = expectedVersion?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "vV")) ?? ""
+    }
+
+    private func sendPendingFirmwareUpdateCompletionIfNeeded() {
+        guard let expected = pendingUpdateCompletionVersion,
+              serialPort.isReadyForCommands,
+              (serialPort.deviceEchoDeskUpdateProtocol ?? 0) >= 1,
+              expected.isEmpty || serialPort.deviceFirmwareVersion == expected else { return }
+        pendingUpdateCompletionVersion = nil
+        let requestID = max(1, Int(Date().timeIntervalSince1970 * 1000) & 0x7fff_ffff)
+        serialPort.performJSONCommand([
+            "cmd": "echodesk_update_complete", "version": 1, "requestId": requestID,
+        ], acceptedTypes: ["echodesk_ack"], timeout: 2.0) { response in
+            if response?["command"] as? String != "echodesk_update_complete" {
+                NSLog("[Firmware] Device did not confirm the optional update-complete screen")
+            }
+        }
+    }
+
     private func allocateFrameId() -> Int {
         let id = nextFrameId
         nextFrameId += 1
         if nextFrameId > 999_999 { nextFrameId = 1 }
         return id
     }
+
+#if ECHODESK_DESKTOP
+    private func sendTelemetryFrame(kind: String, payload: [String: Any]) {
+        guard serialPort.isReadyForCommands else { return }
+        switch kind {
+        case "performance": guard (serialPort.devicePerformanceProtocol ?? 0) >= 1 else { return }
+        case "music": guard (serialPort.deviceMusicProtocol ?? 0) >= 1 else { return }
+        case "pc_dashboard_sample": guard (serialPort.deviceEchoDeskPcDashboardProtocol ?? 0) >= 1 else { return }
+        default: return
+        }
+
+        let frameId = allocateFrameId()
+        var envelope = payload
+        envelope["frameId"] = frameId
+        guard let bytes = try? JSONSerialization.data(withJSONObject: envelope),
+              bytes.count < (kind == "music" ? 1536 : 1024),
+              bytes.count <= (serialPort.deviceMaxFrameBytes ?? 4095),
+              let json = String(data: bytes, encoding: .utf8) else {
+            NSLog("[Telemetry] Rejected oversized or invalid %@ frame", kind)
+            return
+        }
+
+        serialSendQueue.async { [weak self] in
+            guard let self else { return }
+            let receipt = self.serialPort.sendJSONAndWaitForFrameAck(json, frameId: frameId)
+            DispatchQueue.main.async {
+                if self.registerFrameReceipt(receipt, source: kind) {
+                    self.lastUpdateDate = Date()
+                    self.onUpdate?()
+                }
+            }
+        }
+    }
+#endif
 
     private func logFrameReceipt(_ receipt: SerialFrameReceipt?, source: String) {
         guard let receipt else {
@@ -4110,6 +4262,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         monitor.onPanelReported = { [weak self] panel, variant in
             self?.handlePanelReport(panel: panel, firmwareVariant: variant)
         }
+#if ECHODESK_DESKTOP
+        monitor.onClockConfigRequest = { [weak self] mode in
+            self?.settingsController?.showEchoDeskClockUtility(requestedMode: mode)
+        }
+#endif
         monitor.start()
 
         // Firmware + App-Update Manager
@@ -4621,16 +4778,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func performLocalFlash(port: String, variant: String, path: String) {
         let fw = FirmwareManager.shared
         fw.beginFlashAttempt(port: port, variant: variant)
-        monitor.serialPort.stopScanning()
-        fw.flashFirmware(port: port, variant: variant, localPath: path) { [weak self] success, message in
-            DispatchQueue.main.async {
-                self?.monitor.serialPort.startScanning()
-                if success {
-                    DeviceRegistry.shared.updateCurrent { $0.displayVariant = variant }
-                    self?.monitor.queueDiagnosticTestFrameAfterNextConnect()
-                } else {
-                    // Bei lokalen Dateien wäre "andere Variante" mit derselben Binärdatei irreführend.
-                    self?.alert(title: L("flash.failed.title"), info: message, style: .warning)
+        monitor.prepareForFirmwareUpdate { [weak self] _ in
+            guard let self else { return }
+            self.monitor.serialPort.stopScanning()
+            fw.flashFirmware(port: port, variant: variant, localPath: path) { [weak self] success, message in
+                DispatchQueue.main.async {
+                    if success {
+                        self?.monitor.queueFirmwareUpdateCompletion(expectedVersion: nil)
+                        DeviceRegistry.shared.updateCurrent { $0.displayVariant = variant }
+                        self?.monitor.queueDiagnosticTestFrameAfterNextConnect()
+                    } else {
+                        // Bei lokalen Dateien wäre "andere Variante" mit derselben Binärdatei irreführend.
+                        self?.alert(title: L("flash.failed.title"), info: message, style: .warning)
+                    }
+                    self?.monitor.serialPort.startScanning()
                 }
             }
         }
@@ -4656,19 +4817,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let proceed: () -> Void = { [weak self] in
             guard let self = self else { return }
-            self.monitor.serialPort.stopScanning()
-            fw.flashFirmware(port: port, variant: variant) { [weak self] success, message in
-                DispatchQueue.main.async {
-                    self?.monitor.serialPort.startScanning()
-                    if success {
-                        self?.monitor.queueDiagnosticTestFrameAfterNextConnect()
-                    } else {
-                        self?.abandonPanelCorrection()
-                        self?.presentFlashRecovery(message: message, port: port, variant: variant)
+            let flashNow = { [weak self] in
+                guard let self else { return }
+                self.monitor.serialPort.stopScanning()
+                fw.flashFirmware(port: port, variant: variant) { [weak self] success, message in
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        if success {
+                            self.monitor.queueFirmwareUpdateCompletion(expectedVersion: fw.latestFirmwareVersionTag)
+                        }
+                        self.monitor.serialPort.startScanning()
+                        if success {
+                            self.monitor.queueDiagnosticTestFrameAfterNextConnect()
+                        } else {
+                            self.abandonPanelCorrection()
+                            self.presentFlashRecovery(message: message, port: port, variant: variant)
+                        }
+                        completion?(success, message)
                     }
-                    completion?(success, message)
                 }
             }
+            self.monitor.prepareForFirmwareUpdate { _ in flashNow() }
         }
 
         // Variantenspezifischer Cache-Check + Download falls noetig.
@@ -4864,8 +5033,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = L("update.available.title")
         let assetNames = appMgr.latestRelease?.assets.map(\.name).joined(separator: ", ") ?? "—"
-        let hasZip = appMgr.latestRelease?.assets.contains { $0.name == kAppAssetName } ?? false
+        let hasZip = appMgr.availableUpdateAsset != nil
+#if ECHODESK_DESKTOP
+        let hasDMG = appMgr.latestRelease?.assets.contains {
+            $0.name.hasPrefix("EchoDesk-Desktop-v") && $0.name.hasSuffix("-macos-universal.dmg")
+        } ?? false
+#else
         let hasDMG = appMgr.latestRelease?.assets.contains { $0.name == "AIMonitor.dmg" } ?? false
+#endif
         var info = """
         Version: \(appMgr.latestVersionDisplay)
         Installiert: v\(kAppVersion)
@@ -4902,7 +5077,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func downloadAppUpdate() {
         let appMgr = AppUpdateManager.shared
-        let hasAsset = appMgr.latestRelease?.assets.contains { $0.name == kAppAssetName } ?? false
+        let hasAsset = appMgr.availableUpdateAsset != nil
         if !hasAsset { appMgr.openReleasePage(); return }
         appMgr.downloadAndInstall { [weak self] success, extractedPathOrError in
             DispatchQueue.main.async {

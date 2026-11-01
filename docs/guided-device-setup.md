@@ -1,6 +1,6 @@
 # EchoDesk guided device setup
 
-EchoDesk Desktop 0.2.7 and EchoDesk OS 2.31.0 implement a coordinated first-run
+EchoDesk Desktop 0.2.8 and EchoDesk OS 2.32.0 implement a coordinated first-run
 flow for the Freenove FNK0114A_2P4 EchoDesk Mini. The WPF app never opens a COM
 port; the bundled EchoDesk Host remains the sole serial owner and the guided
 wizard reuses the existing firmware manager and flasher.

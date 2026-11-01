@@ -2,13 +2,14 @@
 //! den blockierenden CLI-Aufruf oder einen seriellen Zugriff hinweg (siehe
 //! `poll` und `serial_service`).
 
-use crate::claude_code::ClaudeCode;
 use crate::audio_visualizer::VisualizerFeed;
-use crate::flash::FlashRecord;
+use crate::claude_code::ClaudeCode;
 use crate::firmware_manager::FirmwareManagerState;
-use crate::plugins::PluginStore;
-use crate::performance::PerformanceFeed;
+use crate::flash::FlashRecord;
 use crate::music::MusicFeed;
+use crate::notifications::NotificationStackState;
+use crate::performance::PerformanceFeed;
+use crate::plugins::PluginStore;
 use crate::serial_service::{ConnectionSnapshot, Job};
 use crate::settings::Settings;
 use crate::updates::ReleaseCache;
@@ -50,6 +51,19 @@ pub struct AppState {
     /// Last validated EchoDesk control state reported by firmware. The local
     /// desktop broker reads this cache; it never opens the serial port.
     pub echo_desk_state: Mutex<Option<serde_json::Value>>,
+    /// Latest validated clock utility state and the latest unconsumed
+    /// device-originated configuration request.
+    pub echo_desk_clock_state: Mutex<Option<serde_json::Value>>,
+    pub echo_desk_clock_config_request: Mutex<Option<String>>,
+    /// Increments for every physical Clock configuration gesture, including
+    /// repeated requests for the same mode.
+    pub echo_desk_clock_config_sequence: AtomicU64,
+    /// Permission/capture health for Notification Stack. Notification bodies
+    /// are never persisted here or to settings.json.
+    pub notification_stack: Mutex<NotificationStackState>,
+    pub echo_desk_notification_state: Mutex<Option<serde_json::Value>>,
+    /// Validated PC Dashboard metric selection. Samples are intentionally not persisted.
+    pub echo_desk_pc_dashboard_state: Mutex<Option<serde_json::Value>>,
     /// Monotonic status/event revision for stale-update protection in the WPF
     /// client. Device settings additionally carry their firmware revision.
     pub desktop_broker_revision: AtomicU64,
@@ -98,6 +112,12 @@ impl AppState {
             music: MusicFeed::default(),
             audio_visualizer: VisualizerFeed::default(),
             echo_desk_state: Mutex::new(None),
+            echo_desk_clock_state: Mutex::new(None),
+            echo_desk_clock_config_request: Mutex::new(None),
+            echo_desk_clock_config_sequence: AtomicU64::new(0),
+            notification_stack: Mutex::new(NotificationStackState::default()),
+            echo_desk_notification_state: Mutex::new(None),
+            echo_desk_pc_dashboard_state: Mutex::new(None),
             desktop_broker_revision: AtomicU64::new(1),
             releases: Mutex::new(ReleaseCache::default()),
             release_check: (Mutex::new(false), Condvar::new()),

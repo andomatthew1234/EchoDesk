@@ -183,6 +183,7 @@ export interface DeviceInfo {
   sceneProtocol: number | null;
   performanceProtocol: number | null;
   musicProtocol: number | null;
+  echoDeskClockProtocol: number | null;
   wifiConfigured: boolean | null;
   wifiConnected: boolean | null;
   timeSynced: boolean | null;

@@ -7,7 +7,7 @@
 "app.settings" = "Settings …";
 "banner.close" = "Dismiss";
 "codex.noquota" = "No quota data";
-"codex.notfound.short" = "CodexBar CLI not found (“brew install codexbar”).";
+"codex.notfound.short" = "The bundled Codex usage component is missing. Reinstall EchoDesk Desktop.";
 "codex.reload" = "Reload now";
 "codex.reload.tooltip" = "Queries the data through the CodexBar CLI again.";
 "codex.short.climissing" = "CLI missing";
@@ -159,7 +159,7 @@
 "ov.appupdate.title" = "Install app update";
 "ov.checking" = "Checking your setup …";
 "ov.codex.check" = "Check CodexBar data";
-"ov.codex.notfound" = "The CodexBar CLI wasn't found. Install it with “brew install codexbar”.";
+"ov.codex.notfound" = "The bundled Codex usage component is missing. Reinstall EchoDesk Desktop.";
 "ov.codex.title" = "Check CodexBar";
 "ov.esp32.connect" = "Connect the ESP32";
 "ov.fw.foreign.detail" = "The USB port is open, but the device doesn't identify itself as AI Monitor.";

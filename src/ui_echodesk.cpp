@@ -11,17 +11,18 @@
 #include "echodesk_usage_state.h"
 #include "serial_receiver.h"
 #include "ui_common.h"
+#include "ui_clock.h"
 #include "ui_now_playing.h"
 #include "ui_performance.h"
+#include "ui_my_device.h"
+#include "ui_notification_stack.h"
+#include "ui_pc_dashboard.h"
 
 #include <Arduino.h>
 #include <lvgl.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-
-LV_FONT_DECLARE(font_standby_clock_76);
 
 namespace {
 
@@ -32,6 +33,9 @@ enum EchoApp : uint8_t {
     ECHO_PERFORMANCE,
     ECHO_NOW_PLAYING,
     ECHO_SETTINGS,
+    ECHO_MY_DEVICE,
+    ECHO_NOTIFICATION_STACK,
+    ECHO_PC_DASHBOARD,
 };
 
 enum class SetupPage : uint8_t {
@@ -54,7 +58,6 @@ constexpr unsigned long UI_REFRESH_MS = 1000;
 
 lv_obj_t *home_screen = nullptr;
 lv_obj_t *codex_screen = nullptr;
-lv_obj_t *clock_screen = nullptr;
 lv_obj_t *settings_screen = nullptr;
 lv_obj_t *setup_screen = nullptr;
 EchoApp current_app = ECHO_HOME;
@@ -70,6 +73,13 @@ lv_obj_t *setup_hello_prompt = nullptr;
 lv_obj_t *setup_hello_button = nullptr;
 lv_obj_t *setup_wifi_status = nullptr;
 lv_obj_t *setup_wifi_retry = nullptr;
+lv_obj_t *update_screen = nullptr;
+lv_obj_t *update_return_screen = nullptr;
+EchoDeskUpdateScreen pending_update_screen = EchoDeskUpdateScreen::NONE;
+bool update_screen_request_pending = false;
+bool update_screen_rendered = false;
+uint32_t pending_update_dismiss_ms = 0;
+unsigned long update_screen_dismiss_at = 0;
 
 struct UsageWidgets {
     lv_obj_t *container = nullptr;
@@ -84,16 +94,6 @@ lv_obj_t *codex_loading = nullptr;
 lv_obj_t *codex_loading_label = nullptr;
 UsageWidgets session_widgets;
 UsageWidgets weekly_widgets;
-
-lv_obj_t *clock_outline[8] = {};
-lv_obj_t *clock_hour_cutout = nullptr;
-lv_obj_t *clock_minute = nullptr;
-lv_obj_t *clock_ampm = nullptr;
-lv_obj_t *clock_loading = nullptr;
-lv_obj_t *clock_waiting = nullptr;
-char last_clock_hour[3] = "";
-char last_clock_minute[3] = "";
-char last_clock_ampm[3] = "";
 
 lv_obj_t *brightness_slider = nullptr;
 lv_obj_t *brightness_value = nullptr;
@@ -217,6 +217,73 @@ lv_obj_t *setup_corner(lv_obj_t *parent, bool bottom_right,
         setup_rect(corner, thickness, height, 0, 0);
     }
     return corner;
+}
+
+lv_obj_t *create_update_handoff_screen(EchoDeskUpdateScreen mode) {
+    lv_obj_t *screen = lv_obj_create(nullptr);
+    setup_style_screen(screen);
+    setup_corner(screen, false, 18, 18);
+    setup_corner(screen, true, 230, 170);
+
+    const bool complete = mode == EchoDeskUpdateScreen::COMPLETE;
+    lv_obj_t *eyebrow = setup_make_label(
+        screen, complete ? "UPDATE COMPLETE" : "SYSTEM UPDATE",
+        &lv_font_montserrat_12);
+    lv_obj_set_style_text_color(eyebrow, lv_color_hex(0x8A8A8A), LV_PART_MAIN);
+    lv_obj_set_width(eyebrow, 260);
+    lv_obj_align(eyebrow, LV_ALIGN_CENTER, 0, -63);
+
+    lv_obj_t *title = setup_make_label(
+        screen, complete ? "ECHODESK OS UPDATED" : "UPDATING ECHODESK OS",
+        &lv_font_montserrat_20);
+    lv_obj_set_width(title, 282);
+    lv_obj_align(title, LV_ALIGN_CENTER, 0, -28);
+
+    lv_obj_t *detail = setup_make_label(
+        screen, complete ? "Your EchoDesk is ready to use."
+                         : "Keep USB connected",
+        &lv_font_montserrat_14);
+    lv_obj_set_width(detail, 276);
+    lv_obj_align(detail, LV_ALIGN_CENTER, 0, 13);
+
+    lv_obj_t *warning = setup_make_label(
+        screen, complete ? "Returning to EchoDesk..." : "Do not unplug your EchoDesk.",
+        &lv_font_montserrat_12);
+    lv_obj_set_style_text_color(warning, lv_color_hex(0x8A8A8A), LV_PART_MAIN);
+    lv_obj_set_width(warning, 276);
+    lv_obj_align(warning, LV_ALIGN_CENTER, 0, 42);
+    return screen;
+}
+
+void process_update_screen(unsigned long now) {
+    if (update_screen_request_pending) {
+        update_screen_request_pending = false;
+        update_return_screen = lv_screen_active();
+        update_screen = create_update_handoff_screen(pending_update_screen);
+        lv_screen_load(update_screen);
+        lv_refr_now(nullptr);
+        update_screen_rendered = true;
+        update_screen_dismiss_at = pending_update_dismiss_ms > 0
+            ? now + pending_update_dismiss_ms
+            : 0;
+        Serial.printf("[EchoDesk] Update screen rendered: %s\n",
+                      pending_update_screen == EchoDeskUpdateScreen::COMPLETE
+                          ? "complete" : "preparing");
+    }
+
+    if (update_screen && update_screen_dismiss_at != 0 &&
+        static_cast<long>(now - update_screen_dismiss_at) >= 0) {
+        update_screen = nullptr;
+        update_screen_dismiss_at = 0;
+        if (update_return_screen) {
+            lv_screen_load_anim(update_return_screen, LV_SCR_LOAD_ANIM_FADE_IN,
+                                180, 0, true);
+            lv_refr_now(nullptr);
+        }
+        update_return_screen = nullptr;
+        pending_update_screen = EchoDeskUpdateScreen::NONE;
+        Serial.println("[EchoDesk] Update completion screen dismissed");
+    }
 }
 
 void setup_anim_set_x(void *object, int32_t value) {
@@ -549,14 +616,22 @@ void add_home_card(lv_obj_t *screen, int16_t x, int16_t y, int16_t width,
     lv_obj_t *icon_label = make_label(icon_box, icon, &lv_font_montserrat_14, color(COLOR_WHITE));
     lv_obj_center(icon_label);
 
+    const bool multiline_title = strchr(title, '\n') != nullptr;
     const lv_font_t *title_font = strlen(title) > 9 ? &lv_font_montserrat_12
                                                     : &lv_font_montserrat_14;
     lv_obj_t *title_label = make_label(button, title, title_font, color(COLOR_WHITE));
-    lv_obj_set_pos(title_label, 45, 6);
-    lv_obj_t *sub_label = make_label(button, subtitle, &lv_font_montserrat_12, color(COLOR_GREY));
-    lv_obj_set_width(sub_label, width - 18);
-    lv_label_set_long_mode(sub_label, LV_LABEL_LONG_DOT);
-    lv_obj_set_pos(sub_label, 9, 36);
+    lv_obj_set_width(title_label, width - 66);
+    lv_obj_set_pos(title_label, 45, multiline_title ? 4 : 6);
+    if (multiline_title) {
+        lv_obj_set_style_text_line_space(title_label, -3, LV_PART_MAIN);
+    }
+    if (subtitle && subtitle[0]) {
+        lv_obj_t *sub_label = make_label(button, subtitle, &lv_font_montserrat_12,
+                                         color(COLOR_GREY));
+        lv_obj_set_width(sub_label, width - 18);
+        lv_label_set_long_mode(sub_label, LV_LABEL_LONG_DOT);
+        lv_obj_set_pos(sub_label, 9, 36);
+    }
     lv_obj_t *arrow = make_label(button, ">", &lv_font_montserrat_16, color(COLOR_GREY));
     lv_obj_align(arrow, LV_ALIGN_TOP_RIGHT, -8, 11);
 }
@@ -567,12 +642,35 @@ lv_obj_t *create_home_screen() {
     add_delete_tracking(screen, &home_screen);
     style_screen(screen);
     add_small_wordmark(screen);
-    add_home_card(screen, 8, 43, 146, ECHO_CODEX, "C", "CODEX", "Usage limits");
-    add_home_card(screen, 166, 43, 146, ECHO_CLOCK, "12", "CLOCK", "Local time");
-    add_home_card(screen, 8, 104, 146, ECHO_PERFORMANCE, "^", "PERFORMANCE", "PC activity");
-    add_home_card(screen, 166, 104, 146, ECHO_NOW_PLAYING, LV_SYMBOL_AUDIO,
-                  "NOW PLAYING", "Windows media");
-    add_home_card(screen, 8, 165, 304, ECHO_SETTINGS, "*", "SETTINGS", "Display & restart");
+    lv_obj_t *content = lv_obj_create(screen);
+    lv_obj_remove_style_all(content);
+    lv_obj_set_size(content, 320, 200);
+    lv_obj_set_pos(content, 0, 40);
+    lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(content, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_width(content, 3, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(content, color(COLOR_DIM), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(content, LV_OPA_70, LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(content, 2, LV_PART_SCROLLBAR);
+
+    add_home_card(content, 8, 3, 146, ECHO_CODEX, "C", "CODEX", "Usage limits");
+    add_home_card(content, 166, 3, 146, ECHO_CLOCK, "12", "CLOCK", "Local time");
+    add_home_card(content, 8, 64, 146, ECHO_PERFORMANCE, "^", "PERFORMANCE", "PC activity");
+    add_home_card(content, 166, 64, 146, ECHO_NOW_PLAYING, LV_SYMBOL_AUDIO,
+                  "NOW PLAYING", "Music & media");
+    add_home_card(content, 8, 125, 146, ECHO_NOTIFICATION_STACK, LV_SYMBOL_BELL,
+                  "NOTIFICATION\nSTACK", "");
+    add_home_card(content, 166, 125, 146, ECHO_MY_DEVICE, "i", "MY DEVICE",
+                  "Health & links");
+    add_home_card(content, 8, 186, 146, ECHO_SETTINGS, "*", "SETTINGS",
+                  "Display & restart");
+    add_home_card(content, 166, 186, 146, ECHO_PC_DASHBOARD, "PC",
+                  "PC DASHBOARD", "Your selected stats");
+    lv_obj_t *end_marker = lv_obj_create(content);
+    lv_obj_remove_style_all(end_marker);
+    lv_obj_set_size(end_marker, 1, 1);
+    lv_obj_set_pos(end_marker, 0, 246);
     return screen;
 }
 
@@ -788,111 +886,6 @@ void update_codex() {
                                  codex.usage.seven_day_utilization,
                                  codex.usage.shows_remaining),
                              codex.usage.seven_day_reset_epoch, weekly_inactive);
-    }
-}
-
-void set_clock_visible(bool visible) {
-    for (lv_obj_t *label : clock_outline) {
-        if (label) visible ? lv_obj_clear_flag(label, LV_OBJ_FLAG_HIDDEN)
-                           : lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (clock_hour_cutout) visible ? lv_obj_clear_flag(clock_hour_cutout, LV_OBJ_FLAG_HIDDEN)
-                                   : lv_obj_add_flag(clock_hour_cutout, LV_OBJ_FLAG_HIDDEN);
-    if (clock_minute) visible ? lv_obj_clear_flag(clock_minute, LV_OBJ_FLAG_HIDDEN)
-                              : lv_obj_add_flag(clock_minute, LV_OBJ_FLAG_HIDDEN);
-    if (clock_ampm) visible ? lv_obj_clear_flag(clock_ampm, LV_OBJ_FLAG_HIDDEN)
-                            : lv_obj_add_flag(clock_ampm, LV_OBJ_FLAG_HIDDEN);
-    if (clock_loading) visible ? lv_obj_add_flag(clock_loading, LV_OBJ_FLAG_HIDDEN)
-                               : lv_obj_clear_flag(clock_loading, LV_OBJ_FLAG_HIDDEN);
-    if (clock_waiting) visible ? lv_obj_add_flag(clock_waiting, LV_OBJ_FLAG_HIDDEN)
-                               : lv_obj_clear_flag(clock_waiting, LV_OBJ_FLAG_HIDDEN);
-}
-
-lv_obj_t *create_clock_screen() {
-    lv_obj_t *screen = lv_obj_create(nullptr);
-    clock_screen = screen;
-    add_delete_tracking(screen, &clock_screen);
-    style_screen(screen);
-    const char *heading = g_config.timezone == ECHODESK_TIMEZONE_UTC ? "UTC" :
-                          g_config.timezone == ECHODESK_TIMEZONE_SYDNEY ? "SYDNEY" :
-                          "MELBOURNE";
-    add_header(screen, heading);
-
-    static const int8_t outline_offsets[][2] = {
-        {-2, -2}, {0, -2}, {2, -2}, {-2, 0},
-        {2, 0}, {-2, 2}, {0, 2}, {2, 2},
-    };
-    for (uint8_t i = 0; i < 8; ++i) {
-        clock_outline[i] = make_label(screen, "12", &font_standby_clock_76, color(COLOR_WHITE));
-        lv_obj_align(clock_outline[i], LV_ALIGN_CENTER,
-                     outline_offsets[i][0], -39 + outline_offsets[i][1]);
-    }
-    clock_hour_cutout = make_label(screen, "12", &font_standby_clock_76, color(COLOR_BLACK));
-    lv_obj_align(clock_hour_cutout, LV_ALIGN_CENTER, 0, -39);
-    clock_minute = make_label(screen, "00", &font_standby_clock_76, color(COLOR_WHITE));
-    lv_obj_align(clock_minute, LV_ALIGN_CENTER, 0, 38);
-    clock_ampm = make_label(screen, "AM", &lv_font_montserrat_14, color(COLOR_GREY));
-    lv_obj_align(clock_ampm, LV_ALIGN_RIGHT_MID, -22, -38);
-    clock_loading = make_spinner(screen, 38);
-    lv_obj_align(clock_loading, LV_ALIGN_CENTER, 0, -8);
-    clock_waiting = make_label(screen, "WAITING FOR TIME", &lv_font_montserrat_16, color(COLOR_GREY));
-    lv_obj_align(clock_waiting, LV_ALIGN_CENTER, 0, 28);
-    last_clock_hour[0] = '\0';
-    last_clock_minute[0] = '\0';
-    last_clock_ampm[0] = '\0';
-    return screen;
-}
-
-void update_clock() {
-    if (!clock_screen) return;
-    time_t now = time(nullptr);
-    if (now <= CLOCK_VALID_EPOCH) {
-        set_clock_visible(false);
-        return;
-    }
-
-    struct tm local_time = {};
-    localtime_r(&now, &local_time);
-    char hour[3];
-    char minute[3];
-    char ampm[3];
-    const bool format_24h = g_config.clock_format == CLOCK_FORMAT_24_HOUR;
-    strftime(hour, sizeof(hour), format_24h ? "%H" : "%I", &local_time);
-    strftime(minute, sizeof(minute), "%M", &local_time);
-    if (format_24h) ampm[0] = '\0';
-    else strftime(ampm, sizeof(ampm), "%p", &local_time);
-    if (!format_24h && hour[0] == '0') {
-        hour[0] = hour[1];
-        hour[1] = '\0';
-    }
-
-    set_clock_visible(true);
-    if (format_24h && clock_ampm) {
-        lv_obj_add_flag(clock_ampm, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (strcmp(hour, last_clock_hour) != 0) {
-        static const int8_t outline_offsets[][2] = {
-            {-2, -2}, {0, -2}, {2, -2}, {-2, 0},
-            {2, 0}, {-2, 2}, {0, 2}, {2, 2},
-        };
-        for (uint8_t i = 0; i < 8; ++i) {
-            lv_label_set_text(clock_outline[i], hour);
-            // A 1-digit hour has a different auto-size than a 2-digit hour.
-            // Re-align after the text change to keep both precisely centred.
-            lv_obj_align(clock_outline[i], LV_ALIGN_CENTER,
-                         outline_offsets[i][0], -39 + outline_offsets[i][1]);
-        }
-        lv_label_set_text(clock_hour_cutout, hour);
-        lv_obj_align(clock_hour_cutout, LV_ALIGN_CENTER, 0, -39);
-        strlcpy(last_clock_hour, hour, sizeof(last_clock_hour));
-    }
-    if (strcmp(minute, last_clock_minute) != 0) {
-        lv_label_set_text(clock_minute, minute);
-        strlcpy(last_clock_minute, minute, sizeof(last_clock_minute));
-    }
-    if (strcmp(ampm, last_clock_ampm) != 0) {
-        lv_label_set_text(clock_ampm, ampm);
-        strlcpy(last_clock_ampm, ampm, sizeof(last_clock_ampm));
     }
 }
 
@@ -1156,6 +1149,30 @@ void on_now_playing_home(void *) {
     show_app(ECHO_HOME);
 }
 
+void on_my_device_home(void *) {
+    show_app(ECHO_HOME);
+}
+
+void on_clock_home(void *) {
+    show_app(ECHO_HOME);
+}
+
+void on_notification_stack_home(void *) {
+    show_app(ECHO_HOME);
+}
+
+void on_pc_dashboard_home(void *) {
+    show_app(ECHO_HOME);
+}
+
+bool on_clock_configuration_request(EchoDeskClockMode mode, void *) {
+    return serial_echodesk_clock_request_configuration(mode);
+}
+
+void on_clock_state_changed(void *) {
+    serial_echodesk_state_changed();
+}
+
 void show_app(EchoApp app, bool animate) {
     if (app == current_app && lv_screen_active() != nullptr) return;
     if (current_app == ECHO_NOW_PLAYING && app != ECHO_NOW_PLAYING) {
@@ -1173,9 +1190,8 @@ void show_app(EchoApp app, bool animate) {
             update_codex();
             break;
         case ECHO_CLOCK:
-            if (!clock_screen) create_clock_screen();
-            target = clock_screen;
-            update_clock();
+            target = ui_clock_create();
+            ui_clock_tick();
             break;
         case ECHO_PERFORMANCE:
             ui_performance_apply_default_view();
@@ -1187,6 +1203,18 @@ void show_app(EchoApp app, bool animate) {
         case ECHO_SETTINGS:
             if (!settings_screen) create_settings_screen();
             target = settings_screen;
+            break;
+        case ECHO_MY_DEVICE:
+            target = ui_my_device_create();
+            ui_my_device_tick();
+            break;
+        case ECHO_NOTIFICATION_STACK:
+            target = ui_notification_stack_create();
+            ui_notification_stack_tick();
+            break;
+        case ECHO_PC_DASHBOARD:
+            target = ui_pc_dashboard_create();
+            ui_pc_dashboard_tick();
             break;
     }
 
@@ -1203,7 +1231,9 @@ void show_app(EchoApp app, bool animate) {
                   app == ECHO_HOME ? "Home" : app == ECHO_CODEX ? "Codex" :
                   app == ECHO_CLOCK ? "Clock" : app == ECHO_PERFORMANCE ? "Performance" :
                   app == ECHO_NOW_PLAYING ? "Now Playing" :
-                  "Settings");
+                  app == ECHO_MY_DEVICE ? "My device" :
+                  app == ECHO_NOTIFICATION_STACK ? "Notification Stack" :
+                  app == ECHO_PC_DASHBOARD ? "PC Dashboard" : "Settings");
     serial_echodesk_state_changed();
 }
 
@@ -1211,10 +1241,13 @@ lv_obj_t *current_screen_pointer() {
     switch (current_app) {
         case ECHO_HOME: return home_screen;
         case ECHO_CODEX: return codex_screen;
-        case ECHO_CLOCK: return clock_screen;
+        case ECHO_CLOCK: return ui_clock_screen();
         case ECHO_PERFORMANCE: return ui_performance_screen();
         case ECHO_NOW_PLAYING: return ui_now_playing_screen();
         case ECHO_SETTINGS: return settings_screen;
+        case ECHO_MY_DEVICE: return ui_my_device_screen();
+        case ECHO_NOTIFICATION_STACK: return ui_notification_stack_screen();
+        case ECHO_PC_DASHBOARD: return ui_pc_dashboard_screen();
     }
     return nullptr;
 }
@@ -1223,10 +1256,13 @@ void clear_current_slot() {
     switch (current_app) {
         case ECHO_HOME: home_screen = nullptr; break;
         case ECHO_CODEX: codex_screen = nullptr; break;
-        case ECHO_CLOCK: clock_screen = nullptr; break;
+        case ECHO_CLOCK: break;
         case ECHO_PERFORMANCE: break;
         case ECHO_NOW_PLAYING: break;
         case ECHO_SETTINGS: settings_screen = nullptr; break;
+        case ECHO_MY_DEVICE: break;
+        case ECHO_NOTIFICATION_STACK: break;
+        case ECHO_PC_DASHBOARD: break;
     }
 }
 
@@ -1234,10 +1270,13 @@ lv_obj_t *rebuild_current_screen() {
     switch (current_app) {
         case ECHO_HOME: return create_home_screen();
         case ECHO_CODEX: return create_codex_screen();
-        case ECHO_CLOCK: return create_clock_screen();
+        case ECHO_CLOCK: return ui_clock_recreate();
         case ECHO_PERFORMANCE: return ui_performance_recreate();
         case ECHO_NOW_PLAYING: return ui_now_playing_recreate();
         case ECHO_SETTINGS: return create_settings_screen();
+        case ECHO_MY_DEVICE: return ui_my_device_recreate();
+        case ECHO_NOTIFICATION_STACK: return ui_notification_stack_recreate();
+        case ECHO_PC_DASHBOARD: return ui_pc_dashboard_recreate();
     }
     return create_home_screen();
 }
@@ -1247,8 +1286,13 @@ lv_obj_t *rebuild_current_screen() {
 void ui_echodesk_init() {
     serial_apply_configured_timezone();
     current_app = ECHO_HOME;
+    ui_clock_set_callbacks(on_clock_home, on_clock_configuration_request,
+                           on_clock_state_changed);
     ui_performance_set_navigation_callbacks(on_performance_home, on_performance_back);
     ui_now_playing_set_navigation_callback(on_now_playing_home);
+    ui_my_device_set_navigation_callback(on_my_device_home);
+    ui_notification_stack_set_navigation_callback(on_notification_stack_home);
+    ui_pc_dashboard_set_navigation_callback(on_pc_dashboard_home);
     if (echodesk_setup_normalize_state(g_config.setup_state) !=
         ECHODESK_SETUP_COMPLETED) {
         load_setup_page(setup_page_for_state(g_config.setup_state));
@@ -1264,6 +1308,7 @@ void ui_echodesk_init() {
         case ECHODESK_APP_PERFORMANCE: startup_app = ECHO_PERFORMANCE; break;
         case ECHODESK_APP_NOW_PLAYING: startup_app = ECHO_NOW_PLAYING; break;
         case ECHODESK_APP_SETTINGS: startup_app = ECHO_SETTINGS; break;
+        case ECHODESK_APP_MY_DEVICE: startup_app = ECHO_MY_DEVICE; break;
         default: break;
     }
     if (startup_app == ECHO_HOME) {
@@ -1279,6 +1324,17 @@ void ui_echodesk_init() {
 
 void ui_echodesk_tick() {
     unsigned long now = millis();
+    process_update_screen(now);
+    if (update_screen) {
+        // Keep the normal UI frozen while either update handoff is visible, but
+        // retain the serial restart escape hatch if Desktop aborts.
+        if (restart_at_ms != 0 &&
+            static_cast<long>(now - restart_at_ms) >= 0) {
+            Serial.flush();
+            ESP.restart();
+        }
+        return;
+    }
     if (setup_state_change_pending) {
         setup_state_change_pending = false;
         if (echodesk_setup_normalize_state(g_config.setup_state) ==
@@ -1353,13 +1409,20 @@ void ui_echodesk_tick() {
     if (current_app == ECHO_CODEX && (new_data || now - last_refresh_ms >= UI_REFRESH_MS)) {
         update_codex();
         last_refresh_ms = now;
-    } else if (current_app == ECHO_CLOCK && now - last_refresh_ms >= UI_REFRESH_MS) {
-        update_clock();
-        last_refresh_ms = now;
+    } else if (current_app == ECHO_CLOCK) {
+        ui_clock_tick();
     } else if (current_app == ECHO_PERFORMANCE) {
         ui_performance_tick();
     } else if (current_app == ECHO_NOW_PLAYING) {
         ui_now_playing_tick();
+    } else if (current_app == ECHO_MY_DEVICE &&
+               now - last_refresh_ms >= UI_REFRESH_MS) {
+        ui_my_device_tick();
+        last_refresh_ms = now;
+    } else if (current_app == ECHO_NOTIFICATION_STACK) {
+        ui_notification_stack_tick();
+    } else if (current_app == ECHO_PC_DASHBOARD) {
+        ui_pc_dashboard_tick();
     } else if (current_app == ECHO_SETTINGS && brightness_slider &&
                !lv_obj_has_state(brightness_slider, LV_STATE_PRESSED)) {
         uint8_t value = g_config.brightness_pct < 10 ? 10 : g_config.brightness_pct;
@@ -1405,6 +1468,30 @@ void ui_echodesk_recreate() {
         Serial.println("[EchoDesk] Now Playing app recreated after display/config change");
         return;
     }
+    if (current_app == ECHO_MY_DEVICE) {
+        ui_my_device_recreate();
+        lv_refr_now(nullptr);
+        Serial.println("[EchoDesk] My device app recreated after display/config change");
+        return;
+    }
+    if (current_app == ECHO_CLOCK) {
+        ui_clock_recreate();
+        lv_refr_now(nullptr);
+        Serial.println("[EchoDesk] Clock utility recreated after display/config change");
+        return;
+    }
+    if (current_app == ECHO_NOTIFICATION_STACK) {
+        ui_notification_stack_recreate();
+        lv_refr_now(nullptr);
+        Serial.println("[EchoDesk] Notification Stack recreated after display/config change");
+        return;
+    }
+    if (current_app == ECHO_PC_DASHBOARD) {
+        ui_pc_dashboard_recreate();
+        lv_refr_now(nullptr);
+        Serial.println("[EchoDesk] PC Dashboard recreated after display/config change");
+        return;
+    }
     lv_obj_t *old = current_screen_pointer();
     EchoApp rebuilding = current_app;
     clear_current_slot();
@@ -1413,7 +1500,6 @@ void ui_echodesk_recreate() {
     if (old && old != replacement) lv_obj_delete(old);
     current_app = rebuilding;
     if (current_app == ECHO_CODEX) update_codex();
-    if (current_app == ECHO_CLOCK) update_clock();
     lv_refr_now(nullptr);
     Serial.println("[EchoDesk] Current app recreated after display/config change");
 }
@@ -1427,6 +1513,11 @@ bool ui_echodesk_request_open_app(const char *app) {
     else if (strcmp(app, "performance") == 0) pending_remote_app = ECHO_PERFORMANCE;
     else if (strcmp(app, "nowPlaying") == 0) pending_remote_app = ECHO_NOW_PLAYING;
     else if (strcmp(app, "settings") == 0) pending_remote_app = ECHO_SETTINGS;
+    else if (strcmp(app, "myDevice") == 0) pending_remote_app = ECHO_MY_DEVICE;
+    else if (strcmp(app, "notificationStack") == 0)
+        pending_remote_app = ECHO_NOTIFICATION_STACK;
+    else if (strcmp(app, "pcDashboard") == 0)
+        pending_remote_app = ECHO_PC_DASHBOARD;
     else return false;
     remote_app_pending = true;
     return true;
@@ -1439,12 +1530,34 @@ const char *ui_echodesk_active_app_name() {
         case ECHO_PERFORMANCE: return "performance";
         case ECHO_NOW_PLAYING: return "nowPlaying";
         case ECHO_SETTINGS: return "settings";
+        case ECHO_MY_DEVICE: return "myDevice";
+        case ECHO_NOTIFICATION_STACK: return "notificationStack";
+        case ECHO_PC_DASHBOARD: return "pcDashboard";
         default: return "home";
     }
 }
 
 void ui_echodesk_request_restart() {
     if (restart_at_ms == 0) restart_at_ms = millis() + 350;
+}
+
+bool ui_echodesk_request_update_screen(EchoDeskUpdateScreen requested,
+                                       uint32_t dismiss_after_ms) {
+    if (requested == EchoDeskUpdateScreen::NONE || update_screen_request_pending ||
+        update_screen) {
+        return false;
+    }
+    pending_update_screen = requested;
+    pending_update_dismiss_ms = dismiss_after_ms;
+    update_screen_rendered = false;
+    update_screen_request_pending = true;
+    return true;
+}
+
+bool ui_echodesk_take_update_screen_rendered() {
+    const bool rendered = update_screen_rendered;
+    update_screen_rendered = false;
+    return rendered;
 }
 
 void ui_echodesk_setup_state_changed() {
@@ -1459,6 +1572,8 @@ void ui_echodesk_recreate() {}
 bool ui_echodesk_request_open_app(const char *) { return false; }
 const char *ui_echodesk_active_app_name() { return "unsupported"; }
 void ui_echodesk_request_restart() {}
+bool ui_echodesk_request_update_screen(EchoDeskUpdateScreen, uint32_t) { return false; }
+bool ui_echodesk_take_update_screen_rendered() { return false; }
 void ui_echodesk_setup_state_changed() {}
 
 #endif

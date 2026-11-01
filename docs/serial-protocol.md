@@ -758,6 +758,7 @@ Ist keine Geräteversion bekannt, fällt der Host für die ACK- und Brightness-P
 | 2.29.0 | Startup-App, 12/24-Stunden-Uhr, benannte DST-Zeitzonen, Codex-Modus/-Ansicht und Performance-Standardansicht über Desktop Control v1 | `(config_store.cpp)`, `(echodesk_control.cpp)`, `(ui_echodesk.cpp)`, `(ui_performance.cpp)` |
 | 2.30.0 | Versionierte Ersteinrichtung, persistenter Setup-Zustand und sicherer Factory Reset ohne vollständiges Flash-Löschen | `(echodesk_setup.cpp)`, `(config_store.cpp)`, `(serial_receiver.cpp)`, `(ui_echodesk.cpp)` |
 | 2.31.0 | Optionale geschützte WLAN-Einrichtung mit lokal begrenzter Discovery, Pairing-Code und authentifizierter Wiedererkennung; USB bleibt Standard | `(echodesk_wifi_setup.cpp)`, `(echodesk_wifi_protocol.cpp)`, `(wifi_time.cpp)` |
+| 2.32.0 | Clock, Notification Stack, PC Dashboard, My Device und gestufter Update-Fortschritt | `(echodesk_clock.cpp)`, `(echodesk_notifications.cpp)`, `(pc_dashboard.cpp)`, `(my_device_health.cpp)`, `(echodesk_update.cpp)` |
 
 Unbekannte Felder werden von der Firmware ignoriert (ArduinoJson-Zugriff per Schlüssel), unbekannte Provider fallen auf `claude` zurück `(providers.cpp:107)`.
 
@@ -1098,7 +1099,8 @@ Every request requires `version:1` and a nonzero numeric `requestId`.
 ```
 
 Supported app values are `home`, `codex`, `clock`, `performance`,
-`nowPlaying`, and `settings`. Navigation is queued and applied by the normal UI
+`nowPlaying`, `notificationStack`, `pcDashboard`, `myDevice`, and `settings`.
+Navigation is queued and applied by the normal UI
 tick rather than running LVGL work inside the serial parser.
 
 The state response to `echodesk_get_state` includes the request ID. The same
@@ -1106,7 +1108,7 @@ message without a request ID is emitted when touchscreen navigation or a
 supported setting changes:
 
 ```json
-{"type":"echodesk_state","version":1,"requestId":41,"revision":7,"deviceName":"EchoDesk","hardwareModel":"Freenove FNK0114A_2P4","firmwareVersion":"2.29.0","activeApp":"home","supportedApps":["home","codex","clock","performance","nowPlaying","settings"],"settings":{"theme":"dark","brightness":80,"nowPlayingLayout":"carPlay","nowPlayingBackground":"audioBars","nowPlayingBackgroundCustomized":true,"defaultApp":"home","clockFormat":"24h","timezone":"Australia/Sydney","codexPercentageMode":"remaining","codexPreferredDisplay":"both","performanceDefaultView":"overview"},"unsupportedSettings":[]}
+{"type":"echodesk_state","version":1,"requestId":41,"revision":7,"deviceName":"EchoDesk","hardwareModel":"Freenove FNK0114A_2P4","firmwareVersion":"2.32.0","activeApp":"home","supportedApps":["home","codex","clock","performance","nowPlaying","myDevice","settings"],"settings":{"theme":"dark","brightness":80,"nowPlayingLayout":"carPlay","nowPlayingBackground":"audioBars","nowPlayingBackgroundCustomized":true,"defaultApp":"home","clockFormat":"24h","timezone":"Australia/Sydney","codexPercentageMode":"remaining","codexPreferredDisplay":"both","performanceDefaultView":"overview"},"unsupportedSettings":[]}
 ```
 
 Settings updates are partial but atomic. `baseRevision` must match the current
@@ -1133,6 +1135,11 @@ the control protocol version. `defaultApp` accepts every supported app name;
 `codexPreferredDisplay` is `both`, `session` or `weekly`; and
 `performanceDefaultView` is `overview`, `cpu`, `gpu` or `memory`. Australian
 timezone settings retain DST rules rather than storing a fixed offset.
+
+Firmware 2.32.0 adds `myDevice` to `supportedApps` and to `defaultApp`. The
+screen summarizes recently accepted host traffic, Wi-Fi state, source-data
+freshness and local device diagnostics; it does not add a heartbeat or change
+the version-1 control envelope.
 
 Successful mutating requests return:
 
@@ -1178,3 +1185,143 @@ these USB serial messages. Discovery and credential provisioning use a
 separate, bounded local-network protocol documented in
 [`wifi-setup-protocol.md`](wifi-setup-protocol.md). Firmware installation,
 recovery and the normal live data path remain USB-only.
+
+## 16. EchoDesk OS update handoff v1
+
+Firmware advertising `echoDeskUpdateProtocol:1` accepts two strict Control v1
+commands. Each request contains only `cmd`, `version`, and a non-zero numeric
+`requestId`:
+
+```json
+{"cmd":"echodesk_prepare_update","version":1,"requestId":104}
+{"cmd":"echodesk_update_complete","version":1,"requestId":105}
+```
+
+`echodesk_prepare_update` loads and refreshes a static **Updating EchoDesk OS**
+screen before returning its normal `echodesk_ack`. The host must wait for that
+ACK before pausing serial and entering the ESP32 ROM bootloader. The screen is
+intentionally static: EchoDesk OS is not executing while the merged image is
+written, so an on-device live percentage would be misleading.
+
+After reset, reconnect, and verification that `get_info.version` matches the
+intended release, the host may send `echodesk_update_complete`. Firmware loads
+and refreshes an **EchoDesk OS updated** screen, ACKs it, keeps it visible for
+three seconds, and then restores the normal device UI. Both commands are
+best-effort presentation enhancements: recovery and legacy firmware must remain
+flashable when the capability or ACK is unavailable.
+
+## 17. EchoDesk Clock utility v1
+
+Firmware advertising `echoDeskClockProtocol:1` exposes the built-in Time,
+Stopwatch, Countdown and Focus views through the existing serial owner. State
+is runtime-only and remains valid while the Clock screen is recreated; a reboot
+resets all timers to their defaults.
+
+```json
+{"cmd":"echodesk_clock_get_state","version":1,"requestId":120}
+{"cmd":"echodesk_clock_control","version":1,"requestId":121,"action":"start","mode":"stopwatch"}
+{"cmd":"echodesk_clock_control","version":1,"requestId":122,"action":"configure","mode":"countdown","durationSeconds":600}
+{"cmd":"echodesk_clock_control","version":1,"requestId":123,"action":"configure","mode":"focus","focusMinutes":25,"breakMinutes":5,"rounds":4}
+```
+
+Actions are `select`, `configure`, `start`, `pause`, `reset`, and `skip`;
+modes are `time`, `stopwatch`, `countdown`, and `focus`. Countdown duration is
+1–86400 seconds. Focus time is 1–180 minutes, break time 1–60 minutes, and the
+round count 1–12. Configuration replaces the selected timer atomically.
+
+`echodesk_clock_get_state` returns `echodesk_clock_state` with an optional
+request ID, a monotonic revision, the active mode, and independent Stopwatch,
+Countdown and Focus snapshots. Countdown and Focus report bounded
+`progressPermille` values from 0 to 1000. Mutations return the normal
+`echodesk_ack` and are followed by an unsolicited state snapshot. Autonomous
+completion and Focus phase changes also emit a new revision.
+
+When Countdown or Focus is selected on-device while a validated Desktop link
+is live, firmware may emit:
+
+```json
+{"type":"echodesk_clock_config_request","version":1,"mode":"countdown"}
+```
+
+Desktop opens its configuration window in response. If no validated link was
+active during the preceding 15 seconds, the firmware emits nothing and the
+device uses its local touch configuration instead.
+
+## 18. EchoDesk Notification Stack v1
+
+Firmware advertising `echoDeskNotificationProtocol:1` accepts a bounded,
+runtime-only mirror of host notifications. Notification titles and bodies are
+never written to ESP32 flash. The eight newest items are kept in RAM; a ninth
+item evicts the oldest, and an existing numeric ID is updated and promoted.
+Disabling the stack immediately clears its RAM queue.
+
+Every command uses the normal Control v1 envelope and a non-zero numeric
+`requestId`:
+
+```json
+{"cmd":"echodesk_notifications_get_state","version":1,"requestId":130}
+{"cmd":"echodesk_notifications_set_enabled","version":1,"requestId":131,"enabled":true}
+{"cmd":"echodesk_notifications_push","version":1,"requestId":132,"id":9001,"timestamp":1793520000,"source":"Mail","title":"New message","body":"Alex sent a message"}
+{"cmd":"echodesk_notifications_dismiss","version":1,"requestId":133,"id":9001}
+{"cmd":"echodesk_notifications_clear","version":1,"requestId":134}
+```
+
+`source` is required and limited to 32 UTF-8 bytes, `title` is required and
+limited to 64, and `body` may be empty and is limited to 160. Decoded control
+characters, invalid UTF-8, zero IDs, wrong JSON types, and extra fields are
+rejected. `timestamp` is an unsigned Unix epoch value in seconds and may be
+zero when the host cannot supply one. Hosts enforce application exclusions
+before forwarding a notification, so excluded content never crosses USB.
+
+`echodesk_notifications_get_state` returns:
+
+```json
+{"type":"echodesk_notifications_state","version":1,"requestId":130,"revision":4,"enabled":true,"count":1,"notifications":[{"id":9001,"timestamp":1793520000,"source":"Mail","title":"New message","body":"Alex sent a message"}]}
+```
+
+Items are newest-first. Accepted mutations return the normal `echodesk_ack`
+and are followed by an unsolicited notification-state snapshot. A push while
+the component is disabled returns `echodesk_error` with code `disabled`; a
+dismiss for an unknown ID returns `not_found`.
+
+## 19. EchoDesk PC Dashboard v1
+
+Firmware advertising `echoDeskPcDashboardProtocol:1` combines the existing
+Performance v1 stream with three optional host facts: battery/charging state,
+microphone activity, and storage usage. A dashboard contains one to four unique
+metric IDs, persisted as identifiers only. Samples and history remain in RAM.
+The default is `cpu`, `ram`, `battery`, `storage`.
+
+Stable metric IDs are `battery`, `microphone`, `storage`, `ram`, `cpu`, `gpu`,
+`networkDown`, `networkUp`, `cpuTemperature`, `gpuTemperature`, and
+`motherboardTemperature`. Hosts omit unavailable values. In particular, a
+desktop computer without a battery omits both battery fields; firmware never
+turns absence into a false zero-percent reading.
+
+The optional host facts use the normal AIM1 owner and strict version-1 frame:
+
+```json
+{"type":"pc_dashboard_sample","version":1,"timestamp":1793520000,"batteryPct":84.5,"charging":true,"microphoneInUse":false,"storageUsedBytes":420000000000,"storageTotalBytes":1000000000000}
+```
+
+`batteryPct` and `charging` are paired, as are the two storage byte fields.
+`microphoneInUse` is independently optional. At least one optional metric must
+be present; values are bounded and storage used cannot exceed storage total.
+A strict `connected:false` frame marks these host facts disconnected. CPU,
+GPU, RAM, network and temperature values continue to come from Performance v1,
+so there is no duplicate telemetry owner.
+
+Configuration uses Control v1 with its own revision to prevent a stale Desktop
+selection from overwriting a newer touchscreen edit:
+
+```json
+{"cmd":"echodesk_pc_dashboard_get_state","version":1,"requestId":140}
+{"cmd":"echodesk_pc_dashboard_set_config","version":1,"requestId":141,"baseRevision":3,"metrics":["cpu","ram","networkDown"]}
+```
+
+The state response is `echodesk_pc_dashboard_state` and contains `revision`,
+the ordered `metrics` array, independent `hostState` and `performanceState`,
+plus `host` and `performance` objects containing only values that have actually
+been observed. States are `neverReceived`, `live`, `stale`, and `disconnected`.
+Accepted configuration returns the normal `echodesk_ack`, persists the metric
+IDs, and is followed by an unsolicited PC Dashboard state snapshot.

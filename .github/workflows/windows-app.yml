@@ -118,7 +118,7 @@ jobs:
         shell: pwsh
         run: >-
           .\scripts\test_echodesk_firmware_package.ps1
-          -SourceFirmware .\desktop\firmware\echodesk-mini\2.31.0\echodesk-os.bin
+          -SourceFirmware .\desktop\firmware\echodesk-mini\2.32.0\echodesk-os.bin
 
       - name: Build performance helper resource
         shell: pwsh
@@ -293,7 +293,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          if [[ ! "$RELEASE_TAG" =~ (^|-)v0\.2\.0$ ]]; then
+          if [[ ! "$RELEASE_TAG" =~ (^|-)v0\.2\.8$ ]]; then
             echo "::error::Release tag must end in v0.2.8; received '$RELEASE_TAG'."
             exit 1
           fi

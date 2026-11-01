@@ -36,6 +36,9 @@ if ($LASTEXITCODE -ne 0) { throw 'EchoDesk Desktop build failed.' }
 & $dotnet run --project (Join-Path $desktopRoot 'tests\EchoDesk.Desktop.Tests\EchoDesk.Desktop.Tests.csproj') -c $configuration --no-build
 if ($LASTEXITCODE -ne 0) { throw 'EchoDesk Desktop tests failed.' }
 
+& (Join-Path $desktopRoot 'tests\validate-windows-host.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'EchoDesk Windows host contract validation failed.' }
+
 # Build the sole serial-owning process unless a CI-produced binary was supplied.
 if ([string]::IsNullOrWhiteSpace($HostExecutable)) {
     $pnpm = (Get-Command pnpm.cmd -ErrorAction SilentlyContinue).Source

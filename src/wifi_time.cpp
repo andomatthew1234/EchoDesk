@@ -158,6 +158,24 @@ bool wifi_time_is_synced() {
     return time_synced;
 }
 
+void wifi_time_get_ssid(char *out, size_t out_size) {
+    if (!out || out_size == 0) return;
+    const String value = WiFi.status() == WL_CONNECTED ? WiFi.SSID()
+                                                       : String(stored_ssid);
+    strlcpy(out, value.c_str(), out_size);
+}
+
+void wifi_time_get_ip(char *out, size_t out_size) {
+    if (!out || out_size == 0) return;
+    const String value = WiFi.status() == WL_CONNECTED
+        ? WiFi.localIP().toString() : String();
+    strlcpy(out, value.c_str(), out_size);
+}
+
+int16_t wifi_time_rssi_dbm() {
+    return WiFi.status() == WL_CONNECTED ? static_cast<int16_t>(WiFi.RSSI()) : 0;
+}
+
 bool wifi_time_has_client_token() {
     return strlen(stored_client_token) == 64;
 }

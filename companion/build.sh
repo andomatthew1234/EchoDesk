@@ -25,6 +25,12 @@ else
   SWIFT_DEFINES=()
 fi
 APP="$BUILD_DIR/$APP_NAME.app"
+ECHODESK_ENTITLEMENTS="$SCRIPT_DIR/Resources/EchoDesk.entitlements"
+if [ "$PRODUCT_MODE" = "echodesk" ]; then
+  MAIN_ENTITLEMENT_ARGS=(--entitlements "$ECHODESK_ENTITLEMENTS")
+else
+  MAIN_ENTITLEMENT_ARGS=()
+fi
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
@@ -83,6 +89,7 @@ SWIFT_SOURCES=(
   Sources/EchoDeskWifiSetup.swift
   Sources/EchoDeskFirmwareBundle.swift
   Sources/EchoDeskFirmwareUpdates.swift
+  Sources/EchoDeskTelemetry.swift
   Sources/SettingsWindow+EchoDeskWifiSetup.swift
   Sources/SettingsWindow+EchoDeskDesktop.swift
 )
@@ -97,6 +104,8 @@ for ARCH in arm64 x86_64; do
     -framework Security \
     -framework Network \
     -framework ServiceManagement \
+    -framework IOKit \
+    -framework CoreAudio \
     -target "$ARCH-apple-macosx$MACOS_MIN" \
     -O \
     -o "$BUILD_DIR/$EXECUTABLE_NAME-$ARCH"
@@ -105,6 +114,53 @@ done
 
 lipo -create -output "$APP/Contents/MacOS/$EXECUTABLE_NAME" "${SLICES[@]}"
 rm -f "${SLICES[@]}"
+
+# EchoDesk Desktop is self-contained: pin and bundle the upstream CodexBar CLI
+# instead of depending on a separate CodexBar/Homebrew installation.
+if [ "$PRODUCT_MODE" = "echodesk" ]; then
+CODEXBAR_VERSION="${CODEXBAR_VERSION:-0.82.0}"
+CODEXBAR_SHA256_arm64="5e6d922fbebbd41a748bc906500740529265e65afbc7ffd2ce8c8794fc5edf76"
+CODEXBAR_SHA256_x86_64="aca88b9b916197e5e0dba33c0e2a8e78f27d4a40760acf849509060b630cea0c"
+CODEXBAR_CACHE="${CODEXBAR_CACHE:-$HOME/.cache/echodesk-codexbar}"
+CODEXBAR_SLICES=()
+mkdir -p "$APP/Contents/Helpers" "$CODEXBAR_CACHE"
+for ARCH in arm64 x86_64; do
+  ARCHIVE="CodexBarCLI-v${CODEXBAR_VERSION}-macos-${ARCH}.tar.gz"
+  TARBALL="$CODEXBAR_CACHE/$ARCHIVE"
+  EXPECTED_VAR="CODEXBAR_SHA256_${ARCH}"
+  EXPECTED_SHA="${!EXPECTED_VAR}"
+  if [ ! -f "$TARBALL" ]; then
+    URL="https://github.com/steipete/CodexBar/releases/download/v${CODEXBAR_VERSION}/${ARCHIVE}"
+    curl -fL --retry 3 --retry-delay 2 -o "$TARBALL.part" "$URL"
+    mv "$TARBALL.part" "$TARBALL"
+  fi
+  ACTUAL_SHA=$(shasum -a 256 "$TARBALL" | awk '{print tolower($1)}')
+  [ "$ACTUAL_SHA" = "$EXPECTED_SHA" ] \
+    || { echo "ERROR: CodexBar CLI $ARCH archive SHA-256 mismatch"; exit 1; }
+  TMP_CODEXBAR=$(mktemp -d)
+  tar -xzf "$TARBALL" -C "$TMP_CODEXBAR"
+  CODEXBAR_BIN=$(find "$TMP_CODEXBAR" -type f -name CodexBarCLI -perm +111 | head -1)
+  [ -n "$CODEXBAR_BIN" ] || { echo "ERROR: $ARCH CodexBarCLI is missing"; exit 1; }
+  cp "$CODEXBAR_BIN" "$BUILD_DIR/CodexBarCLI-$ARCH"
+  rm -rf "$TMP_CODEXBAR"
+  CODEXBAR_SLICES+=("$BUILD_DIR/CodexBarCLI-$ARCH")
+done
+lipo -create -output "$APP/Contents/Helpers/CodexBarCLI" "${CODEXBAR_SLICES[@]}"
+chmod +x "$APP/Contents/Helpers/CodexBarCLI"
+rm -f "${CODEXBAR_SLICES[@]}"
+CODEXBAR_ARCHS=$(lipo -archs "$APP/Contents/Helpers/CodexBarCLI")
+for NEED in arm64 x86_64; do
+  case " $CODEXBAR_ARCHS " in *" $NEED "*) ;; *) echo "ERROR: bundled CodexBarCLI lacks $NEED"; exit 1 ;; esac
+done
+CODEXBAR_REPORTED_VERSION=$("$APP/Contents/Helpers/CodexBarCLI" --version 2>&1 | head -1)
+case "$CODEXBAR_REPORTED_VERSION" in
+  *"$CODEXBAR_VERSION"*) ;;
+  *) echo "ERROR: unexpected CodexBarCLI version: $CODEXBAR_REPORTED_VERSION"; exit 1 ;;
+esac
+"$APP/Contents/Helpers/CodexBarCLI" usage --help 2>&1 | grep -q -- '--source' \
+  || { echo "ERROR: bundled CodexBarCLI lacks OAuth source selection"; exit 1; }
+echo "Validated bundled command contract: codexbar usage --provider codex --json --source oauth"
+fi
 
 # The native companion uses the same validated plugin format and scene builder
 # as the Windows app through a small bundled Rust helper.
@@ -134,18 +190,18 @@ done
 cp "$INFO_PLIST" "$APP/Contents/Info.plist"
 
 if [ "$PRODUCT_MODE" = "echodesk" ]; then
-  FIRMWARE_SOURCE="$SCRIPT_DIR/../desktop/firmware/echodesk-mini/2.31.0/echodesk-os.bin"
-  FIRMWARE_DEST="$APP/Contents/Resources/firmware/echodesk-mini/2.31.0"
-  [ -f "$FIRMWARE_SOURCE" ] || { echo "ERROR: EchoDesk OS 2.31.0 is missing"; exit 1; }
-  EXPECTED_FIRMWARE_SHA="77dd25b6bb32cd059807135a9db9577b7f7d39748f50bc7256c528bd45577175"
+  FIRMWARE_SOURCE="$SCRIPT_DIR/../desktop/firmware/echodesk-mini/2.32.0/echodesk-os.bin"
+  FIRMWARE_DEST="$APP/Contents/Resources/firmware/echodesk-mini/2.32.0"
+  [ -f "$FIRMWARE_SOURCE" ] || { echo "ERROR: EchoDesk OS 2.32.0 is missing"; exit 1; }
+  EXPECTED_FIRMWARE_SHA="1109b7a4afb242b9695ae60952073fd6da2e2e33e9fe53c1d000885af67dd2ea"
   ACTUAL_FIRMWARE_SHA=$(shasum -a 256 "$FIRMWARE_SOURCE" | awk '{print tolower($1)}')
   [ "$ACTUAL_FIRMWARE_SHA" = "$EXPECTED_FIRMWARE_SHA" ] \
-    || { echo "ERROR: EchoDesk OS 2.31.0 SHA-256 mismatch"; exit 1; }
-  [ "$(stat -f %z "$FIRMWARE_SOURCE")" = "1516400" ] \
-    || { echo "ERROR: EchoDesk OS 2.31.0 size mismatch"; exit 1; }
+    || { echo "ERROR: EchoDesk OS 2.32.0 SHA-256 mismatch"; exit 1; }
+  [ "$(stat -f %z "$FIRMWARE_SOURCE")" = "1552080" ] \
+    || { echo "ERROR: EchoDesk OS 2.32.0 size mismatch"; exit 1; }
   mkdir -p "$FIRMWARE_DEST"
   cp "$FIRMWARE_SOURCE" "$FIRMWARE_DEST/echodesk-os.bin"
-  echo "Bundled and validated EchoDesk OS 2.31.0"
+  echo "Bundled and validated EchoDesk OS 2.32.0"
 fi
 
 # -----------------------------------------------------------------------------
@@ -196,6 +252,9 @@ done
 
 cp Resources/MenuBarIconTemplate.png "$APP/Contents/Resources/" 2>/dev/null || true
 cp Resources/MenuBarIconTemplate@2x.png "$APP/Contents/Resources/" 2>/dev/null || true
+if [ "$PRODUCT_MODE" = "echodesk" ]; then
+  cp THIRD-PARTY-NOTICES.md "$APP/Contents/Resources/"
+fi
 
 # Bundle esptool als eigenstaendige Binaries (ab v1.27.1).
 #
@@ -285,14 +344,20 @@ if [ "$HAS_DEVELOPER_ID" = "1" ]; then
   fi
 
   # Main app binary + Bundle. Mit --options runtime = Hardened Runtime.
-  # Ohne Entitlements — werden nicht gebraucht: USB-Serial laeuft via open()
-  # auf /dev/cu.*, CodexBar wird aus der User Library gelesen, und esptool
-  # laeuft als separater Python-Prozess mit eigener Signatur.
+  # EchoDesk sends Apple Events to Music/Spotify for Now Playing, so its main
+  # executable needs the narrowly scoped Automation entitlement in addition
+  # to the NSAppleEventsUsageDescription permission prompt.
   codesign --force --timestamp --options runtime \
     --sign "$SIGN_IDENTITY" "$APP/Contents/MacOS/aimonitor-plugin-host"
+  if [ -f "$APP/Contents/Helpers/CodexBarCLI" ]; then
+    codesign --force --timestamp --options runtime \
+      --sign "$SIGN_IDENTITY" "$APP/Contents/Helpers/CodexBarCLI"
+  fi
   codesign --force --timestamp --options runtime \
+    "${MAIN_ENTITLEMENT_ARGS[@]}" \
     --sign "$SIGN_IDENTITY" "$APP/Contents/MacOS/$EXECUTABLE_NAME"
   codesign --force --timestamp --options runtime \
+    "${MAIN_ENTITLEMENT_ARGS[@]}" \
     --sign "$SIGN_IDENTITY" "$APP"
 
   # Sanity-Check
@@ -300,7 +365,8 @@ if [ "$HAS_DEVELOPER_ID" = "1" ]; then
   echo "Developer ID signing complete."
 else
   # Ad-hoc-Fallback (CI ohne Cert, lokal ohne Apple-Dev-Account)
-  codesign --force --deep --sign - "$APP"
+  codesign --force --deep --sign - \
+    "${MAIN_ENTITLEMENT_ARGS[@]}" "$APP"
 fi
 
 # Kopiere zurück ins Projekt

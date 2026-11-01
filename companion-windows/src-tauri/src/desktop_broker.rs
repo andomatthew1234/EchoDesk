@@ -22,6 +22,101 @@ pub const PROTOCOL_VERSION: u8 = 1;
 pub const MAX_LINE_BYTES: usize = 65_536;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
 
+#[derive(Debug, PartialEq, Eq)]
+struct CodexDiagnostic {
+    code: &'static str,
+    detail: &'static str,
+    stderr_summary: Option<&'static str>,
+}
+
+fn safe_stderr_summary(stderr: &str) -> Option<&'static str> {
+    let text = stderr.to_ascii_lowercase();
+    if text.trim().is_empty() {
+        return None;
+    }
+    // Never forward provider output verbatim: it can contain user paths,
+    // cookies or OAuth material. Return only allowlisted semantic summaries.
+    if text.contains("unauthorized")
+        || text.contains("not logged in")
+        || text.contains("sign in")
+        || text.contains("authentication")
+        || text.contains("401")
+    {
+        Some("The provider reported that Codex authentication is required.")
+    } else if text.contains("rate limit")
+        || text.contains("too many requests")
+        || text.contains("429")
+    {
+        Some("The provider reported a temporary request limit.")
+    } else if text.contains("network")
+        || text.contains("dns")
+        || text.contains("offline")
+        || text.contains("timed out")
+        || text.contains("timeout")
+    {
+        Some("The provider reported a network or timeout failure.")
+    } else if text.contains("version") || text.contains("unsupported") {
+        Some("The provider reported an incompatible response version.")
+    } else if text.contains("not found") || text.contains("cannot find") {
+        Some("The bundled provider could not be started.")
+    } else {
+        Some("Provider diagnostic output was withheld because it was not safe to display.")
+    }
+}
+
+fn codex_diagnostic(status: &Status, stderr: &str) -> CodexDiagnostic {
+    let (code, detail) = match status {
+        Status::Ok => ("ok", "Provider returned valid usage data."),
+        Status::NotYet => ("waiting", "Waiting for the first provider result."),
+        Status::CliMissing => (
+            "dependency_missing",
+            "The bundled Codex provider is missing.",
+        ),
+        Status::AuthenticationRequired => (
+            "authentication_required",
+            "Codex authentication is required.",
+        ),
+        Status::NetworkUnavailable => (
+            "network_unavailable",
+            "The provider could not reach the network.",
+        ),
+        Status::RateLimited => (
+            "rate_limited",
+            "The provider requested a temporary retry delay.",
+        ),
+        Status::Stale { .. } => ("stale", "The last valid usage result is out of date."),
+        Status::ProviderUnavailable { .. } => (
+            "provider_unavailable",
+            "Codex usage is temporarily unavailable.",
+        ),
+        Status::CliFailed { message } if message.to_ascii_lowercase().contains("timeout") => {
+            ("timeout", "The bundled provider did not respond in time.")
+        }
+        Status::CliFailed { .. } => (
+            "provider_failed",
+            "The bundled provider exited without usable data.",
+        ),
+        Status::ParseError { message }
+            if message.to_ascii_lowercase().contains("version")
+                || message.to_ascii_lowercase().contains("unsupported") =>
+        {
+            (
+                "version_mismatch",
+                "The provider response version is not supported.",
+            )
+        }
+        Status::ParseError { .. } => (
+            "malformed_output",
+            "The provider returned unreadable usage data.",
+        ),
+    };
+    CodexDiagnostic {
+        code,
+        detail,
+        stderr_summary: safe_stderr_summary(stderr),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BrokerRequest {
@@ -42,6 +137,14 @@ struct SetAiUsageEnabledParams {
 #[serde(deny_unknown_fields)]
 struct SetUpdateNotificationsParams {
     enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ConfigureNotificationStackParams {
+    enabled: bool,
+    #[serde(default)]
+    excluded_sources: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -80,10 +183,60 @@ pub fn status(app: &AppHandle) -> Value {
             "music": info.supports_music(),
             "musicBackground": info.supports_music_background(),
             "musicVisualizer": info.supports_music_visualizer(),
+            "echoDeskUpdate": info.supports_echo_desk_update(),
+            "echoDeskClock": info.supports_echo_desk_clock(),
+            "echoDeskNotifications": info.supports_echo_desk_notifications(),
+            "echoDeskPcDashboard": info.supports_echo_desk_pc_dashboard(),
         })
     });
     let enabled = state.settings.lock().unwrap().ai_usage_enabled;
     let usage = current_snapshot(app);
+    let performance_health = state.performance.health();
+    let music_health = state.music.health();
+    let connected = connection.state == ConnectionState::Connected;
+    let performance_supported = connection
+        .info
+        .as_ref()
+        .is_some_and(|info| info.supports_performance());
+    let music_supported = connection
+        .info
+        .as_ref()
+        .is_some_and(|info| info.supports_music());
+    let clock_supported = connection
+        .info
+        .as_ref()
+        .is_some_and(|info| info.supports_echo_desk_clock());
+    let clock_state = state.echo_desk_clock_state.lock().unwrap().clone();
+    let clock_request = state.echo_desk_clock_config_request.lock().unwrap().clone();
+    let clock_request_sequence = state
+        .echo_desk_clock_config_sequence
+        .load(Ordering::Acquire);
+    let notification_health = state.notification_stack.lock().unwrap().clone();
+    let notification_device_state = state.echo_desk_notification_state.lock().unwrap().clone();
+    let pc_dashboard_supported = connection
+        .info
+        .as_ref()
+        .is_some_and(|info| info.supports_echo_desk_pc_dashboard());
+    let pc_dashboard_state = state.echo_desk_pc_dashboard_state.lock().unwrap().clone();
+    let notification_settings = state.settings.lock().unwrap();
+    let notification_exclusions = notification_settings.notification_stack_exclusions.clone();
+    drop(notification_settings);
+    let performance_status = if !connected {
+        "waitingForDevice"
+    } else if !performance_supported {
+        "firmwareUnsupported"
+    } else {
+        performance_health.status.as_str()
+    }
+    .to_string();
+    let music_status = if !connected {
+        "waitingForDevice"
+    } else if !music_supported {
+        "firmwareUnsupported"
+    } else {
+        music_health.status.as_str()
+    }
+    .to_string();
     let (component_status, component_error) = if !enabled {
         ("disabled", None)
     } else if usage.fetching {
@@ -101,11 +254,11 @@ pub fn status(app: &AppHandle) -> Value {
                 Some("Sign in to Codex in EchoDesk Desktop."),
             ),
             Status::NetworkUnavailable => (
-                "unavailable",
+                "networkUnavailable",
                 Some("Codex usage is unavailable while the network is offline."),
             ),
             Status::RateLimited => (
-                "unavailable",
+                "rateLimited",
                 Some("Codex usage is temporarily rate limited."),
             ),
             Status::Stale { .. } => ("stale", Some("Codex usage data is out of date.")),
@@ -113,15 +266,36 @@ pub fn status(app: &AppHandle) -> Value {
                 "unavailable",
                 Some("Codex usage is temporarily unavailable."),
             ),
+            Status::CliFailed { message } if message.to_ascii_lowercase().contains("timeout") => (
+                "timeout",
+                Some("The Codex usage provider did not respond in time."),
+            ),
             Status::CliFailed { .. } => (
-                "error",
+                "providerFailed",
                 Some("The Codex usage provider could not be reached."),
             ),
-            Status::ParseError { .. } => {
-                ("error", Some("EchoDesk could not read Codex usage data."))
+            Status::ParseError { message }
+                if message.to_ascii_lowercase().contains("version")
+                    || message.to_ascii_lowercase().contains("unsupported") =>
+            {
+                (
+                    "versionMismatch",
+                    Some("The bundled provider returned an unsupported response version."),
+                )
             }
+            Status::ParseError { .. } => (
+                "malformedOutput",
+                Some("EchoDesk could not read Codex usage data."),
+            ),
         }
     };
+    let stderr = usage
+        .last_run
+        .as_ref()
+        .map(|run| run.stderr.as_str())
+        .unwrap_or("");
+    let diagnostic = codex_diagnostic(&usage.status, stderr);
+    let exit_code = usage.last_run.as_ref().and_then(|run| run.exit_code);
     json!({
         "brokerAvailable": true,
         "brokerRevision": state.desktop_broker_revision.load(Ordering::Acquire),
@@ -140,7 +314,47 @@ pub fn status(app: &AppHandle) -> Value {
                 "fetching": enabled && usage.fetching,
                 "source": usage.source,
                 "cliVersion": usage.cli_version,
+                "diagnosticCode": diagnostic.code,
+                "diagnosticDetail": diagnostic.detail,
+                "exitCode": exit_code,
+                "stderrSummary": diagnostic.stderr_summary,
+            },
+            "performance": {
+                "status": performance_status,
+                "lastSampleAt": performance_health.last_sample_at,
+                "error": performance_health.error,
+                "capabilityNegotiated": performance_supported,
+            },
+            "nowPlaying": {
+                "status": music_status,
+                "lastSampleAt": music_health.last_sample_at,
+                "error": music_health.error,
+                "capabilityNegotiated": music_supported,
+            },
+            "notificationStack": {
+                "enabled": notification_health.enabled,
+                "status": notification_health.status,
+                "permission": notification_health.permission,
+                "message": notification_health.message,
+                "forwardedCount": notification_health.forwarded_count,
+                "availableSources": notification_health.available_sources,
+                "excludedSources": notification_exclusions,
             }
+        },
+        "clock": {
+            "available": connected && clock_supported,
+            "protocol": if clock_supported { 1 } else { 0 },
+            "configRequestMode": clock_request,
+            "configRequestSequence": clock_request_sequence,
+            "state": clock_state,
+        },
+        "notificationStack": {
+            "deviceState": notification_device_state,
+        },
+        "pcDashboard": {
+            "available": connected && pc_dashboard_supported,
+            "protocol": if pc_dashboard_supported { 1 } else { 0 },
+            "state": pc_dashboard_state,
         },
         "firmwareManager": firmware_manager::snapshot(app),
         "wifiSetup": wifi_setup::snapshot(app),
@@ -200,8 +414,74 @@ fn dispatch(app: &AppHandle, request: &BrokerRequest) -> Result<Value, BrokerErr
             request_device(app, "get_state", json!({}))?;
             Ok(status(app))
         }
-        "open_app" | "set_settings" | "restart" => {
+        "open_app"
+        | "set_settings"
+        | "restart"
+        | "clock_get_state"
+        | "clock_control"
+        | "pc_dashboard_get_state"
+        | "pc_dashboard_set_metrics" => {
             request_device(app, &request.method, request.params.clone())?;
+            Ok(status(app))
+        }
+        "notification_stack_configure" => {
+            let params: ConfigureNotificationStackParams =
+                serde_json::from_value(request.params.clone()).map_err(|_| {
+                    error(
+                        "invalid_request",
+                        "notification_stack_configure requires enabled and excludedSources",
+                    )
+                })?;
+            if params.excluded_sources.len() > 32
+                || params
+                    .excluded_sources
+                    .iter()
+                    .any(|value| value.trim().is_empty() || value.len() > 64)
+            {
+                return Err(error(
+                    "invalid_request",
+                    "Notification exclusions are invalid",
+                ));
+            }
+            {
+                let state = app.state::<AppState>();
+                let mut settings = state.settings.lock().unwrap();
+                settings.notification_stack_enabled = params.enabled;
+                settings.notification_stack_exclusions = params.excluded_sources;
+                settings.normalize_views();
+                settings.save(app);
+                state.desktop_broker_revision.fetch_add(1, Ordering::AcqRel);
+            }
+            if app
+                .state::<AppState>()
+                .connection
+                .lock()
+                .unwrap()
+                .info
+                .as_ref()
+                .is_some_and(|info| info.supports_echo_desk_notifications())
+            {
+                request_device(
+                    app,
+                    "notifications_set_enabled",
+                    json!({"enabled": params.enabled}),
+                )?;
+            }
+            Ok(status(app))
+        }
+        "notification_stack_test" => {
+            let timestamp = chrono::Utc::now().timestamp().max(0) as u64;
+            request_device(
+                app,
+                "notifications_push",
+                json!({
+                    "id": ((timestamp % (u32::MAX as u64 - 1)) + 1) as u32,
+                    "source": "EchoDesk Desktop",
+                    "title": "Notification Stack is ready",
+                    "body": "This test notification was sent privately over USB.",
+                    "timestamp": timestamp,
+                }),
+            )?;
             Ok(status(app))
         }
         "reconnect" => {
@@ -641,5 +921,23 @@ mod tests {
         assert!(
             serde_json::from_value::<SetAiUsageEnabledParams>(json!({"enabled": "true"})).is_err()
         );
+    }
+
+    #[test]
+    fn codex_diagnostics_are_stable_and_never_forward_raw_stderr() {
+        let raw = r#"C:\\Users\\someone\\.codex token=<secret> request timed out"#;
+        let diagnostic = codex_diagnostic(
+            &Status::CliFailed {
+                message: "Timeout after 20s".into(),
+            },
+            raw,
+        );
+        assert_eq!(diagnostic.code, "timeout");
+        assert_eq!(
+            diagnostic.stderr_summary,
+            Some("The provider reported a network or timeout failure.")
+        );
+        assert!(!diagnostic.detail.contains("Users"));
+        assert!(!diagnostic.stderr_summary.unwrap().contains("secret"));
     }
 }

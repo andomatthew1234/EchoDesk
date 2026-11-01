@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-01T12:38:34+11:00",
+  "generatedAt": "2026-11-01T21:35:12+11:00",
   "releases": [
     {
-      "firmwareVersion": "2.31.0",
+      "firmwareVersion": "2.32.0",
       "hardwareModel": "EchoDesk Mini",
       "hardwareId": "freenove-fnk0114a-2p4",
       "supportedChip": "esp32",
@@ -12,12 +12,12 @@
       "flashMode": "dio",
       "flashFrequency": "40m",
       "flashSize": "4MB",
-      "imageFile": "echodesk-mini/2.31.0/echodesk-os.bin",
+      "imageFile": "echodesk-mini/2.32.0/echodesk-os.bin",
       "downloadUrl": null,
-      "sha256": "77DD25B6BB32CD059807135A9DB9577B7F7D39748F50BC7256C528BD45577175",
-      "size": 1516400,
-      "releaseNotes": "Adds optional Wi-Fi setup with a protected temporary network, on-screen pairing code, strict local discovery and provisioning, and authenticated LAN rediscovery. USB remains the default connection and recovery path.",
-      "minimumDesktopVersion": "0.2.7"
+      "sha256": "1109B7A4AFB242B9695AE60952073FD6DA2E2E33E9FE53C1D000885AF67DD2EA",
+      "size": 1552080,
+      "releaseNotes": "Adds Clock timers, Notification Stack, PC Dashboard, My Device health, staged update progress, and optional protected Wi-Fi setup. USB remains the default connection and recovery path.",
+      "minimumDesktopVersion": "0.2.8"
     }
   ]
 }

@@ -4,6 +4,7 @@
 
 #include "config_store.h"
 #include "performance_data.h"
+#include "echodesk_status_copy.h"
 
 #include <Arduino.h>
 #include <math.h>
@@ -229,20 +230,11 @@ void make_freshness_label() {
     lv_obj_align(freshness_label, LV_ALIGN_TOP_RIGHT, -9, 6);
 }
 
-const char *connection_text(PerformanceConnectionState state) {
-    switch (state) {
-        case PerformanceConnectionState::LIVE: return "LIVE";
-        case PerformanceConnectionState::STALE: return "STALE";
-        case PerformanceConnectionState::DISCONNECTED: return "OFFLINE";
-        case PerformanceConnectionState::NEVER_RECEIVED: return "NO DATA";
-    }
-    return "NO DATA";
-}
-
 void update_freshness() {
     if (!freshness_label) return;
     const PerformanceConnectionState state = performance_data_connection_state(millis());
-    lv_label_set_text(freshness_label, connection_text(state));
+    lv_label_set_text(freshness_label,
+                      echodesk_performance_status_text(state));
     lv_obj_set_style_text_color(freshness_label,
                                 state == PerformanceConnectionState::LIVE ? foreground_color() : muted_color(),
                                 LV_PART_MAIN);
@@ -697,7 +689,8 @@ void update_dashboard_charts(bool temperatures) {
 
 void update_usage_dashboard(const PerformanceSample &latest, bool available) {
     if (!available) {
-        const char *state = connection_text(performance_data_connection_state(millis()));
+        const char *state = echodesk_performance_status_text(
+            performance_data_connection_state(millis()));
         for (uint8_t i = 0; i < 4; ++i) {
             lv_label_set_text(tile_values[i], "--");
             set_tile_note(i, state);
@@ -728,7 +721,8 @@ void update_usage_dashboard(const PerformanceSample &latest, bool available) {
 
 void update_temperature_dashboard(const PerformanceSample &latest, bool available) {
     if (!available) {
-        const char *state = connection_text(performance_data_connection_state(millis()));
+        const char *state = echodesk_performance_status_text(
+            performance_data_connection_state(millis()));
         for (uint8_t i = 0; i < 4; ++i) {
             lv_label_set_text(tile_values[i], "--");
             set_tile_note(i, state);

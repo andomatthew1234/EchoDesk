@@ -18,6 +18,9 @@ int main() {
     assert(echodesk_parse_app("nowPlaying", value));
     assert(value == ECHODESK_APP_NOW_PLAYING);
     assert(strcmp(echodesk_app_name(value), "nowPlaying") == 0);
+    assert(echodesk_parse_app("myDevice", value));
+    assert(value == ECHODESK_APP_MY_DEVICE);
+    assert(strcmp(echodesk_app_name(value), "myDevice") == 0);
     assert(echodesk_parse_clock_format("24h", value));
     assert(value == CLOCK_FORMAT_24_HOUR);
     assert(echodesk_parse_timezone("Australia/Sydney", value));
@@ -72,7 +75,7 @@ int main() {
 
     patch = {};
     patch.has_default_app = true;
-    patch.values.default_app = ECHODESK_APP_CLOCK;
+    patch.values.default_app = ECHODESK_APP_MY_DEVICE;
     patch.has_clock_format = true;
     patch.values.clock_format = CLOCK_FORMAT_24_HOUR;
     patch.has_timezone = true;
@@ -85,7 +88,7 @@ int main() {
     patch.values.performance_default_view = PERFORMANCE_VIEW_GPU;
     assert(echodesk_apply_settings_patch(current, patch, 7, 7, true, next) ==
            EchoDeskControlApplyResult::OK);
-    assert(next.default_app == ECHODESK_APP_CLOCK);
+    assert(next.default_app == ECHODESK_APP_MY_DEVICE);
     assert(next.clock_format == CLOCK_FORMAT_24_HOUR);
     assert(next.timezone == ECHODESK_TIMEZONE_UTC);
     assert(next.codex_percentage_mode == CODEX_PERCENTAGE_REMAINING);

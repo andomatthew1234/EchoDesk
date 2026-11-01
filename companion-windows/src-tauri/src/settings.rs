@@ -114,6 +114,14 @@ pub struct Settings {
     /// Show a non-intrusive notification when a newer EchoDesk OS is listed.
     #[serde(default = "default_true")]
     pub firmware_update_notifications: bool,
+    /// Notification Stack is opt-in because enabling it asks Windows for access
+    /// to the user's notification history.
+    #[serde(default)]
+    pub notification_stack_enabled: bool,
+    /// Case-insensitive app display names excluded from mirroring. Empty means
+    /// include every source, which is the product default after setup.
+    #[serde(default)]
+    pub notification_stack_exclusions: Vec<String>,
 }
 
 fn default_timezone() -> String {
@@ -144,6 +152,8 @@ impl Default for Settings {
             installed_firmware_version: None,
             last_update_check: None,
             firmware_update_notifications: true,
+            notification_stack_enabled: false,
+            notification_stack_exclusions: Vec::new(),
         }
     }
 }
@@ -252,6 +262,17 @@ impl Settings {
         }
         self.view_interval_seconds = self.view_interval_seconds.clamp(2, 3600);
         self.active_view = self.active_view.min(self.views.len() - 1);
+        self.notification_stack_exclusions = self
+            .notification_stack_exclusions
+            .drain(..)
+            .map(|value| value.trim().chars().take(64).collect::<String>())
+            .filter(|value| !value.is_empty())
+            .take(32)
+            .collect();
+        self.notification_stack_exclusions
+            .sort_by_key(|value| value.to_lowercase());
+        self.notification_stack_exclusions
+            .dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     }
 
     pub fn save(&self, app: &AppHandle) {

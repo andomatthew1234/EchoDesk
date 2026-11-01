@@ -159,6 +159,8 @@
                                         </Border>
                                     </StackPanel>
                                     <TextBlock Style="{StaticResource Muted}" Text="{Binding AiUsageGuidance}" TextWrapping="Wrap" Margin="0,10,0,0"/>
+                                    <TextBlock Text="{Binding AiUsageDiagnostic}" Foreground="{DynamicResource DangerBrush}" TextWrapping="Wrap" Margin="0,7,0,0"
+                                               Visibility="{Binding AiUsageHasDiagnostic, Converter={StaticResource BoolVisibility}}"/>
                                     <TextBlock Margin="0,8,0,0" FontSize="12">
                                         <Run Foreground="{DynamicResource MutedTextBrush}" Text="Last successful update: "/><Run Text="{Binding AiUsageLastUpdated, Mode=OneWay}"/>
                                     </TextBlock>
@@ -168,6 +170,58 @@
                                           IsEnabled="{Binding AiUsageAvailable}" Command="{Binding ToggleAiUsageCommand}"/>
                             </Grid>
                         </Border>
+
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,18">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel Margin="0,0,24,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Notification Stack" FontSize="17" FontWeight="SemiBold"/>
+                                        <Border Margin="12,0,0,0" Padding="8,3" CornerRadius="10" Background="{DynamicResource SurfaceAltBrush}">
+                                            <TextBlock Text="{Binding NotificationStackStatus}" FontSize="11" FontWeight="Bold"/>
+                                        </Border>
+                                    </StackPanel>
+                                    <TextBlock Style="{StaticResource Muted}" Text="{Binding NotificationStackGuidance}" TextWrapping="Wrap" Margin="0,10,0,0"/>
+                                    <TextBlock Style="{StaticResource Muted}" Text="{Binding NotificationStackSourceSummary}" TextWrapping="Wrap" FontSize="12" Margin="0,7,0,0"/>
+                                    <TextBlock Text="Exclude apps (comma-separated)" FontWeight="SemiBold" FontSize="12" Margin="0,12,0,5"/>
+                                    <TextBox Text="{Binding NotificationExcludedSourcesText, UpdateSourceTrigger=PropertyChanged}" MaxLength="512"
+                                             ToolTip="Leave empty to include every app. Use the exact observed app names shown above."/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" MinWidth="160">
+                                    <Button Style="{StaticResource PrimaryButton}" Command="{Binding ConfigureNotificationStackCommand}"
+                                            Content="Set up notifications" Margin="0,0,0,8"/>
+                                    <Button Command="{Binding TestNotificationStackCommand}" Content="Send test" Margin="0,0,0,8"/>
+                                    <Button Command="{Binding ConfigureNotificationStackCommand}" CommandParameter="disable" Content="Disable"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <UniformGrid Columns="2" Margin="0,0,0,18">
+                            <Border Style="{StaticResource Card}" Margin="0,0,9,0">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Performance" FontSize="17" FontWeight="SemiBold"/>
+                                        <Border Margin="12,0,0,0" Padding="8,3" CornerRadius="10" Background="{DynamicResource SurfaceAltBrush}">
+                                            <TextBlock Text="{Binding PerformanceComponentStatus}" FontSize="11" FontWeight="Bold"/>
+                                        </Border>
+                                    </StackPanel>
+                                    <TextBlock Style="{StaticResource Muted}" Text="{Binding PerformanceComponentGuidance}" TextWrapping="Wrap" Margin="0,10,0,0"/>
+                                    <TextBlock Text="{Binding PerformanceLastSample}" FontSize="12" Margin="0,8,0,0"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource Card}" Margin="9,0,0,0">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Now Playing" FontSize="17" FontWeight="SemiBold"/>
+                                        <Border Margin="12,0,0,0" Padding="8,3" CornerRadius="10" Background="{DynamicResource SurfaceAltBrush}">
+                                            <TextBlock Text="{Binding NowPlayingComponentStatus}" FontSize="11" FontWeight="Bold"/>
+                                        </Border>
+                                    </StackPanel>
+                                    <TextBlock Style="{StaticResource Muted}" Text="{Binding NowPlayingComponentGuidance}" TextWrapping="Wrap" Margin="0,10,0,0"/>
+                                    <TextBlock Text="{Binding NowPlayingLastSample}" FontSize="12" Margin="0,8,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </UniformGrid>
 
                         <TextBlock Style="{StaticResource SectionTitle}" Text="Quick actions"/>
                         <ItemsControl ItemsSource="{Binding AppTiles}">
@@ -519,7 +573,7 @@
                                 <Slider Minimum="10" Maximum="100" TickFrequency="5" Value="{Binding Brightness, UpdateSourceTrigger=PropertyChanged}" Margin="0,7,0,2"/>
                                 <TextBlock Style="{StaticResource Muted}" Text="Preview updates are not written to flash; only the final value is persisted." FontSize="12"/>
                                 <TextBlock Text="Default app on startup" FontWeight="SemiBold" Margin="0,18,0,7"/>
-                                <ComboBox ItemsSource="{Binding DefaultAppOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding DefaultApp}" IsEnabled="{Binding SupportsDefaultApp}"/>
+                                <ComboBox ItemsSource="{Binding AvailableDefaultAppOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding DefaultApp}" IsEnabled="{Binding SupportsDefaultApp}"/>
                             </StackPanel>
                         </Border>
 
@@ -561,6 +615,20 @@
                                 <TextBlock Style="{StaticResource SectionTitle}" Text="Performance"/>
                                 <TextBlock Text="Default view" FontWeight="SemiBold" Margin="0,0,0,7"/>
                                 <ComboBox ItemsSource="{Binding PerformanceDefaultViewOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding PerformanceDefaultView}"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                            <StackPanel IsEnabled="{Binding PcDashboardAvailable}">
+                                <TextBlock Style="{StaticResource SectionTitle}" Text="PC Dashboard"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="Choose one to four different metrics. Unavailable sensors are shown honestly rather than as zero." TextWrapping="Wrap" Margin="0,0,0,12"/>
+                                <UniformGrid Columns="2" Rows="2">
+                                    <ComboBox ItemsSource="{Binding PcDashboardRequiredMetricOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding PcDashboardMetric1}" Margin="0,0,12,10"/>
+                                    <ComboBox ItemsSource="{Binding PcDashboardMetricOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding PcDashboardMetric2}" Margin="0,0,0,10"/>
+                                    <ComboBox ItemsSource="{Binding PcDashboardMetricOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding PcDashboardMetric3}" Margin="0,0,12,0"/>
+                                    <ComboBox ItemsSource="{Binding PcDashboardMetricOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding PcDashboardMetric4}"/>
+                                </UniformGrid>
+                                <Button Style="{StaticResource PrimaryButton}" Command="{Binding SavePcDashboardCommand}" Content="Apply dashboard" HorizontalAlignment="Left" Margin="0,14,0,0"/>
                             </StackPanel>
                         </Border>
 

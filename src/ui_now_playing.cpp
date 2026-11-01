@@ -4,6 +4,7 @@
 
 #include "config_store.h"
 #include "music_data.h"
+#include "echodesk_status_copy.h"
 #include "now_playing_layout.h"
 #include "serial_receiver.h"
 
@@ -593,11 +594,10 @@ void refresh() {
     MusicState state{}; const uint32_t now = millis();
     const MusicConnectionState connection = music_data_connection_state(now);
     const bool available = music_data_get(state);
-    const bool disconnected = connection == MusicConnectionState::DISCONNECTED || connection == MusicConnectionState::NEVER_RECEIVED;
     const bool empty = !available || (state.playback == MusicPlaybackState::STOPPED && !state.title[0]);
     char status[96];
-    const char *state_text = disconnected ? "OFFLINE" : connection == MusicConnectionState::STALE ? "STALE" : empty ? "READY" :
-        state.playback == MusicPlaybackState::PLAYING ? "PLAYING" : state.playback == MusicPlaybackState::PAUSED ? "PAUSED" : "STOPPED";
+    const char *state_text = echodesk_music_status_text(connection, empty,
+                                                        state.playback);
     if (current_background == NOW_PLAYING_BACKGROUND_AUDIO_BARS) {
         const char *visualizer_text = visualizer_status_text(music_data_visualizer_status(now));
         if (visualizer_text) state_text = visualizer_text;
@@ -607,8 +607,10 @@ void refresh() {
     else strlcpy(status, state_text, sizeof(status));
     lv_label_set_text(status_label, status);
     if (empty) {
-        set_bounded_text(title_label, "NOTHING PLAYING", "NOTHING PLAYING");
-        set_bounded_text(artist_label, disconnected ? "Start EchoDesk on Windows" : "Start playback on your PC", "");
+        set_bounded_text(title_label, echodesk_music_empty_title(connection),
+                         "MUSIC");
+        set_bounded_text(artist_label, echodesk_music_empty_detail(connection),
+                         "");
         set_bounded_text(album_label, "", ""); lv_bar_set_value(progress_bar, 0, LV_ANIM_OFF);
         if (position_label) lv_label_set_text(position_label, "0:00");
         if (duration_label) lv_label_set_text(duration_label, "--:--");

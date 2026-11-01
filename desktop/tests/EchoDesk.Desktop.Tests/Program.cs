@@ -12,6 +12,10 @@ internal static class Program
         try
         {
             MapperUsesOnlyReportedValues();
+            MapperPreservesVersionedClockState();
+            MapperPreservesNotificationStackPrivacyState();
+            MapperPreservesPcDashboardConfiguration();
+            AppCatalogIncludesMyDevice();
             FirmwareManagerMappingPreservesSafetyStates();
             MapperAcceptsNullOptionalNumericFields();
             FirstRunOnboardingIsDismissibleAndOneTime();
@@ -26,6 +30,73 @@ internal static class Program
             Console.Error.WriteLine($"EchoDesk.Desktop.Tests: FAIL\n{error}");
             return 1;
         }
+    }
+
+    private static void AppCatalogIncludesMyDevice()
+    {
+        var app = EchoDeskApps.All.SingleOrDefault(candidate => candidate.Id == "myDevice");
+        Assert(app.Id == "myDevice" && app.Label == "My device",
+            "My device is missing from the authoritative Desktop app catalogue");
+    }
+
+    private static void MapperPreservesVersionedClockState()
+    {
+        using var document = JsonDocument.Parse("""
+        {
+          "brokerAvailable":true,"connection":"connected",
+          "clock":{"available":true,"protocol":1,"configRequestMode":"focus","configRequestSequence":3,"state":{
+            "revision":9,"activeMode":"countdown",
+            "stopwatch":{"status":"paused","elapsedMs":12500},
+            "countdown":{"status":"running","durationSeconds":600,"remainingSeconds":321,"progressPermille":465},
+            "focus":{"status":"paused","phase":"break","focusMinutes":45,"breakMinutes":10,"rounds":3,"currentRound":2,"remainingSeconds":240,"progressPermille":600}
+          }}
+        }
+        """);
+        var state = BrokerStateMapper.FromPayload(document.RootElement);
+        Assert(state.Clock.Available && state.Clock.Protocol == 1, "Clock capability was not mapped");
+        Assert(state.Clock.ConfigRequestMode == "focus", "Clock configuration request was lost");
+        Assert(state.Clock.ConfigRequestSequence == 3, "repeated Clock request identity was lost");
+        Assert(state.Clock.Revision == 9 && state.Clock.ActiveMode == "countdown",
+            "Clock state identity was lost");
+        Assert(state.Clock.Stopwatch.ElapsedMs == 12500 && state.Clock.Countdown.RemainingSeconds == 321,
+            "Clock elapsed/remaining values were lost");
+        Assert(state.Clock.Focus.Phase == "break" && state.Clock.Focus.CurrentRound == 2,
+            "Focus plan state was lost");
+    }
+
+    private static void MapperPreservesNotificationStackPrivacyState()
+    {
+        using var document = JsonDocument.Parse("""
+        {"components":{"notificationStack":{"enabled":true,"status":"connected","permission":"allowed",
+          "message":"Private USB relay active","forwardedCount":7,
+          "availableSources":["Mail","Calendar"],"excludedSources":["Calendar"]}}}
+        """);
+        var state = BrokerStateMapper.FromPayload(document.RootElement);
+        Assert(state.NotificationStack.Available && state.NotificationStack.Enabled,
+            "Notification Stack setup state was not mapped");
+        Assert(state.NotificationStack.Permission == "allowed" && state.NotificationStack.ForwardedCount == 7,
+            "Notification permission/forward count was lost");
+        Assert(state.NotificationStack.AvailableSources.SequenceEqual(["Mail", "Calendar"])
+               && state.NotificationStack.ExcludedSources.SequenceEqual(["Calendar"]),
+            "Notification source filters were lost");
+        Assert(EchoDeskApps.All.Any(app => app.Id == "notificationStack"),
+            "Notification Stack is missing from the Desktop app catalogue");
+    }
+
+    private static void MapperPreservesPcDashboardConfiguration()
+    {
+        using var document = JsonDocument.Parse("""
+        {"connection":"connected","pcDashboard":{"available":true,"protocol":1,
+          "state":{"revision":5,"metrics":["cpu","ram","battery","storage"]}}}
+        """);
+        var state = BrokerStateMapper.FromPayload(document.RootElement);
+        Assert(state.PcDashboard.Available && state.PcDashboard.Protocol == 1,
+            "PC Dashboard capability was not mapped");
+        Assert(state.PcDashboard.Revision == 5
+               && state.PcDashboard.Metrics.SequenceEqual(["cpu", "ram", "battery", "storage"]),
+            "PC Dashboard metric selection was lost");
+        Assert(EchoDeskApps.All.Any(app => app.Id == "pcDashboard"),
+            "PC Dashboard is missing from the Desktop app catalogue");
     }
 
     private static void FirstRunOnboardingIsDismissibleAndOneTime()
@@ -226,11 +297,15 @@ internal static class Program
         using var document = JsonDocument.Parse("""
         {
           "brokerAvailable":true,"brokerRevision":8,"connection":"connected","port":"COM5","firmware":"2.28.0",
-          "components":{"aiUsage":{"enabled":true,"status":"live","lastSuccessfulUpdate":"2026-10-30T12:34:56Z","provider":"Codex","fetching":false,"source":"codexbar-cli","cliVersion":"0.70.0"}},
+          "components":{
+            "aiUsage":{"enabled":true,"status":"live","lastSuccessfulUpdate":"2026-10-30T12:34:56Z","provider":"Codex","fetching":false,"source":"codexbar-cli","cliVersion":"0.70.0","diagnosticCode":"ok","exitCode":0,"diagnosticDetail":"Provider returned valid usage data."},
+            "performance":{"status":"live","lastSampleAt":"2026-10-30T12:35:01Z","capabilityNegotiated":true},
+            "nowPlaying":{"status":"unavailable","error":"Windows media sessions are unavailable.","capabilityNegotiated":true}
+          },
           "deviceState":{
             "deviceName":"EchoDesk","hardwareModel":"Freenove FNK0114A_2P4","firmwareVersion":"2.28.0",
             "revision":12,"activeApp":"nowPlaying",
-            "supportedApps":["home","codex","clock","performance","nowPlaying","settings"],
+            "supportedApps":["home","codex","clock","performance","nowPlaying","myDevice","settings"],
             "settings":{"theme":"dark","brightness":73,"nowPlayingLayout":"carPlay","nowPlayingBackground":"audioBars","nowPlayingBackgroundCustomized":true,
               "defaultApp":"codex","clockFormat":"24h","timezone":"Australia/Melbourne","codexPercentageMode":"remaining","codexPreferredDisplay":"weekly","performanceDefaultView":"gpu"},
             "unsupportedSettings":["timezone","performanceDefaultView"]
@@ -249,10 +324,20 @@ internal static class Program
         Assert(state.Device?.Settings.CodexPercentageMode == "remaining", "Codex percentage mode lost");
         Assert(state.Device?.Settings.CodexPreferredDisplay == "weekly", "Codex preferred display lost");
         Assert(state.Device?.Settings.PerformanceDefaultView == "gpu", "performance default view lost");
+        Assert(state.Device?.SupportedApps.Contains("myDevice") == true, "My device support was lost");
         Assert(state.Device?.UnsupportedSettings.Contains("timezone") == true, "unsupported settings lost");
         Assert(state.AiUsage.Available && state.AiUsage.Enabled, "AI usage component lost");
         Assert(state.AiUsage.Status == "live", "AI usage status lost");
         Assert(state.AiUsage.LastSuccessfulUpdate?.UtcDateTime == new DateTime(2026, 10, 30, 12, 34, 56, DateTimeKind.Utc), "AI usage timestamp lost");
+        Assert(state.AiUsage.DiagnosticCode == "ok" && state.AiUsage.ExitCode == 0,
+            "bounded Codex diagnostic identity was lost");
+        Assert(state.AiUsage.DiagnosticDetail == "Provider returned valid usage data.",
+            "safe Codex diagnostic detail was lost");
+        Assert(state.Performance.Status == "live" && state.Performance.CapabilityNegotiated,
+            "Performance producer health was lost");
+        Assert(state.NowPlaying.Status == "unavailable"
+               && state.NowPlaying.Error == "Windows media sessions are unavailable.",
+            "Now Playing producer failure was lost");
     }
 
     private static async Task BrokerRoundTripIsBoundedAndRevisionAware()
@@ -270,6 +355,7 @@ internal static class Program
         var observedWifiDiscover = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         var observedWifiProvision = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         var observedWifiCancel = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observedClockControl = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = Task.Run(async () =>
         {
             await using var pipe = new NamedPipeServerStream(
@@ -298,6 +384,7 @@ internal static class Program
                 if (method == "wifi_setup_discover") observedWifiDiscover.TrySetResult(request);
                 if (method == "wifi_setup_provision") observedWifiProvision.TrySetResult(request);
                 if (method == "wifi_setup_cancel") observedWifiCancel.TrySetResult(request);
+                if (method == "clock_control") observedClockControl.TrySetResult(request);
                 var response = new
                 {
                     version = 1,
@@ -463,6 +550,19 @@ internal static class Program
         var cancelRequest = await observedWifiCancel.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert(!cancelRequest.GetProperty("params").EnumerateObject().Any(),
             "Wi-Fi cancellation sent unexpected parameters");
+        await client.ControlClockAsync(
+            "configure", "focus", focusMinutes: 25, breakMinutes: 5, rounds: 4,
+            cancellationToken: serverReady.Token);
+        var clockRequest = await observedClockControl.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var clockParams = clockRequest.GetProperty("params");
+        Assert(clockParams.EnumerateObject().Count() == 5, "Clock control sent unexpected parameters");
+        Assert(clockParams.GetProperty("action").GetString() == "configure"
+               && clockParams.GetProperty("mode").GetString() == "focus",
+            "Clock control action/mode was not versioned by the broker seam");
+        Assert(clockParams.GetProperty("focusMinutes").GetInt32() == 25
+               && clockParams.GetProperty("breakMinutes").GetInt32() == 5
+               && clockParams.GetProperty("rounds").GetInt32() == 4,
+            "Clock focus configuration was not preserved");
         serverReady.Cancel();
         try { await server; } catch (OperationCanceledException) { }
     }

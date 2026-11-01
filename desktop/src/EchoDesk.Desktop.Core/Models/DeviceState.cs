@@ -25,6 +25,15 @@ public sealed record BrokerState
     [JsonPropertyName("aiUsage")]
     public AiUsageComponentState AiUsage { get; init; } = AiUsageComponentState.Unavailable;
 
+    public TelemetryComponentState Performance { get; init; } = TelemetryComponentState.Unavailable;
+    public TelemetryComponentState NowPlaying { get; init; } = TelemetryComponentState.Unavailable;
+
+    [JsonPropertyName("clock")]
+    public ClockUtilityState Clock { get; init; } = ClockUtilityState.Unavailable;
+
+    public NotificationStackState NotificationStack { get; init; } = NotificationStackState.Unavailable;
+    public PcDashboardState PcDashboard { get; init; } = PcDashboardState.Unavailable;
+
     [JsonPropertyName("firmwareManager")]
     public FirmwareManagerState FirmwareManager { get; init; } = FirmwareManagerState.Unavailable;
 
@@ -144,6 +153,83 @@ public sealed record AiUsageComponentState
     public bool Fetching { get; init; }
     public string? Source { get; init; }
     public string? CliVersion { get; init; }
+    public string? DiagnosticCode { get; init; }
+    public int? ExitCode { get; init; }
+    public string? DiagnosticDetail { get; init; }
+    public string? StderrSummary { get; init; }
+}
+
+public sealed record TelemetryComponentState
+{
+    public static TelemetryComponentState Unavailable { get; } = new();
+
+    public bool Available { get; init; }
+    public string Status { get; init; } = "unavailable";
+    public DateTimeOffset? LastSampleAt { get; init; }
+    public string? Error { get; init; }
+    public bool CapabilityNegotiated { get; init; }
+}
+
+public sealed record ClockUtilityState
+{
+    public static ClockUtilityState Unavailable { get; } = new();
+    public bool Available { get; init; }
+    public int Protocol { get; init; }
+    public string? ConfigRequestMode { get; init; }
+    public ulong ConfigRequestSequence { get; init; }
+    public ulong Revision { get; init; }
+    public string ActiveMode { get; init; } = "time";
+    public ClockStopwatchState Stopwatch { get; init; } = new();
+    public ClockCountdownState Countdown { get; init; } = new();
+    public ClockFocusState Focus { get; init; } = new();
+}
+
+public sealed record NotificationStackState
+{
+    public static NotificationStackState Unavailable { get; } = new();
+    public bool Available { get; init; }
+    public bool Enabled { get; init; }
+    public string Status { get; init; } = "unavailable";
+    public string Permission { get; init; } = "notRequested";
+    public string? Message { get; init; }
+    public ulong ForwardedCount { get; init; }
+    public IReadOnlyList<string> AvailableSources { get; init; } = [];
+    public IReadOnlyList<string> ExcludedSources { get; init; } = [];
+}
+
+public sealed record PcDashboardState
+{
+    public static PcDashboardState Unavailable { get; } = new();
+    public bool Available { get; init; }
+    public int Protocol { get; init; }
+    public ulong Revision { get; init; }
+    public IReadOnlyList<string> Metrics { get; init; } = ["cpu", "ram", "battery", "storage"];
+}
+
+public sealed record ClockStopwatchState
+{
+    public string Status { get; init; } = "idle";
+    public ulong ElapsedMs { get; init; }
+}
+
+public sealed record ClockCountdownState
+{
+    public string Status { get; init; } = "idle";
+    public int DurationSeconds { get; init; } = 300;
+    public int RemainingSeconds { get; init; } = 300;
+    public int ProgressPermille { get; init; }
+}
+
+public sealed record ClockFocusState
+{
+    public string Status { get; init; } = "idle";
+    public string Phase { get; init; } = "focus";
+    public int FocusMinutes { get; init; } = 25;
+    public int BreakMinutes { get; init; } = 5;
+    public int Rounds { get; init; } = 4;
+    public int CurrentRound { get; init; } = 1;
+    public int RemainingSeconds { get; init; } = 1500;
+    public int ProgressPermille { get; init; }
 }
 
 public sealed record EchoDeskDevice
@@ -298,6 +384,9 @@ public static class EchoDeskApps
         ("clock", "Clock", "\uE823"),
         ("performance", "Performance", "\uE9D9"),
         ("nowPlaying", "Now Playing", "\uE8D6"),
+        ("myDevice", "My device", "\uE946"),
+        ("notificationStack", "Notification Stack", "\uE7E7"),
+        ("pcDashboard", "PC Dashboard", "\uE9D2"),
         ("settings", "Settings", "\uE713"),
     ];
 }

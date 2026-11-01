@@ -68,6 +68,10 @@ protected Wi-Fi provisioning. USB remains selected by default. The Wi-Fi path
 uses an expiring `EchoDesk-XXXX` access point and the version-1 protocol in
 [`wifi-setup-protocol.md`](wifi-setup-protocol.md).
 
+Firmware 2.32.0 adds Clock timers, Notification Stack, PC Dashboard, My Device
+health, and staged on-device update progress while retaining the same setup
+and recovery paths.
+
 Firmware 2.30.0 introduced the version-1 setup
 handshake documented in [`guided-device-setup.md`](guided-device-setup.md).
 Blank devices show the animated Hello screen, English selection and the

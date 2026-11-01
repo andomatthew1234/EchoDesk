@@ -9,6 +9,8 @@ namespace EchoDesk.Desktop;
 
 public partial class MainWindow : Window
 {
+    private ClockWindow? clockWindow;
+
     public MainWindow(MainViewModel viewModel)
     {
         InitializeComponent();
@@ -33,6 +35,7 @@ public partial class MainWindow : Window
                     { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } });
             }
         };
+        viewModel.ClockWindowRequested += (_, mode) => Dispatcher.Invoke(() => ShowClockWindow(viewModel, mode));
         Loaded += OnLoaded;
         SizeChanged += (_, _) =>
         {
@@ -47,6 +50,29 @@ public partial class MainWindow : Window
                 Hide();
             }
         };
+    }
+
+    private void ShowClockWindow(MainViewModel viewModel, string? requestedMode)
+    {
+        // A configuration request originates on the physical device. Make the
+        // owner visible first so the owned utility cannot remain hidden behind
+        // the tray/minimised main window.
+        if (requestedMode is "countdown" or "focus") ShowAndActivate();
+        if (clockWindow is null)
+        {
+            clockWindow = new ClockWindow(viewModel, requestedMode) { Owner = this };
+            clockWindow.Closed += (_, _) => clockWindow = null;
+            clockWindow.Show();
+        }
+        else
+        {
+            clockWindow.Show();
+        }
+        if (clockWindow.WindowState == WindowState.Minimized) clockWindow.WindowState = WindowState.Normal;
+        clockWindow.Activate();
+        clockWindow.Topmost = true;
+        clockWindow.Topmost = false;
+        clockWindow.Focus();
     }
 
     public void ShowAndActivate()

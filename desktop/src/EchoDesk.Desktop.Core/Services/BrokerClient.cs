@@ -35,6 +35,33 @@ public sealed class BrokerClient : IAsyncDisposable
     public Task<BrokerState> OpenAppAsync(string app, CancellationToken cancellationToken = default) =>
         StateRequestAsync("open_app", new { app }, cancellationToken);
 
+    public Task<BrokerState> GetClockStateAsync(CancellationToken cancellationToken = default) =>
+        StateRequestAsync("clock_get_state", null, cancellationToken);
+
+    public Task<BrokerState> GetPcDashboardStateAsync(CancellationToken cancellationToken = default) =>
+        StateRequestAsync("pc_dashboard_get_state", null, cancellationToken);
+
+    public Task<BrokerState> SetPcDashboardMetricsAsync(ulong baseRevision, IReadOnlyList<string> metrics,
+        CancellationToken cancellationToken = default) =>
+        StateRequestAsync("pc_dashboard_set_metrics", new { baseRevision, metrics }, cancellationToken);
+
+    public Task<BrokerState> ControlClockAsync(
+        string action,
+        string mode,
+        int? durationSeconds = null,
+        int? focusMinutes = null,
+        int? breakMinutes = null,
+        int? rounds = null,
+        CancellationToken cancellationToken = default)
+    {
+        var parameters = new Dictionary<string, object?> { ["action"] = action, ["mode"] = mode };
+        if (durationSeconds is not null) parameters["durationSeconds"] = durationSeconds.Value;
+        if (focusMinutes is not null) parameters["focusMinutes"] = focusMinutes.Value;
+        if (breakMinutes is not null) parameters["breakMinutes"] = breakMinutes.Value;
+        if (rounds is not null) parameters["rounds"] = rounds.Value;
+        return StateRequestAsync("clock_control", parameters, cancellationToken);
+    }
+
     public Task<BrokerState> SetSettingsAsync(
         ulong baseRevision,
         SettingsPatch settings,
@@ -47,6 +74,15 @@ public sealed class BrokerClient : IAsyncDisposable
 
     public Task<BrokerState> SetAiUsageEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
         StateRequestAsync("set_ai_usage_enabled", new { enabled }, cancellationToken);
+
+    public Task<BrokerState> ConfigureNotificationStackAsync(
+        bool enabled,
+        IReadOnlyList<string> excludedSources,
+        CancellationToken cancellationToken = default) =>
+        StateRequestAsync("notification_stack_configure", new { enabled, excludedSources }, cancellationToken);
+
+    public Task<BrokerState> SendNotificationStackTestAsync(CancellationToken cancellationToken = default) =>
+        StateRequestAsync("notification_stack_test", null, cancellationToken);
 
     public Task<BrokerState> ScanFirmwareDevicesAsync(
         bool revealUnknown = false,

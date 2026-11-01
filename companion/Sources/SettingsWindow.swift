@@ -147,6 +147,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskComponentStatus: NSTextField!
     var echoDeskComponentDetail: NSTextField!
     var echoDeskComponentUpdated: NSTextField!
+    var echoDeskNotificationStatus: NSTextField!
+    var echoDeskNotificationDetail: NSTextField!
+    var echoDeskNotificationExclusions: NSTextField!
     var echoDeskFooterStatus: NSTextField!
     var echoDeskSetupViews: [NSView] = []
     var echoDeskSetupStepLabels: [NSTextField] = []
@@ -178,6 +181,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskQuickTheme: NSSegmentedControl!
     var echoDeskQuickClockFormat: NSPopUpButton!
     var echoDeskSettingControls: [String: NSControl] = [:]
+    var echoDeskAppButtons: [String: [NSButton]] = [:]
+    var echoDeskClockWindow: NSWindow?
+    var echoDeskClockStopwatchLabel: NSTextField?
+    var echoDeskClockCountdownLabel: NSTextField?
+    var echoDeskClockFocusLabel: NSTextField?
+    var echoDeskClockFocusRoundLabel: NSTextField?
+    var echoDeskClockCountdownMinutes: NSTextField?
+    var echoDeskClockFocusMinutes: NSTextField?
+    var echoDeskClockBreakMinutes: NSTextField?
+    var echoDeskClockRounds: NSTextField?
+    var echoDeskClockRefreshTimer: Timer?
+    var echoDeskClockStateRequestInFlight = false
+    var echoDeskPcDashboardPopups: [NSPopUpButton] = []
+    var echoDeskPcDashboardRevision: Int = 0
     var echoDeskLastState: [String: Any]?
     var echoDeskLastStatePort: String?
     var echoDeskLastStateMAC: String?

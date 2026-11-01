@@ -8,7 +8,7 @@
 // ============================================================
 
 // App version
-#define APP_VERSION "2.31.0"
+#define APP_VERSION "2.32.0"
 #define APP_NAME    "AI Usage Monitor"
 
 // Display-Controller-ID (aus Build-Flags abgeleitet, Compile-Zeit).
@@ -185,6 +185,7 @@ extern uint16_t SCREEN_HEIGHT;
 #define ECHODESK_APP_PERFORMANCE  3
 #define ECHODESK_APP_NOW_PLAYING  4
 #define ECHODESK_APP_SETTINGS     5
+#define ECHODESK_APP_MY_DEVICE    6
 #define ECHODESK_APP_DEFAULT      ECHODESK_APP_HOME
 
 #define CLOCK_FORMAT_12_HOUR  0
@@ -210,6 +211,9 @@ extern uint16_t SCREEN_HEIGHT;
 #define PERFORMANCE_VIEW_GPU       2
 #define PERFORMANCE_VIEW_MEMORY    3
 #define PERFORMANCE_VIEW_DEFAULT   PERFORMANCE_VIEW_OVERVIEW
+
+// PC Dashboard stores only metric identifiers. Values/samples stay in RAM.
+#define PC_DASHBOARD_WIDGET_LIMIT 4
 
 // EchoDesk guided-setup state. setup_version is persisted alongside the state
 // so future firmware can migrate the onboarding flow without re-running it on
@@ -265,6 +269,8 @@ struct AppConfig {
     uint8_t  codex_percentage_mode;     // CODEX_PERCENTAGE_* (EchoDesk only)
     uint8_t  codex_preferred_display;   // CODEX_DISPLAY_* (EchoDesk only)
     uint8_t  performance_default_view;  // PERFORMANCE_VIEW_* (EchoDesk only)
+    uint8_t  pc_dashboard_metric_count; // 1..PC_DASHBOARD_WIDGET_LIMIT
+    uint8_t  pc_dashboard_metrics[PC_DASHBOARD_WIDGET_LIMIT]; // PcDashboardMetric values
     uint8_t  setup_state;               // ECHODESK_SETUP_* (EchoDesk only)
     uint8_t  setup_version;             // Persisted guided-setup schema version
     uint8_t  setup_transport;           // ECHODESK_SETUP_TRANSPORT_*; USB is default

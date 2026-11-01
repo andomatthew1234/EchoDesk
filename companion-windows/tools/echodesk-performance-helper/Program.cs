@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using LibreHardwareMonitor.Hardware;
@@ -160,7 +161,8 @@ internal static class SensorSnapshot
             new TemperatureSample(
                 Temperature(CpuTemperature(readings)),
                 Temperature(GpuTemperature(readings)),
-                Temperature(MotherboardTemperature(readings))));
+                Temperature(MotherboardTemperature(readings))),
+            PcDashboardSnapshot.Read());
     }
 
     public static int RunSelfTest()
@@ -353,7 +355,109 @@ internal sealed record PerformanceSample(
     ulong? RamUsedBytes,
     ulong? RamTotalBytes,
     NetworkSample Network,
-    TemperatureSample Temperature);
+    TemperatureSample Temperature,
+    PcDashboardSample PcDashboard);
 
 internal sealed record NetworkSample(ulong? DownBps, ulong? UpBps);
 internal sealed record TemperatureSample(double? CpuC, double? GpuC, double? MotherboardC);
+internal sealed record PcDashboardSample(double? BatteryPct, bool? Charging, bool? MicrophoneInUse,
+                                         ulong? StorageUsedBytes, ulong? StorageTotalBytes);
+
+internal static class PcDashboardSnapshot
+{
+    public static PcDashboardSample Read()
+    {
+        if (!OperatingSystem.IsWindows())
+            return new(null, null, null, null, null);
+        (double? battery, bool? charging) = ReadBattery();
+        (ulong? used, ulong? total) = ReadStorage();
+        return new(battery, charging, ReadMicrophone(), used, total);
+    }
+
+    private static (double?, bool?) ReadBattery()
+    {
+        try
+        {
+            if (!GetSystemPowerStatus(out SYSTEM_POWER_STATUS s) || s.BatteryFlag == 128 || s.BatteryLifePercent == 255)
+                return (null, null);
+            return (s.BatteryLifePercent, (s.BatteryFlag & 8) != 0);
+        }
+        catch { return (null, null); }
+    }
+
+    private static (ulong?, ulong?) ReadStorage()
+    {
+        try
+        {
+            DriveInfo[] drives = DriveInfo.GetDrives().Where(d => d.IsReady && d.DriveType == DriveType.Fixed).ToArray();
+            ulong total = 0, free = 0;
+            foreach (DriveInfo d in drives)
+            {
+                total = checked(total + (ulong)d.TotalSize);
+                free = checked(free + (ulong)d.AvailableFreeSpace);
+            }
+            return total == 0 || free > total ? (null, null) : (total - free, total);
+        }
+        catch { return (null, null); }
+    }
+
+    private static bool? ReadMicrophone()
+    {
+        object? enumeratorObject = null;
+        IMMDevice? device = null;
+        IAudioSessionManager2? manager = null;
+        IAudioSessionEnumerator? sessions = null;
+        try
+        {
+            Type? type = Type.GetTypeFromCLSID(new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E"));
+            if (type is null) return null;
+            enumeratorObject = Activator.CreateInstance(type);
+            var enumerator = (IMMDeviceEnumerator)enumeratorObject!;
+            if (enumerator.GetDefaultAudioEndpoint(1, 1, out device!) != 0) return null; // capture, multimedia
+            Guid iid = typeof(IAudioSessionManager2).GUID;
+            if (device.Activate(ref iid, 23, IntPtr.Zero, out object managerObject) != 0) return null;
+            manager = (IAudioSessionManager2)managerObject;
+            if (manager.GetSessionEnumerator(out sessions!) != 0 || sessions.GetCount(out int count) != 0) return null;
+            for (int i = 0; i < count; i++)
+            {
+                if (sessions.GetSession(i, out IAudioSessionControl control) == 0)
+                {
+                    try { if (control.GetState(out int state) == 0 && state == 1) return true; }
+                    finally { Marshal.FinalReleaseComObject(control); }
+                }
+            }
+            return false;
+        }
+        catch { return null; }
+        finally
+        {
+            foreach (object? value in new object?[] { sessions, manager, device, enumeratorObject })
+                if (value is not null && Marshal.IsComObject(value)) Marshal.FinalReleaseComObject(value);
+        }
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern bool GetSystemPowerStatus(out SYSTEM_POWER_STATUS status);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SYSTEM_POWER_STATUS { public byte ACLineStatus, BatteryFlag, BatteryLifePercent, SystemStatusFlag; public uint BatteryLifeTime, BatteryFullLifeTime; }
+
+    [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IMMDeviceEnumerator
+    {
+        [PreserveSig] int EnumAudioEndpoints(int dataFlow, int stateMask, out object devices);
+        [PreserveSig] int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice endpoint);
+    }
+    [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IMMDevice { [PreserveSig] int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object instance); }
+    [ComImport, Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IAudioSessionManager2
+    {
+        [PreserveSig] int GetAudioSessionControl(IntPtr sessionGuid, int streamFlags, out object control);
+        [PreserveSig] int GetSimpleAudioVolume(IntPtr sessionGuid, int streamFlags, out object volume);
+        [PreserveSig] int GetSessionEnumerator(out IAudioSessionEnumerator enumerator);
+    }
+    [ComImport, Guid("E2F5BB11-0570-40CA-ACDD-3AA01277DEE8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IAudioSessionEnumerator { [PreserveSig] int GetCount(out int count); [PreserveSig] int GetSession(int index, out IAudioSessionControl session); }
+    [ComImport, Guid("F4B1A599-7266-4319-A8CA-E70ACB11E8CD"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IAudioSessionControl { [PreserveSig] int GetState(out int state); }
+}

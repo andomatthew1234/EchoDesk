@@ -3,6 +3,11 @@
 
 #include "api_common.h"
 
+#if defined(ECHODESK_OS)
+#include "echodesk_clock.h"
+#include "pc_dashboard.h"
+#endif
+
 // Initialize serial receiver state
 void serial_receiver_init();
 
@@ -52,6 +57,17 @@ void serial_ui_rebuild_clear();
 // Marks the versioned EchoDesk control snapshot dirty after a touchscreen or
 // legacy-command change. The snapshot is emitted from serial_receiver_tick().
 void serial_echodesk_state_changed();
+
+#if defined(ECHODESK_OS)
+// Requests Desktop configuration for Countdown or Focus only while a recently
+// validated Desktop link is live. False tells the Clock UI to use local input.
+bool serial_echodesk_clock_request_configuration(EchoDeskClockMode mode);
+
+// Applies a touchscreen PC Dashboard selection through the same validation,
+// persistence and revision path used by Desktop commands.
+bool serial_echodesk_pc_dashboard_apply_local_config(
+    const PcDashboardConfig &config);
+#endif
 
 // C3: True once the Mac companion sent a TZ offset. wifi_time uses this to
 // avoid overwriting the host-selected timezone with its fixed NTP TZ.

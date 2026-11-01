@@ -6,10 +6,10 @@ import Foundation
 /// version numbers, so the EchoDesk build must never infer an OS version from
 /// its GitHub app-release tag.
 enum EchoDeskFirmwareBundle {
-    static let version = "2.31.0"
+    static let version = "2.32.0"
     static let expectedSize = 1_516_400
     static let expectedSHA256 = "77dd25b6bb32cd059807135a9db9577b7f7d39748f50bc7256c528bd45577175"
-    static let resourceSubdirectory = "firmware/echodesk-mini/2.31.0"
+    static let resourceSubdirectory = "firmware/echodesk-mini/2.32.0"
     static let resourceName = "echodesk-os"
 
     enum BundleError: LocalizedError {
@@ -21,7 +21,7 @@ enum EchoDeskFirmwareBundle {
         var errorDescription: String? {
             switch self {
             case .missing:
-                return "EchoDesk OS 2.31.0 is missing from this app. Reinstall EchoDesk Desktop."
+                return "EchoDesk OS 2.32.0 is missing from this app. Reinstall EchoDesk Desktop."
             case .invalidSize(let size):
                 return "The bundled EchoDesk OS has an invalid size (\(size) bytes)."
             case .invalidDigest:

@@ -31,6 +31,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string codexPercentageMode = "used";
     private string codexPreferredDisplay = "both";
     private string performanceDefaultView = "overview";
+    private string pcDashboardMetric1 = "cpu";
+    private string pcDashboardMetric2 = "ram";
+    private string pcDashboardMetric3 = "battery";
+    private string pcDashboardMetric4 = "storage";
+    private int countdownDurationMinutes = 5;
+    private int focusDurationMinutes = 25;
+    private int focusBreakMinutes = 5;
+    private int focusRounds = 4;
+    private string notificationExcludedSourcesText = "";
+    private bool notificationFiltersInitialized;
+    private ulong handledClockConfigRequestSequence;
     private bool applyingState;
     private bool isCompact;
     private string? selectedFirmwarePort;
@@ -61,14 +72,23 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         RefreshCommand = new AsyncRelayCommand(_ => ExecuteAsync(() => broker.RefreshAsync(), "Device information refreshed."));
         ReconnectCommand = new AsyncRelayCommand(_ => ExecuteAsync(() => broker.ReconnectDeviceAsync(), "Reconnect requested."));
         OpenAppCommand = new AsyncRelayCommand(OpenAppAsync, app => IsConnected && app is string value && SupportsApp(value));
+        ClockActionCommand = new AsyncRelayCommand(ControlClockAsync, _ => ClockAvailable);
+        ConfigureCountdownCommand = new AsyncRelayCommand(_ => ConfigureCountdownAsync(), _ => ClockAvailable);
+        ConfigureFocusCommand = new AsyncRelayCommand(_ => ConfigureFocusAsync(), _ => ClockAvailable);
         SetThemeCommand = new AsyncRelayCommand(SetThemeAsync, _ => IsConnected && SupportsSettings);
         SetNowPlayingCommand = new AsyncRelayCommand(_ => SetNowPlayingAsync(), _ => IsConnected && SupportsSettings);
+        SavePcDashboardCommand = new AsyncRelayCommand(_ => SavePcDashboardAsync(), _ => PcDashboardAvailable);
         SetAdvancedSettingCommand = new AsyncRelayCommand(
             SetAdvancedSettingAsync,
             setting => setting is string key && SupportsDeviceSetting(key));
         ToggleAiUsageCommand = new AsyncRelayCommand(
             _ => SetAiUsageEnabledAsync(!AiUsageEnabled),
             _ => IsBrokerAvailable && AiUsageAvailable);
+        ConfigureNotificationStackCommand = new AsyncRelayCommand(
+            ConfigureNotificationStackAsync, _ => IsBrokerAvailable && IsConnected);
+        TestNotificationStackCommand = new AsyncRelayCommand(
+            _ => ExecuteAsync(() => broker.SendNotificationStackTestAsync(), "Test notification sent to EchoDesk."),
+            _ => NotificationStackEnabled && IsConnected);
         ScanFirmwareDevicesCommand = new AsyncRelayCommand(
             _ => ExecuteFirmwareAsync(() => broker.ScanFirmwareDevicesAsync(), "Device scan complete."),
             _ => IsBrokerAvailable && !FirmwareOperationActive);
@@ -145,7 +165,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         [
             new Choice("home", "Home"), new Choice("codex", "Codex Usage"),
             new Choice("clock", "Clock"), new Choice("performance", "Performance"),
-            new Choice("nowPlaying", "Now Playing"), new Choice("settings", "Settings"),
+            new Choice("nowPlaying", "Now Playing"), new Choice("myDevice", "My device"),
+            new Choice("notificationStack", "Notification Stack"),
+            new Choice("settings", "Settings"),
         ];
         ClockFormatOptions = [new Choice("12h", "12-hour"), new Choice("24h", "24-hour")];
         TimezoneOptions =
@@ -164,6 +186,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         [
             new Choice(BrokerProtocol.EchoDeskMiniHardwareModel, "EchoDesk Mini · Freenove FNK0114A_2P4"),
         ];
+        PcDashboardMetricOptions =
+        [
+            new Choice("", "None"), new Choice("battery", "Battery / charging"),
+            new Choice("microphone", "Microphone in use"), new Choice("storage", "Storage usage"),
+            new Choice("ram", "RAM usage"), new Choice("cpu", "CPU usage"),
+            new Choice("gpu", "GPU usage"), new Choice("networkDown", "Network download"),
+            new Choice("networkUp", "Network upload"), new Choice("cpuTemperature", "CPU temperature"),
+            new Choice("gpuTemperature", "GPU temperature"), new Choice("motherboardTemperature", "Motherboard temperature"),
+        ];
         AppTiles = new ObservableCollection<AppTile>(EchoDeskApps.All.Select(app => new AppTile(app.Id, app.Label, app.Glyph)));
         ThemeService.Apply(preferences.Appearance);
     }
@@ -172,10 +203,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public AsyncRelayCommand RefreshCommand { get; }
     public AsyncRelayCommand ReconnectCommand { get; }
     public AsyncRelayCommand OpenAppCommand { get; }
+    public AsyncRelayCommand ClockActionCommand { get; }
+    public AsyncRelayCommand ConfigureCountdownCommand { get; }
+    public AsyncRelayCommand ConfigureFocusCommand { get; }
     public AsyncRelayCommand SetThemeCommand { get; }
     public AsyncRelayCommand SetNowPlayingCommand { get; }
+    public AsyncRelayCommand SavePcDashboardCommand { get; }
     public AsyncRelayCommand SetAdvancedSettingCommand { get; }
     public AsyncRelayCommand ToggleAiUsageCommand { get; }
+    public AsyncRelayCommand ConfigureNotificationStackCommand { get; }
+    public AsyncRelayCommand TestNotificationStackCommand { get; }
     public AsyncRelayCommand ScanFirmwareDevicesCommand { get; }
     public AsyncRelayCommand RevealFirmwareUnknownCommand { get; }
     public AsyncRelayCommand SelectFirmwareDeviceCommand { get; }
@@ -205,11 +242,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public IReadOnlyList<Choice> LayoutOptions { get; }
     public IReadOnlyList<Choice> BackgroundOptions { get; }
     public IReadOnlyList<Choice> DefaultAppOptions { get; }
+    public IReadOnlyList<Choice> AvailableDefaultAppOptions =>
+        Device?.SupportedApps.Count > 0
+            ? DefaultAppOptions.Where(option => SupportsApp(option.Value)).ToArray()
+            : DefaultAppOptions;
     public IReadOnlyList<Choice> ClockFormatOptions { get; }
     public IReadOnlyList<Choice> TimezoneOptions { get; }
     public IReadOnlyList<Choice> CodexPercentageModeOptions { get; }
     public IReadOnlyList<Choice> CodexPreferredDisplayOptions { get; }
     public IReadOnlyList<Choice> PerformanceDefaultViewOptions { get; }
+    public IReadOnlyList<Choice> PcDashboardMetricOptions { get; }
+    public IReadOnlyList<Choice> PcDashboardRequiredMetricOptions => PcDashboardMetricOptions.Where(choice => choice.Value.Length > 0).ToArray();
     public IReadOnlyList<Choice> FirmwareHardwareOptions { get; }
 
     public string SelectedPage
@@ -267,6 +310,18 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public bool SupportsCodexPercentageMode => SupportsDeviceSetting("codexPercentageMode");
     public bool SupportsCodexPreferredDisplay => SupportsDeviceSetting("codexPreferredDisplay");
     public bool SupportsPerformanceDefaultView => SupportsDeviceSetting("performanceDefaultView");
+    public bool ClockAvailable => IsConnected && state.Clock.Available && state.Clock.Protocol == 1;
+    public ClockUtilityState Clock => state.Clock;
+    public string ClockActiveMode => Clock.ActiveMode;
+    public string StopwatchDisplay => TimeSpan.FromMilliseconds(Clock.Stopwatch.ElapsedMs).ToString(@"hh\:mm\:ss\.f");
+    public string CountdownDisplay => TimeSpan.FromSeconds(Clock.Countdown.RemainingSeconds).ToString(@"hh\:mm\:ss");
+    public string FocusDisplay => TimeSpan.FromSeconds(Clock.Focus.RemainingSeconds).ToString(@"hh\:mm\:ss");
+    public string FocusRoundDisplay => $"Round {Math.Max(1, Clock.Focus.CurrentRound)} of {Clock.Focus.Rounds} · {Clock.Focus.Phase.ToUpperInvariant()}";
+    public int CountdownDurationMinutes { get => countdownDurationMinutes; set => Set(ref countdownDurationMinutes, Math.Clamp(value, 1, 1440)); }
+    public int FocusDurationMinutes { get => focusDurationMinutes; set => Set(ref focusDurationMinutes, Math.Clamp(value, 1, 180)); }
+    public int FocusBreakMinutes { get => focusBreakMinutes; set => Set(ref focusBreakMinutes, Math.Clamp(value, 1, 60)); }
+    public int FocusRounds { get => focusRounds; set => Set(ref focusRounds, Math.Clamp(value, 1, 12)); }
+    public event EventHandler<string?>? ClockWindowRequested;
     public bool AiUsageAvailable => state.AiUsage.Available;
     public bool AiUsageEnabled => state.AiUsage.Enabled;
     public bool AiUsageFetching => state.AiUsage.Fetching;
@@ -278,9 +333,63 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public string AiUsageGuidance => AiUsageAvailable
         ? AiUsageGuidanceFor(state.AiUsage)
         : "Waiting for the bundled AI usage service.";
+    public string AiUsageDiagnostic
+    {
+        get
+        {
+            var component = state.AiUsage;
+            var message = component.DiagnosticDetail
+                ?? component.StderrSummary
+                ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(component.StderrSummary)
+                && !string.Equals(message, component.StderrSummary, StringComparison.Ordinal))
+            {
+                message = $"{message} {component.StderrSummary}";
+            }
+            var identifiers = new List<string>();
+            if (!string.IsNullOrWhiteSpace(component.DiagnosticCode))
+                identifiers.Add($"code {component.DiagnosticCode}");
+            if (component.ExitCode is { } exitCode)
+                identifiers.Add($"exit {exitCode}");
+            return identifiers.Count == 0
+                ? message
+                : $"{message} ({string.Join(", ", identifiers)})";
+        }
+    }
+    public bool AiUsageHasDiagnostic => !string.IsNullOrWhiteSpace(AiUsageDiagnostic)
+        && state.AiUsage.Status is not "connected" and not "live" and not "ready";
     public bool AiUsageNeedsAttention => state.AiUsage.Status is
         "authenticationRequired" or "sessionExpired" or "networkUnavailable" or "rateLimited"
-        or "dependencyMissing" or "stale" or "error" or "unavailable";
+        or "dependencyMissing" or "stale" or "error" or "unavailable" or "timeout"
+        or "providerFailed" or "malformedOutput" or "versionMismatch";
+    public string PerformanceComponentStatus => FriendlyTelemetryStatus(state.Performance.Status);
+    public string PerformanceComponentGuidance => TelemetryGuidance("Performance", state.Performance);
+    public string PerformanceLastSample => TelemetryLastSample(state.Performance);
+    public bool PerformanceNeedsAttention => TelemetryNeedsAttention(state.Performance);
+    public string NowPlayingComponentStatus => FriendlyTelemetryStatus(state.NowPlaying.Status);
+    public string NowPlayingComponentGuidance => TelemetryGuidance("Now Playing", state.NowPlaying);
+    public string NowPlayingLastSample => TelemetryLastSample(state.NowPlaying);
+    public bool NowPlayingNeedsAttention => TelemetryNeedsAttention(state.NowPlaying);
+    public NotificationStackState NotificationStack => state.NotificationStack;
+    public bool NotificationStackEnabled => NotificationStack.Enabled;
+    public string NotificationStackStatus => NotificationStack.Status switch
+    {
+        "connected" => "ACTIVE",
+        "permissionDenied" => "PERMISSION NEEDED",
+        "notConfigured" => "NOT SET UP",
+        "waitingForDevice" => "WAITING",
+        _ => NotificationStack.Status.ToUpperInvariant(),
+    };
+    public string NotificationStackGuidance => NotificationStack.Message
+        ?? "Choose Set up notifications to mirror Windows notifications privately over USB.";
+    public string NotificationStackSourceSummary => NotificationStack.AvailableSources.Count == 0
+        ? "No app sources observed yet. Everything is included by default."
+        : $"Observed apps: {string.Join(", ", NotificationStack.AvailableSources)}";
+    public string NotificationExcludedSourcesText
+    {
+        get => notificationExcludedSourcesText;
+        set => Set(ref notificationExcludedSourcesText, value);
+    }
 
     public FirmwareManagerState FirmwareManager => state.FirmwareManager;
     public IReadOnlyList<FirmwareDeviceCandidate> FirmwareDevices => FirmwareManager.Devices;
@@ -617,6 +726,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         set { if (Set(ref performanceDefaultView, value) && !applyingState) SetAdvancedSettingCommand.Execute("performanceDefaultView"); }
     }
 
+    public bool PcDashboardAvailable => IsConnected && state.PcDashboard.Available && state.PcDashboard.Protocol == 1;
+    public string PcDashboardMetric1 { get => pcDashboardMetric1; set => Set(ref pcDashboardMetric1, value); }
+    public string PcDashboardMetric2 { get => pcDashboardMetric2; set => Set(ref pcDashboardMetric2, value); }
+    public string PcDashboardMetric3 { get => pcDashboardMetric3; set => Set(ref pcDashboardMetric3, value); }
+    public string PcDashboardMetric4 { get => pcDashboardMetric4; set => Set(ref pcDashboardMetric4, value); }
+
     public string DesktopAppearance
     {
         get => preferences.Appearance;
@@ -686,6 +801,25 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         () => broker.SetAiUsageEnabledAsync(enabled),
         enabled ? "AI Usage Monitor enabled." : "AI Usage Monitor disabled. Background polling has stopped.");
 
+    private async Task SavePcDashboardAsync()
+    {
+        var metrics = new[] { PcDashboardMetric1, PcDashboardMetric2, PcDashboardMetric3, PcDashboardMetric4 }
+            .Where(value => !string.IsNullOrWhiteSpace(value)).ToArray();
+        if (metrics.Length is < 1 or > 4 || metrics.Distinct(StringComparer.Ordinal).Count() != metrics.Length)
+        {
+            Feedback = "Choose between one and four different PC Dashboard metrics.";
+            return;
+        }
+        var baseRevision = state.PcDashboard.Revision;
+        if (baseRevision == 0)
+        {
+            var refreshed = await broker.GetPcDashboardStateAsync();
+            baseRevision = refreshed.PcDashboard.Revision;
+        }
+        await ExecuteAsync(() => broker.SetPcDashboardMetricsAsync(baseRevision, metrics),
+            "PC Dashboard layout saved to EchoDesk.");
+    }
+
     private void OnStateChanged(object? sender, BrokerState next) =>
         uiContext.Post(_ => ApplyState(next), null);
 
@@ -693,6 +827,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (next.BrokerRevision != 0 && state.BrokerRevision != 0
             && next.BrokerRevision < state.BrokerRevision) return;
+        var previousClockAvailable = state.Clock.Available;
+        var previousClockRevision = state.Clock.Revision;
         state = next;
         applyingState = true;
         try
@@ -709,6 +845,29 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 CodexPercentageMode = settings.CodexPercentageMode ?? CodexPercentageMode;
                 CodexPreferredDisplay = settings.CodexPreferredDisplay ?? CodexPreferredDisplay;
                 PerformanceDefaultView = settings.PerformanceDefaultView ?? PerformanceDefaultView;
+            }
+            // Remaining time can arrive every second. Do not overwrite a
+            // duration that the user is currently editing unless the device's
+            // actual timer configuration changed.
+            if (next.Clock.Available
+                && (!previousClockAvailable || previousClockRevision != next.Clock.Revision))
+            {
+                CountdownDurationMinutes = Math.Max(1, (int)Math.Ceiling(next.Clock.Countdown.DurationSeconds / 60d));
+                FocusDurationMinutes = next.Clock.Focus.FocusMinutes;
+                FocusBreakMinutes = next.Clock.Focus.BreakMinutes;
+                FocusRounds = next.Clock.Focus.Rounds;
+            }
+            if (!notificationFiltersInitialized && next.NotificationStack.Available)
+            {
+                NotificationExcludedSourcesText = string.Join(", ", next.NotificationStack.ExcludedSources);
+                notificationFiltersInitialized = true;
+            }
+            if (next.PcDashboard.Available && next.PcDashboard.Metrics.Count is >= 1 and <= 4)
+            {
+                PcDashboardMetric1 = next.PcDashboard.Metrics.ElementAtOrDefault(0) ?? "cpu";
+                PcDashboardMetric2 = next.PcDashboard.Metrics.ElementAtOrDefault(1) ?? "";
+                PcDashboardMetric3 = next.PcDashboard.Metrics.ElementAtOrDefault(2) ?? "";
+                PcDashboardMetric4 = next.PcDashboard.Metrics.ElementAtOrDefault(3) ?? "";
             }
         }
         finally { applyingState = false; }
@@ -761,10 +920,19 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                      nameof(ConnectionLabel), nameof(ConnectionDetail), nameof(DeviceName), nameof(Port),
                      nameof(Firmware), nameof(Hardware), nameof(ActiveApp), nameof(Appearance), nameof(SupportsSettings),
                      nameof(SupportsDefaultApp), nameof(SupportsClockFormat), nameof(SupportsTimezone),
+                     nameof(AvailableDefaultAppOptions),
                      nameof(SupportsCodexPercentageMode), nameof(SupportsCodexPreferredDisplay),
                      nameof(SupportsPerformanceDefaultView),
                      nameof(AiUsageAvailable), nameof(AiUsageEnabled), nameof(AiUsageFetching), nameof(AiUsageStatus),
                      nameof(AiUsageProvider), nameof(AiUsageLastUpdated), nameof(AiUsageGuidance), nameof(AiUsageNeedsAttention),
+                     nameof(AiUsageDiagnostic), nameof(AiUsageHasDiagnostic),
+                     nameof(PerformanceComponentStatus), nameof(PerformanceComponentGuidance), nameof(PerformanceLastSample), nameof(PerformanceNeedsAttention),
+                     nameof(NowPlayingComponentStatus), nameof(NowPlayingComponentGuidance), nameof(NowPlayingLastSample), nameof(NowPlayingNeedsAttention),
+                     nameof(ClockAvailable), nameof(Clock), nameof(ClockActiveMode), nameof(StopwatchDisplay),
+                     nameof(CountdownDisplay), nameof(FocusDisplay), nameof(FocusRoundDisplay),
+                     nameof(NotificationStack), nameof(NotificationStackEnabled), nameof(NotificationStackStatus),
+                     nameof(NotificationStackGuidance), nameof(NotificationStackSourceSummary),
+                     nameof(PcDashboardAvailable),
                      nameof(FirmwareManager), nameof(FirmwareDevices), nameof(SelectedFirmwarePort), nameof(SelectedFirmwareDevice),
                      nameof(WifiSetup), nameof(GuidedWifiDevices), nameof(GuidedWifiHasDevices),
                      nameof(GuidedPairedWifiDevices), nameof(GuidedWifiHasPairedDevice),
@@ -775,6 +943,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         RaiseFirmwareComputed();
         RaiseGuidedSetupComputed();
         RefreshCommands();
+        var requestedClockMode = next.Clock.ConfigRequestMode;
+        if (requestedClockMode is not null
+            && next.Clock.ConfigRequestSequence > handledClockConfigRequestSequence)
+        {
+            handledClockConfigRequestSequence = next.Clock.ConfigRequestSequence;
+            ClockWindowRequested?.Invoke(this, requestedClockMode);
+        }
         if (IsConnected) Feedback = "Device state is synchronised.";
 
         if (IsGuidedSetup && IsGuidedUsbInstallStep && guidedUpdateRequested
@@ -1122,7 +1297,33 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (parameter is not string app || !SupportsApp(app)) return;
         await ExecuteAsync(() => broker.OpenAppAsync(app), $"Opened {AppTiles.First(item => item.Id == app).Label} on EchoDesk.");
+        if (app == "clock" && ClockAvailable)
+        {
+            await ExecuteAsync(() => broker.GetClockStateAsync(), "Clock controls synchronised.");
+            ClockWindowRequested?.Invoke(this, null);
+        }
+        else if (app == "pcDashboard" && PcDashboardAvailable)
+        {
+            await ExecuteAsync(() => broker.GetPcDashboardStateAsync(), "PC Dashboard controls synchronised.");
+        }
     }
+
+    private async Task ControlClockAsync(object? parameter)
+    {
+        if (parameter is not string value) return;
+        var parts = value.Split(':', 2);
+        if (parts.Length != 2) return;
+        await ExecuteAsync(() => broker.ControlClockAsync(parts[1], parts[0]), "Clock updated.");
+    }
+
+    private Task ConfigureCountdownAsync() => ExecuteAsync(
+        () => broker.ControlClockAsync("configure", "countdown", durationSeconds: CountdownDurationMinutes * 60),
+        "Countdown configured.");
+
+    private Task ConfigureFocusAsync() => ExecuteAsync(
+        () => broker.ControlClockAsync("configure", "focus", focusMinutes: FocusDurationMinutes,
+            breakMinutes: FocusBreakMinutes, rounds: FocusRounds),
+        "Focus timer configured.");
 
     private async Task SetThemeAsync(object? parameter)
     {
@@ -1309,6 +1510,20 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    private Task ConfigureNotificationStackAsync(object? parameter)
+    {
+        var enable = parameter as string != "disable";
+        var exclusions = NotificationExcludedSourcesText
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(value => value.Length <= 64)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(32)
+            .ToArray();
+        return ExecuteAsync(
+            () => broker.ConfigureNotificationStackAsync(enable, exclusions),
+            enable ? "Notification Stack setup saved." : "Notification Stack disabled and cleared.");
+    }
+
     private bool SupportsApp(string app) => Device?.SupportedApps.Contains(app, StringComparer.OrdinalIgnoreCase) == true;
 
     private bool SupportsDeviceSetting(string setting) => IsConnected && SupportsSettings
@@ -1317,8 +1532,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void RefreshCommands()
     {
         RefreshCommand.Refresh(); ReconnectCommand.Refresh(); OpenAppCommand.Refresh();
+        SavePcDashboardCommand.Refresh();
+        ClockActionCommand.Refresh(); ConfigureCountdownCommand.Refresh(); ConfigureFocusCommand.Refresh();
         SetThemeCommand.Refresh(); SetNowPlayingCommand.Refresh(); SetAdvancedSettingCommand.Refresh();
         ToggleAiUsageCommand.Refresh();
+        ConfigureNotificationStackCommand.Refresh(); TestNotificationStackCommand.Refresh();
         ScanFirmwareDevicesCommand.Refresh(); RevealFirmwareUnknownCommand.Refresh(); SelectFirmwareDeviceCommand.Refresh();
         CheckFirmwareUpdatesCommand.Refresh(); InstallFirmwareCommand.Refresh();
         FirmwareRecoveryActionCommand.Refresh();
@@ -1418,8 +1636,40 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         "dependencyMissing" => "REPAIR REQUIRED",
         "stale" => "STALE",
         "unavailable" => "UNAVAILABLE",
+        "timeout" => "TIMED OUT",
+        "providerFailed" => "PROVIDER ERROR",
+        "malformedOutput" => "INVALID RESPONSE",
+        "versionMismatch" => "UPDATE REQUIRED",
         "error" => "NEEDS ATTENTION",
         _ => status.Replace('_', ' ').ToUpperInvariant(),
+    };
+
+    private static string FriendlyTelemetryStatus(string status) => status switch
+    {
+        "live" => "LIVE",
+        "starting" => "STARTING",
+        "waitingForDevice" => "WAITING FOR DEVICE",
+        "firmwareUnsupported" => "FIRMWARE UPDATE REQUIRED",
+        "unavailable" => "NEEDS ATTENTION",
+        _ => status.Replace('_', ' ').ToUpperInvariant(),
+    };
+
+    private static bool TelemetryNeedsAttention(TelemetryComponentState component) =>
+        component.Status is "unavailable" or "firmwareUnsupported";
+
+    private static string TelemetryLastSample(TelemetryComponentState component) =>
+        component.LastSampleAt is { } sample
+            ? sample.ToLocalTime().ToString("g")
+            : "No sample received yet";
+
+    private static string TelemetryGuidance(string label, TelemetryComponentState component) => component.Status switch
+    {
+        "live" => $"{label} telemetry is reaching EchoDesk Desktop.",
+        "starting" => $"Starting the {label} collector…",
+        "waitingForDevice" => $"The {label} collector is ready; connect EchoDesk to display it.",
+        "firmwareUnsupported" => $"The connected firmware does not advertise {label} support. Update EchoDesk OS.",
+        "unavailable" => component.Error ?? $"The {label} collector is unavailable and will retry automatically.",
+        _ => component.Error ?? $"Waiting for {label} telemetry.",
     };
 
     private static string AiUsageGuidanceFor(AiUsageComponentState component) => component.Status switch
@@ -1439,6 +1689,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         "unavailable" when component.Error?.Contains("rate", StringComparison.OrdinalIgnoreCase) == true
             => "The provider is temporarily limiting requests. EchoDesk will retry automatically.",
         "unavailable" => "Codex usage is temporarily unavailable. EchoDesk will retry automatically.",
+        "timeout" => "The bundled Codex provider did not respond in time. EchoDesk will retry automatically.",
+        "providerFailed" => "The bundled Codex provider stopped unexpectedly. Repair the Desktop app if this continues.",
+        "malformedOutput" => "The bundled provider returned data EchoDesk could not read. Update or repair EchoDesk Desktop.",
+        "versionMismatch" => "The bundled provider and EchoDesk Desktop are incompatible. Install the latest Desktop release.",
         "error" => "Usage could not be refreshed safely. EchoDesk will retry; sign in again if the problem continues.",
         _ => "AI usage is managed by the bundled EchoDesk service.",
     };

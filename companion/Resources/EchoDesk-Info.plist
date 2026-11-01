@@ -31,6 +31,8 @@
 	<false/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>EchoDesk Desktop discovers and securely provisions your EchoDesk Mini on the local network.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>EchoDesk Desktop reads and controls playback in Apple Music or Spotify for the Now Playing screen.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

@@ -1,5 +1,6 @@
 #if ECHODESK_DESKTOP
 import Cocoa
+import UserNotifications
 
 private let echoDeskFirstRunOnboardingKey = "EchoDeskFirstRunOnboardingCompletedV1"
 
@@ -411,8 +412,27 @@ extension SettingsWindowController {
         componentRow.orientation = .horizontal; componentRow.alignment = .top
         let component = echoDeskCard(componentRow)
 
+        echoDeskNotificationStatus = NSTextField(labelWithString: "NOT SET UP")
+        echoDeskNotificationStatus.font = .systemFont(ofSize: 11, weight: .bold)
+        let notificationTitle = NSTextField(labelWithString: "Notification Stack")
+        notificationTitle.font = .systemFont(ofSize: 17, weight: .semibold)
+        let notificationHeading = NSStackView(views: [notificationTitle, echoDeskNotificationStatus])
+        notificationHeading.orientation = .horizontal; notificationHeading.spacing = 12
+        echoDeskNotificationDetail = echoDeskMuted("macOS only exposes notifications delivered by EchoDesk Desktop itself. Other apps remain private.")
+        echoDeskNotificationExclusions = NSTextField(string: UserDefaults.standard.string(forKey: "EchoDeskNotificationExclusions") ?? "")
+        echoDeskNotificationExclusions.placeholderString = "Excluded apps (comma-separated; everything included by default)"
+        let notificationButtons = NSStackView(views: [
+            echoDeskPrimaryButton("Set up notifications", #selector(echoDeskSetupNotifications)),
+            NSButton(title: "Send test", target: self, action: #selector(echoDeskTestNotification)),
+            NSButton(title: "Disable", target: self, action: #selector(echoDeskDisableNotifications)),
+        ])
+        notificationButtons.orientation = .horizontal; notificationButtons.spacing = 8
+        let notificationCard = echoDeskCard(echoDeskPageStack([
+            notificationHeading, echoDeskNotificationDetail, echoDeskNotificationExclusions, notificationButtons,
+        ], spacing: 8))
+
         let apps = echoDeskAppGrid(columns: 3)
-        let stack = echoDeskPageStack([header, deviceCard, metrics, echoDeskSectionTitle("Components"), component,
+        let stack = echoDeskPageStack([header, deviceCard, metrics, echoDeskSectionTitle("Components"), component, notificationCard,
                                        echoDeskSectionTitle("Quick actions"), apps])
         return stack
     }
@@ -455,7 +475,8 @@ extension SettingsWindowController {
             echoDeskLabeledControl("Brightness", brightness),
             echoDeskLabeledControl("Default app on startup", echoDeskSettingPopup("defaultApp", [
                 ("Home", "home"), ("Codex Usage", "codex"), ("Clock", "clock"),
-                ("Performance", "performance"), ("Now Playing", "nowPlaying"), ("Settings", "settings"),
+                ("Performance", "performance"), ("Now Playing", "nowPlaying"),
+                ("My device", "myDevice"), ("Notification Stack", "notificationStack"), ("PC Dashboard", "pcDashboard"), ("Settings", "settings"),
             ])),
         ]))
         let nowPlaying = echoDeskCard(echoDeskPageStack([
@@ -489,6 +510,33 @@ extension SettingsWindowController {
                 ("Overview", "overview"), ("CPU", "cpu"), ("GPU", "gpu"), ("Memory", "memory"),
             ])),
         ]))
+        let dashboardChoices: [(String, String)] = [
+            ("None", ""), ("Battery / charging", "battery"), ("Microphone in use", "microphone"),
+            ("Storage usage", "storage"), ("RAM usage", "ram"), ("CPU usage", "cpu"),
+            ("GPU usage", "gpu"), ("Network download", "networkDown"), ("Network upload", "networkUp"),
+            ("CPU temperature", "cpuTemperature"), ("GPU temperature", "gpuTemperature"),
+            ("Motherboard temperature", "motherboardTemperature"),
+        ]
+        echoDeskPcDashboardPopups = (0..<4).map { index in
+            let popup = EchoDeskPopupButton(frame: .zero, pullsDown: false)
+            for (label, value) in dashboardChoices where index > 0 || !value.isEmpty {
+                let item = NSMenuItem(title: label, action: nil, keyEquivalent: "")
+                item.representedObject = value; popup.menu?.addItem(item)
+            }
+            return popup
+        }
+        let applyDashboard = NSButton(title: "Apply dashboard", target: self,
+                                      action: #selector(echoDeskApplyPcDashboard))
+        applyDashboard.bezelStyle = .rounded
+        let dashboard = echoDeskCard(echoDeskPageStack([
+            echoDeskSectionTitle("PC Dashboard"),
+            echoDeskMuted("Choose one to four different metrics. Unavailable sensors remain unavailable instead of appearing as zero."),
+            echoDeskLabeledControl("Metric 1", echoDeskPcDashboardPopups[0]),
+            echoDeskLabeledControl("Metric 2", echoDeskPcDashboardPopups[1]),
+            echoDeskLabeledControl("Metric 3", echoDeskPcDashboardPopups[2]),
+            echoDeskLabeledControl("Metric 4", echoDeskPcDashboardPopups[3]), applyDashboard,
+        ]))
+        requestEchoDeskPcDashboardState()
         let desktopAppearance = EchoDeskPopupButton(frame: .zero, pullsDown: false)
         desktopAppearance.addItems(withTitles: ["System", "Light", "Dark"])
         let savedDesktopAppearance = max(0, min(2,
@@ -500,7 +548,50 @@ extension SettingsWindowController {
         let desktop = echoDeskCard(echoDeskPageStack([
             echoDeskSectionTitle("Desktop app"), echoDeskLabeledControl("Desktop appearance", desktopAppearance),
         ]))
-        return echoDeskPageStack([header, quick, general, nowPlaying, clock, codex, performance, desktop])
+        return echoDeskPageStack([header, quick, general, nowPlaying, clock, codex, performance, dashboard, desktop])
+    }
+
+    private func requestEchoDeskPcDashboardState() {
+        guard let monitor, (monitor.serialPort.deviceEchoDeskPcDashboardProtocol ?? 0) >= 1 else { return }
+        let request = nextEchoDeskRequest()
+        monitor.serialPort.performJSONCommand([
+            "cmd": "echodesk_pc_dashboard_get_state", "version": 1, "requestId": request,
+        ], acceptedTypes: ["echodesk_pc_dashboard_state", "echodesk_error"], timeout: 5) { [weak self] json in
+            guard let self, json?["type"] as? String == "echodesk_pc_dashboard_state",
+                  self.echoDeskResponseMatches(json ?? [:], request: request),
+                  let revision = json?["revision"] as? Int,
+                  let metrics = json?["metrics"] as? [String], metrics.count >= 1, metrics.count <= 4,
+                  Set(metrics).count == metrics.count,
+                  Set(metrics).isSubset(of: Set(["battery", "microphone", "storage", "ram", "cpu", "gpu",
+                                                  "networkDown", "networkUp", "cpuTemperature", "gpuTemperature",
+                                                  "motherboardTemperature"])) else { return }
+            self.echoDeskPcDashboardRevision = revision
+            for (index, popup) in self.echoDeskPcDashboardPopups.enumerated() {
+                let value = index < metrics.count ? metrics[index] : ""
+                if let item = popup.itemArray.first(where: { ($0.representedObject as? String) == value }) { popup.select(item) }
+            }
+        }
+    }
+
+    @objc private func echoDeskApplyPcDashboard() {
+        let metrics = echoDeskPcDashboardPopups.compactMap { $0.selectedItem?.representedObject as? String }
+            .filter { !$0.isEmpty }
+        guard metrics.count >= 1, metrics.count <= 4, Set(metrics).count == metrics.count, let monitor else {
+            NSSound.beep(); return
+        }
+        let request = nextEchoDeskRequest()
+        monitor.serialPort.performJSONCommand([
+            "cmd": "echodesk_pc_dashboard_set_config", "version": 1, "requestId": request,
+            "baseRevision": echoDeskPcDashboardRevision, "metrics": metrics,
+        ], acceptedTypes: ["echodesk_ack", "echodesk_error"], timeout: 5) { [weak self] json in
+            guard json?["type"] as? String == "echodesk_ack",
+                  self?.echoDeskResponseMatches(json ?? [:], request: request,
+                                                command: "echodesk_pc_dashboard_set_config") == true else {
+                NSSound.beep(); return
+            }
+            UserDefaults.standard.set(metrics, forKey: "EchoDeskPcDashboardMetrics")
+            self?.requestEchoDeskPcDashboardState()
+        }
     }
 
     private func buildEchoDeskSetupPage() -> NSView {
@@ -736,6 +827,17 @@ extension SettingsWindowController {
         echoDeskFirmwareLabel?.stringValue = serial.deviceFirmwareVersion.map { "EchoDesk OS \($0)" } ?? "Not reported"
         echoDeskHardwareLabel?.stringValue = ready ? "EchoDesk Mini" : "Not reported"
         echoDeskActiveAppLabel?.stringValue = (echoDeskLastState?["activeApp"] as? String)?.echoDeskTitle ?? "Not reported"
+        let supportedApps = Set((echoDeskLastState?["supportedApps"] as? [Any] ?? [])
+            .compactMap { $0 as? String })
+        for (app, buttons) in echoDeskAppButtons {
+            buttons.forEach { $0.isEnabled = ready && supportedApps.contains(app) }
+        }
+        if let defaultApp = echoDeskSettingControls["defaultApp"] as? NSPopUpButton {
+            for item in defaultApp.itemArray {
+                guard let app = item.representedObject as? String else { continue }
+                item.isEnabled = supportedApps.isEmpty || supportedApps.contains(app)
+            }
+        }
 
         let source = monitor.codexBar
         if source.status.isOK {
@@ -750,6 +852,12 @@ extension SettingsWindowController {
         } else {
             echoDeskComponentUpdated?.stringValue = "Last successful update: No successful update yet"
         }
+        let notificationsEnabled = UserDefaults.standard.bool(forKey: "EchoDeskNotificationStackEnabled")
+        let notificationSupported = (serial.deviceEchoDeskNotificationProtocol ?? 0) >= 1
+        echoDeskNotificationStatus?.stringValue = !notificationsEnabled ? "NOT SET UP" : notificationSupported ? "APP NOTIFICATIONS ONLY" : "UPDATE REQUIRED"
+        echoDeskNotificationDetail?.stringValue = !notificationSupported
+            ? "Update EchoDesk OS to use Notification Stack."
+            : "macOS has no public API for reading other apps’ Notification Centre history. EchoDesk Desktop can safely relay its own notifications and test messages."
         if echoDeskSelectedPage == .setup {
             if echoDeskSetupStep == .usbDevice { refreshEchoDeskSetupDevices() }
             continueEchoDeskSetupAfterReconnect(profile: profile)
@@ -825,6 +933,257 @@ extension SettingsWindowController {
         }
     }
 
+    private func echoDeskNotificationText(_ value: String, maximumBytes: Int) -> String {
+        let cleaned = value.components(separatedBy: .controlCharacters).joined(separator: " ")
+        var output = ""
+        for scalar in cleaned.unicodeScalars {
+            let candidate = output + String(scalar)
+            if candidate.utf8.count > maximumBytes { break }
+            output = candidate
+        }
+        return output.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func echoDeskNotificationID(source: String, identifier: String) -> UInt32 {
+        var hash: UInt32 = 2_166_136_261
+        for byte in (source + "\u{0}" + identifier).utf8 {
+            hash = (hash ^ UInt32(byte)) &* 16_777_619
+        }
+        return hash == 0 ? 1 : hash
+    }
+
+    @objc private func echoDeskSetupNotifications() {
+        guard (monitor?.serialPort.deviceEchoDeskNotificationProtocol ?? 0) >= 1 else {
+            echoDeskFooterStatus?.stringValue = "Update EchoDesk OS to set up Notification Stack."
+            return
+        }
+        let exclusions = echoDeskNotificationExclusions?.stringValue ?? ""
+        UserDefaults.standard.set(exclusions, forKey: "EchoDeskNotificationExclusions")
+        UserDefaults.standard.set(true, forKey: "EchoDeskNotificationStackEnabled")
+        sendEchoDeskCommand("echodesk_notifications_set_enabled", extra: ["enabled": true]) { [weak self] ok in
+            guard let self else { return }
+            self.echoDeskFooterStatus?.stringValue = ok
+                ? "Notification Stack is ready for EchoDesk Desktop notifications."
+                : "EchoDesk did not confirm Notification Stack setup."
+            if ok { self.relayEchoDeskOwnedNotifications() }
+            self.refreshEchoDeskDesktopState(forceStateRequest: false)
+        }
+    }
+
+    @objc private func echoDeskDisableNotifications() {
+        UserDefaults.standard.set(false, forKey: "EchoDeskNotificationStackEnabled")
+        sendEchoDeskCommand("echodesk_notifications_set_enabled", extra: ["enabled": false]) { [weak self] ok in
+            self?.echoDeskFooterStatus?.stringValue = ok ? "Notification Stack disabled and cleared." : "EchoDesk did not confirm the change."
+            self?.refreshEchoDeskDesktopState(forceStateRequest: false)
+        }
+    }
+
+    @objc private func echoDeskTestNotification() {
+        guard UserDefaults.standard.bool(forKey: "EchoDeskNotificationStackEnabled") else {
+            echoDeskFooterStatus?.stringValue = "Set up Notification Stack first."
+            return
+        }
+        let timestamp = UInt64(max(0, Date().timeIntervalSince1970))
+        sendEchoDeskCommand("echodesk_notifications_push", extra: [
+            "id": echoDeskNotificationID(source: "EchoDesk Desktop", identifier: "test-\(timestamp)"),
+            "source": "EchoDesk Desktop", "title": "Notification Stack is ready",
+            "body": "This test notification was sent privately over USB.", "timestamp": timestamp,
+        ]) { [weak self] ok in self?.echoDeskFooterStatus?.stringValue = ok ? "Test notification sent." : "Test notification failed." }
+    }
+
+    private func relayEchoDeskOwnedNotifications() {
+        UNUserNotificationCenter.current().getDeliveredNotifications { [weak self] notifications in
+            guard let self else { return }
+            let exclusions = Set((UserDefaults.standard.string(forKey: "EchoDeskNotificationExclusions") ?? "")
+                .split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+            guard !exclusions.contains("echodesk desktop") else { return }
+            DispatchQueue.main.async {
+                for item in notifications.suffix(12) {
+                    let content = item.request.content
+                    let timestamp = UInt64(max(0, Date().timeIntervalSince1970))
+                    self.sendEchoDeskCommand("echodesk_notifications_push", extra: [
+                        "id": self.echoDeskNotificationID(source: "EchoDesk Desktop", identifier: item.request.identifier),
+                        "source": "EchoDesk Desktop",
+                        "title": self.echoDeskNotificationText(content.title.isEmpty ? "EchoDesk Desktop" : content.title, maximumBytes: 64),
+                        "body": self.echoDeskNotificationText(content.body, maximumBytes: 160),
+                        "timestamp": timestamp,
+                    ])
+                }
+            }
+        }
+    }
+
+    // MARK: Clock utility
+
+    func showEchoDeskClockUtility(requestedMode: String? = nil) {
+        guard monitor?.serialPort.isReadyForCommands == true,
+              (monitor?.serialPort.deviceEchoDeskClockProtocol ?? 0) >= 1 else {
+            echoDeskFooterStatus?.stringValue = "Update EchoDesk OS to use Desktop Clock controls."
+            return
+        }
+        if echoDeskClockWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 690),
+                                  styleMask: [.titled, .closable, .resizable],
+                                  backing: .buffered, defer: false)
+            window.title = "EchoDesk Clock"
+            window.isReleasedWhenClosed = false
+            window.minSize = NSSize(width: 520, height: 560)
+
+            func actionButton(_ title: String, _ command: String, primary: Bool = false) -> NSButton {
+                let button = primary
+                    ? echoDeskPrimaryButton(title, #selector(echoDeskClockAction(_:)))
+                    : NSButton(title: title, target: self, action: #selector(echoDeskClockAction(_:)))
+                button.identifier = NSUserInterfaceItemIdentifier(command)
+                return button
+            }
+            func actions(_ buttons: [NSButton]) -> NSStackView {
+                let stack = NSStackView(views: buttons)
+                stack.orientation = .horizontal; stack.spacing = 8; stack.alignment = .centerY
+                return stack
+            }
+
+            echoDeskClockStopwatchLabel = echoDeskHero("00:00:00.0")
+            echoDeskClockStopwatchLabel?.font = .monospacedDigitSystemFont(ofSize: 32, weight: .light)
+            let stopwatch = echoDeskCard(echoDeskPageStack([
+                echoDeskSectionTitle("Stopwatch"), echoDeskClockStopwatchLabel!,
+                actions([actionButton("Start", "stopwatch:start", primary: true),
+                         actionButton("Pause", "stopwatch:pause"), actionButton("Reset", "stopwatch:reset")]),
+            ]))
+
+            echoDeskClockCountdownLabel = echoDeskHero("00:05:00")
+            echoDeskClockCountdownLabel?.font = .monospacedDigitSystemFont(ofSize: 30, weight: .light)
+            echoDeskClockCountdownMinutes = NSTextField(string: "5")
+            let countdownApply = echoDeskPrimaryButton("Apply duration", #selector(echoDeskClockConfigureCountdown))
+            let countdown = echoDeskCard(echoDeskPageStack([
+                echoDeskSectionTitle("Countdown"), echoDeskClockCountdownLabel!,
+                echoDeskLabeledControl("Duration in minutes", echoDeskClockCountdownMinutes!),
+                actions([countdownApply, actionButton("Start", "countdown:start"),
+                         actionButton("Pause", "countdown:pause"), actionButton("Reset", "countdown:reset")]),
+            ]))
+
+            echoDeskClockFocusLabel = echoDeskHero("00:25:00")
+            echoDeskClockFocusLabel?.font = .monospacedDigitSystemFont(ofSize: 30, weight: .light)
+            echoDeskClockFocusRoundLabel = echoDeskMuted("Round 1 of 4 · FOCUS")
+            echoDeskClockFocusMinutes = NSTextField(string: "25")
+            echoDeskClockBreakMinutes = NSTextField(string: "5")
+            echoDeskClockRounds = NSTextField(string: "4")
+            let focusFields = NSStackView(views: [
+                echoDeskLabeledControl("Focus minutes", echoDeskClockFocusMinutes!),
+                echoDeskLabeledControl("Break minutes", echoDeskClockBreakMinutes!),
+                echoDeskLabeledControl("Rounds", echoDeskClockRounds!),
+            ])
+            focusFields.orientation = .horizontal; focusFields.spacing = 10; focusFields.distribution = .fillEqually
+            let focusApply = echoDeskPrimaryButton("Apply plan", #selector(echoDeskClockConfigureFocus))
+            let focus = echoDeskCard(echoDeskPageStack([
+                echoDeskSectionTitle("Focus timer"), echoDeskClockFocusLabel!, echoDeskClockFocusRoundLabel!,
+                focusFields,
+                actions([focusApply, actionButton("Start", "focus:start"),
+                         actionButton("Pause", "focus:pause"), actionButton("Skip", "focus:skip"),
+                         actionButton("Reset", "focus:reset")]),
+            ]))
+
+            let heading = echoDeskHero("Clock")
+            let detail = echoDeskMuted("Control Stopwatch, Countdown and Focus Timer on your EchoDesk Mini.")
+            let content = echoDeskPageStack([heading, detail, stopwatch, countdown, focus])
+            content.edgeInsets = NSEdgeInsets(top: 24, left: 24, bottom: 24, right: 24)
+            let scroll = NSScrollView()
+            scroll.hasVerticalScroller = true; scroll.drawsBackground = false
+            let document = NSView()
+            document.translatesAutoresizingMaskIntoConstraints = false
+            content.translatesAutoresizingMaskIntoConstraints = false
+            document.addSubview(content)
+            NSLayoutConstraint.activate([
+                content.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+                content.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+                content.topAnchor.constraint(equalTo: document.topAnchor),
+                content.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+                content.widthAnchor.constraint(equalToConstant: 570),
+            ])
+            scroll.documentView = document
+            window.contentView = scroll
+            echoDeskClockWindow = window
+        }
+        echoDeskClockWindow?.title = requestedMode.map { "Configure EchoDesk \($0.capitalized)" } ?? "EchoDesk Clock"
+        echoDeskClockWindow?.center()
+        echoDeskClockWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        requestEchoDeskClockState()
+        if echoDeskClockRefreshTimer == nil {
+            echoDeskClockRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                guard self?.echoDeskClockWindow?.isVisible == true else { return }
+                self?.requestEchoDeskClockState()
+            }
+        }
+    }
+
+    private func requestEchoDeskClockState() {
+        guard let monitor, !echoDeskClockStateRequestInFlight else { return }
+        echoDeskClockStateRequestInFlight = true
+        let request = nextEchoDeskRequest()
+        monitor.serialPort.performJSONCommand([
+            "cmd": "echodesk_clock_get_state", "version": 1, "requestId": request,
+        ], acceptedTypes: ["echodesk_clock_state", "echodesk_error"], timeout: 3) { [weak self] json in
+            self?.echoDeskClockStateRequestInFlight = false
+            guard let self, let json, json["type"] as? String == "echodesk_clock_state" else { return }
+            self.applyEchoDeskClockState(json)
+        }
+    }
+
+    private func applyEchoDeskClockState(_ state: [String: Any]) {
+        func clock(_ seconds: Int, tenths: Bool = false) -> String {
+            let safe = max(0, seconds)
+            if tenths { return String(format: "%02d:%02d:%02d.0", safe / 3600, (safe / 60) % 60, safe % 60) }
+            return String(format: "%02d:%02d:%02d", safe / 3600, (safe / 60) % 60, safe % 60)
+        }
+        if let stopwatch = state["stopwatch"] as? [String: Any] {
+            let elapsed = max(0, stopwatch["elapsedMs"] as? Int ?? 0)
+            let wholeSeconds = elapsed / 1000
+            echoDeskClockStopwatchLabel?.stringValue = String(
+                format: "%02d:%02d:%02d.%d", wholeSeconds / 3600,
+                (wholeSeconds / 60) % 60, wholeSeconds % 60, (elapsed / 100) % 10)
+        }
+        if let countdown = state["countdown"] as? [String: Any] {
+            echoDeskClockCountdownLabel?.stringValue = clock(countdown["remainingSeconds"] as? Int ?? 0)
+            echoDeskClockCountdownMinutes?.stringValue = String(max(1, Int(ceil(Double(countdown["durationSeconds"] as? Int ?? 300) / 60))))
+        }
+        if let focus = state["focus"] as? [String: Any] {
+            echoDeskClockFocusLabel?.stringValue = clock(focus["remainingSeconds"] as? Int ?? 0)
+            let round = focus["currentRound"] as? Int ?? 1
+            let rounds = focus["rounds"] as? Int ?? 4
+            let phase = (focus["phase"] as? String ?? "focus").uppercased()
+            echoDeskClockFocusRoundLabel?.stringValue = "Round \(max(1, round)) of \(rounds) · \(phase)"
+            echoDeskClockFocusMinutes?.stringValue = String(focus["focusMinutes"] as? Int ?? 25)
+            echoDeskClockBreakMinutes?.stringValue = String(focus["breakMinutes"] as? Int ?? 5)
+            echoDeskClockRounds?.stringValue = String(rounds)
+        }
+    }
+
+    @objc private func echoDeskClockAction(_ sender: NSButton) {
+        guard let value = sender.identifier?.rawValue else { return }
+        let parts = value.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return }
+        sendEchoDeskCommand("echodesk_clock_control", extra: ["mode": parts[0], "action": parts[1]]) { [weak self] ok in
+            if ok { self?.requestEchoDeskClockState() }
+        }
+    }
+
+    @objc private func echoDeskClockConfigureCountdown() {
+        let minutes = min(1440, max(1, echoDeskClockCountdownMinutes?.integerValue ?? 5))
+        sendEchoDeskCommand("echodesk_clock_control", extra: [
+            "mode": "countdown", "action": "configure", "durationSeconds": minutes * 60,
+        ]) { [weak self] ok in if ok { self?.requestEchoDeskClockState() } }
+    }
+
+    @objc private func echoDeskClockConfigureFocus() {
+        let focus = min(180, max(1, echoDeskClockFocusMinutes?.integerValue ?? 25))
+        let pause = min(60, max(1, echoDeskClockBreakMinutes?.integerValue ?? 5))
+        let rounds = min(12, max(1, echoDeskClockRounds?.integerValue ?? 4))
+        sendEchoDeskCommand("echodesk_clock_control", extra: [
+            "mode": "focus", "action": "configure", "focusMinutes": focus,
+            "breakMinutes": pause, "rounds": rounds,
+        ]) { [weak self] ok in if ok { self?.requestEchoDeskClockState() } }
+    }
+
     // MARK: Actions
 
     @objc private func echoDeskReconnect() { monitor?.serialPort.requestReconnect() }
@@ -835,6 +1194,7 @@ extension SettingsWindowController {
         sendEchoDeskCommand("echodesk_open_app", extra: ["app": app]) { [weak self] ok in
             self?.echoDeskFooterStatus?.stringValue = ok ? "Opened \(sender.title)" : "EchoDesk did not accept the app command."
             if ok { self?.requestEchoDeskState() }
+            if ok && app == "clock" { self?.showEchoDeskClockUtility() }
         }
     }
 
@@ -1283,6 +1643,13 @@ extension SettingsWindowController {
 
     private func performEchoDeskVerifiedRecovery(port: String) {
         guard let monitor else { return }
+        monitor.prepareForFirmwareUpdate { [weak self] _ in
+            self?.performEchoDeskVerifiedRecoveryAfterWarning(port: port)
+        }
+    }
+
+    private func performEchoDeskVerifiedRecoveryAfterWarning(port: String) {
+        guard let monitor else { return }
         monitor.serialPort.stopScanning()
         FirmwareManager.shared.detectChip(port: port) { [weak self] chip in
             DispatchQueue.main.async {
@@ -1304,6 +1671,9 @@ extension SettingsWindowController {
                         FirmwareManager.shared.beginFlashAttempt(port: port, variant: kDisplayVariantST7789)
                         FirmwareManager.shared.flashFirmware(port: port, variant: kDisplayVariantST7789) { success, detail in
                             DispatchQueue.main.async {
+                                if success {
+                                    monitor.queueFirmwareUpdateCompletion(expectedVersion: EchoDeskFirmwareBundle.version)
+                                }
                                 monitor.serialPort.startScanning()
                                 if success {
                                     self.echoDeskRecoveryFlashSucceeded = true
@@ -1506,7 +1876,11 @@ extension SettingsWindowController {
     private func echoDeskAppGrid(columns: Int) -> NSView {
         let apps = [("home", "Home", "house"), ("codex", "Codex Usage", "curlybraces"),
                     ("clock", "Clock", "clock"), ("performance", "Performance", "waveform.path.ecg"),
-                    ("nowPlaying", "Now Playing", "music.note"), ("settings", "Settings", "gearshape")]
+                    ("nowPlaying", "Now Playing", "music.note"),
+                    ("myDevice", "My device", "desktopcomputer"),
+                    ("notificationStack", "Notification Stack", "bell.badge"),
+                    ("pcDashboard", "PC Dashboard", "gauge.with.dots.needle.67percent"),
+                    ("settings", "Settings", "gearshape")]
         let grid = NSGridView(views: [])
         grid.rowSpacing = 10; grid.columnSpacing = 10
         for start in stride(from: 0, to: apps.count, by: columns) {
@@ -1519,6 +1893,8 @@ extension SettingsWindowController {
                 button.imagePosition = .imageLeading; button.alignment = .left; button.bezelStyle = .rounded
                 button.translatesAutoresizingMaskIntoConstraints = false
                 button.heightAnchor.constraint(equalToConstant: 46).isActive = true
+                button.isEnabled = false
+                echoDeskAppButtons[id, default: []].append(button)
                 return button
             }
             while row.count < columns { row.append(NSView()) }
@@ -1563,6 +1939,9 @@ private extension String {
     var echoDeskTitle: String {
         switch self {
         case "nowPlaying": return "Now Playing"
+        case "myDevice": return "My device"
+        case "notificationStack": return "Notification Stack"
+        case "pcDashboard": return "PC Dashboard"
         default: return prefix(1).uppercased() + String(dropFirst())
         }
     }

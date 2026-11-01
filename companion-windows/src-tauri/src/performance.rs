@@ -6,6 +6,7 @@
 
 use crate::serial_service::{self, Job};
 use crate::state::AppState;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -18,6 +19,13 @@ const HELPER_ENV: &str = "AIMONITOR_PERFORMANCE_HELPER";
 const HELPER_NAME: &str = "echodesk-performance-helper.exe";
 #[cfg(windows)]
 const HELPER_LINE_MAX_BYTES: usize = 2048;
+
+#[cfg(windows)]
+const fn performance_helper_creation_flags() -> u32 {
+    // CREATE_NO_WINDOW. The helper is a supervised console application whose
+    // stdout/stderr are pipes; it must never create a user-visible terminal.
+    0x0800_0000
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +41,18 @@ pub struct PerformanceSample {
     pub ram_total_bytes: Option<u64>,
     pub network: NetworkSample,
     pub temperature: TemperatureSample,
+    #[serde(default, skip_serializing)]
+    pub pc_dashboard: PcDashboardHostSample,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PcDashboardHostSample {
+    pub battery_pct: Option<f64>,
+    pub charging: Option<bool>,
+    pub microphone_in_use: Option<bool>,
+    pub storage_used_bytes: Option<u64>,
+    pub storage_total_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -102,6 +122,24 @@ impl PerformanceSample {
         {
             return Err("network rate exceeds sanity limit".into());
         }
+        if self
+            .pc_dashboard
+            .battery_pct
+            .is_some_and(|v| !v.is_finite() || !(0.0..=100.0).contains(&v))
+        {
+            return Err("pcDashboard.batteryPct is outside 0..100".into());
+        }
+        if self.pc_dashboard.battery_pct.is_some() != self.pc_dashboard.charging.is_some() {
+            return Err("PC Dashboard battery fields must be paired".into());
+        }
+        match (
+            self.pc_dashboard.storage_used_bytes,
+            self.pc_dashboard.storage_total_bytes,
+        ) {
+            (Some(used), Some(total)) if total > 0 && used <= total => {}
+            (None, None) => {}
+            _ => return Err("PC Dashboard storage fields are invalid".into()),
+        }
         Ok(())
     }
 
@@ -117,12 +155,64 @@ impl PerformanceSample {
         }
         Ok(payload)
     }
+
+    pub fn pc_dashboard_payload(&self, frame_id: i64) -> Result<Option<String>, String> {
+        self.validate()?;
+        let p = &self.pc_dashboard;
+        if p.battery_pct.is_none()
+            && p.microphone_in_use.is_none()
+            && p.storage_used_bytes.is_none()
+        {
+            return Ok(None);
+        }
+        let mut value = serde_json::json!({
+            "type": "pc_dashboard_sample",
+            "version": 1,
+            "timestamp": self.timestamp,
+            "frameId": frame_id,
+        });
+        if let (Some(pct), Some(charging)) = (p.battery_pct, p.charging) {
+            value["batteryPct"] = serde_json::json!(pct);
+            value["charging"] = serde_json::json!(charging);
+        }
+        if let Some(in_use) = p.microphone_in_use {
+            value["microphoneInUse"] = serde_json::json!(in_use);
+        }
+        if let (Some(used), Some(total)) = (p.storage_used_bytes, p.storage_total_bytes) {
+            value["storageUsedBytes"] = serde_json::json!(used);
+            value["storageTotalBytes"] = serde_json::json!(total);
+        }
+        let payload = value.to_string();
+        if payload.len() >= PERFORMANCE_MAX_BYTES {
+            return Err(format!("PC Dashboard payload is {} bytes", payload.len()));
+        }
+        Ok(Some(payload))
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceHealth {
+    pub status: String,
+    pub last_sample_at: Option<DateTime<Utc>>,
+    pub error: Option<String>,
+}
+
+impl Default for PerformanceHealth {
+    fn default() -> Self {
+        Self {
+            status: "starting".into(),
+            last_sample_at: None,
+            error: None,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
 struct FeedState {
     latest: Option<PerformanceSample>,
     notification_pending: bool,
+    health: PerformanceHealth,
 }
 
 /// Single-slot latest-value mailbox. A producer can replace a queued sample,
@@ -137,6 +227,9 @@ impl PerformanceFeed {
     pub fn publish(&self, sample: PerformanceSample) -> bool {
         let mut state = self.inner.lock().unwrap();
         state.latest = Some(sample);
+        state.health.status = "live".into();
+        state.health.last_sample_at = Some(Utc::now());
+        state.health.error = None;
         if state.notification_pending {
             false
         } else {
@@ -150,6 +243,22 @@ impl PerformanceFeed {
         let sample = state.latest.take();
         state.notification_pending = false;
         sample
+    }
+
+    pub fn mark_starting(&self) {
+        let mut state = self.inner.lock().unwrap();
+        state.health.status = "starting".into();
+        state.health.error = None;
+    }
+
+    pub fn mark_unavailable(&self) {
+        let mut state = self.inner.lock().unwrap();
+        state.health.status = "unavailable".into();
+        state.health.error = Some("The Windows performance collector is unavailable.".into());
+    }
+
+    pub fn health(&self) -> PerformanceHealth {
+        self.inner.lock().unwrap().health.clone()
     }
 }
 
@@ -168,9 +277,11 @@ fn start_windows(app: AppHandle) {
         .spawn(move || {
             let mut retry = std::time::Duration::from_secs(1);
             loop {
+                app.state::<AppState>().performance.mark_starting();
                 match run_helper_once(&app) {
                     Ok(()) => serial_service::log(&app, "Performance helper stopped; restarting"),
                     Err(e) => {
+                        app.state::<AppState>().performance.mark_unavailable();
                         serial_service::log(&app, format!("Performance helper unavailable: {e}"))
                     }
                 }
@@ -184,14 +295,18 @@ fn start_windows(app: AppHandle) {
 #[cfg(windows)]
 fn run_helper_once(app: &AppHandle) -> Result<(), String> {
     use std::io::{BufRead, BufReader};
+    use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
 
     let helper = resolve_helper(app).ok_or_else(|| "helper executable not found".to_string())?;
-    let mut child = Command::new(&helper)
+    let mut command = Command::new(&helper);
+    command
+        .creation_flags(performance_helper_creation_flags())
         .args(["--parent-pid", &std::process::id().to_string()])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command
         .spawn()
         .map_err(|e| format!("failed to start: {e}"))?;
 
@@ -335,6 +450,7 @@ mod tests {
                 gpu_c: None,
                 motherboard_c: None,
             },
+            pc_dashboard: PcDashboardHostSample::default(),
         }
     }
 
@@ -349,6 +465,24 @@ mod tests {
         assert_eq!(value["type"], "performance");
         assert_eq!(value["frameId"], 42);
         assert_eq!(value["network"]["downBps"], 1234);
+    }
+
+    #[test]
+    fn builds_bounded_pc_dashboard_sample_and_omits_unavailable_fields() {
+        let mut value = sample(1_793_333_400);
+        value.pc_dashboard = PcDashboardHostSample {
+            battery_pct: None,
+            charging: None,
+            microphone_in_use: Some(false),
+            storage_used_bytes: Some(25),
+            storage_total_bytes: Some(100),
+        };
+        let payload = value.pc_dashboard_payload(43).unwrap().unwrap();
+        let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(json["type"], "pc_dashboard_sample");
+        assert_eq!(json["microphoneInUse"], false);
+        assert_eq!(json["storageUsedBytes"], 25);
+        assert!(json.get("batteryPct").is_none());
     }
 
     #[test]
@@ -372,11 +506,26 @@ mod tests {
     #[test]
     fn feed_coalesces_to_latest_sample_and_rearms_after_take() {
         let feed = PerformanceFeed::default();
+        assert_eq!(feed.health().status, "starting");
         assert!(feed.publish(sample(1)));
+        assert_eq!(feed.health().status, "live");
+        assert!(feed.health().last_sample_at.is_some());
         assert!(!feed.publish(sample(2)));
         assert_eq!(feed.take().unwrap().timestamp, 2);
         assert!(feed.publish(sample(3)));
         assert_eq!(feed.take().unwrap().timestamp, 3);
         assert!(feed.take().is_none());
+        feed.mark_unavailable();
+        assert_eq!(feed.health().status, "unavailable");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn performance_helper_is_configured_without_a_console_window() {
+        assert_eq!(
+            performance_helper_creation_flags(),
+            0x0800_0000,
+            "the supervised helper must not create the terminal window users reported"
+        );
     }
 }

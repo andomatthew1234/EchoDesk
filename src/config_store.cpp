@@ -9,6 +9,7 @@
 #include "board.h"
 #include "config.h"
 #include "echodesk_setup.h"
+#include "pc_dashboard.h"
 #include <Preferences.h>
 
 // ============================================================
@@ -17,6 +18,23 @@
 AppConfig g_config;
 
 static Preferences prefs;
+
+static void set_default_pc_dashboard_config(AppConfig &cfg) {
+    const PcDashboardConfig defaults = pc_dashboard_default_config();
+    cfg.pc_dashboard_metric_count = defaults.count;
+    for (uint8_t i = 0; i < PC_DASHBOARD_WIDGET_LIMIT; ++i) {
+        cfg.pc_dashboard_metrics[i] = static_cast<uint8_t>(defaults.metrics[i]);
+    }
+}
+
+static void normalize_pc_dashboard_config(AppConfig &cfg) {
+    PcDashboardConfig candidate{};
+    candidate.count = cfg.pc_dashboard_metric_count;
+    for (uint8_t i = 0; i < PC_DASHBOARD_WIDGET_LIMIT; ++i) {
+        candidate.metrics[i] = static_cast<PcDashboardMetric>(cfg.pc_dashboard_metrics[i]);
+    }
+    if (!pc_dashboard_validate_config(candidate)) set_default_pc_dashboard_config(cfg);
+}
 
 static const char *timezone_name(uint8_t timezone) {
     switch (timezone) {
@@ -53,6 +71,7 @@ void config_load(AppConfig &cfg) {
         cfg.codex_percentage_mode = CODEX_PERCENTAGE_DEFAULT;
         cfg.codex_preferred_display = CODEX_DISPLAY_DEFAULT;
         cfg.performance_default_view = PERFORMANCE_VIEW_DEFAULT;
+        set_default_pc_dashboard_config(cfg);
         cfg.setup_state = ECHODESK_SETUP_NOT_CONFIGURED;
         cfg.setup_version = ECHODESK_SETUP_VERSION;
         cfg.setup_transport = ECHODESK_SETUP_TRANSPORT_USB;
@@ -87,6 +106,17 @@ void config_load(AppConfig &cfg) {
     cfg.codex_percentage_mode = prefs.getUChar("codex_pct", CODEX_PERCENTAGE_DEFAULT);
     cfg.codex_preferred_display = prefs.getUChar("codex_view", CODEX_DISPLAY_DEFAULT);
     cfg.performance_default_view = prefs.getUChar("perf_view", PERFORMANCE_VIEW_DEFAULT);
+    if (prefs.isKey("pcd_count")) {
+        cfg.pc_dashboard_metric_count = prefs.getUChar("pcd_count", 0);
+        for (uint8_t i = 0; i < PC_DASHBOARD_WIDGET_LIMIT; ++i) {
+            char key[8];
+            snprintf(key, sizeof(key), "pcd_%u", static_cast<unsigned>(i));
+            cfg.pc_dashboard_metrics[i] = prefs.getUChar(key, 0xFF);
+        }
+        normalize_pc_dashboard_config(cfg);
+    } else {
+        set_default_pc_dashboard_config(cfg);
+    }
     const bool has_setup_state = prefs.isKey("setup_state");
     // Every released EchoDesk OS before guided setup wrote at least one of
     // these keys during its first boot. Treat that as an already configured
@@ -114,7 +144,7 @@ void config_load(AppConfig &cfg) {
                 ? NOW_PLAYING_BACKGROUND_ECHODESK
                 : NOW_PLAYING_BACKGROUND_ALBUM_COVER;
     }
-    if (cfg.default_app > ECHODESK_APP_SETTINGS) {
+    if (cfg.default_app > ECHODESK_APP_MY_DEVICE) {
         cfg.default_app = ECHODESK_APP_DEFAULT;
     }
     if (cfg.clock_format > CLOCK_FORMAT_24_HOUR) {
@@ -132,6 +162,7 @@ void config_load(AppConfig &cfg) {
     if (cfg.performance_default_view > PERFORMANCE_VIEW_MEMORY) {
         cfg.performance_default_view = PERFORMANCE_VIEW_DEFAULT;
     }
+    normalize_pc_dashboard_config(cfg);
     cfg.setup_state = echodesk_setup_normalize_state(cfg.setup_state);
     if (cfg.setup_version == 0 || cfg.setup_version > ECHODESK_SETUP_VERSION) {
         cfg.setup_version = ECHODESK_SETUP_VERSION;
@@ -173,6 +204,8 @@ void config_load(AppConfig &cfg) {
                   cfg.codex_preferred_display);
     Serial.printf("[Config] EchoDesk Performance default: %u\n",
                   cfg.performance_default_view);
+    Serial.printf("[Config] EchoDesk PC Dashboard widgets: %u\n",
+                  cfg.pc_dashboard_metric_count);
     Serial.printf("[Config] EchoDesk setup: %s (v%u)\n",
                   echodesk_setup_state_name(cfg.setup_state),
                   static_cast<unsigned>(cfg.setup_version));
@@ -207,6 +240,12 @@ void config_save(const AppConfig &cfg) {
     prefs.putUChar("codex_pct", cfg.codex_percentage_mode);
     prefs.putUChar("codex_view", cfg.codex_preferred_display);
     prefs.putUChar("perf_view", cfg.performance_default_view);
+    prefs.putUChar("pcd_count", cfg.pc_dashboard_metric_count);
+    for (uint8_t i = 0; i < PC_DASHBOARD_WIDGET_LIMIT; ++i) {
+        char key[8];
+        snprintf(key, sizeof(key), "pcd_%u", static_cast<unsigned>(i));
+        prefs.putUChar(key, cfg.pc_dashboard_metrics[i]);
+    }
     prefs.putUChar("setup_state", cfg.setup_state);
     prefs.putUChar("setup_ver", cfg.setup_version);
     prefs.putUChar("setup_link", cfg.setup_transport);
