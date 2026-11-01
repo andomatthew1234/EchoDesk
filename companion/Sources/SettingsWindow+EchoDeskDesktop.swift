@@ -112,7 +112,7 @@ extension SettingsWindowController {
             (.deviceControl, "Device Control", "switch.2"),
             (.customisation, "Customisation", "gearshape"),
             (.setup, "Setup new device", "plus.circle"),
-            (.recovery, "Device recovery & updates", "arrow.triangle.2.circlepath"),
+            (.recovery, "Device recovery & updates", "heart.text.square"),
         ]
         echoDeskSidebarButtons = items.map { item in
             let (page, title, symbol) = item

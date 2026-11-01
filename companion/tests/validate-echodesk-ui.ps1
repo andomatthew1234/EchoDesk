@@ -37,7 +37,7 @@ foreach ($stateFeature in @(
     'EchoDeskSetupStep', 'EchoDeskPendingSetupPortV2', 'continueEchoDeskSetupAfterReconnect',
     'echoDeskShowUnknownDevices', 'EchoDeskWiFiSetupManager.shared',
     'performEchoDeskVerifiedRecovery', 'kFirmwareChipESP32',
-    'EchoDeskPopupButton', 'Quick settings', '12-hour', '24-hour',
+    'EchoDeskPopupButton', 'heart.text.square', 'Quick settings', '12-hour', '24-hour',
     'echoDeskSetupFlashSucceeded', 'echoDeskRecoveryFlashSucceeded',
     'fw.lastFlashPort == expectedPort', 'monitor?.serialPort.connectedPort == expectedPort',
     'Settings.shared.manualPortPath = port', 'DispatchQueue.main.async',
