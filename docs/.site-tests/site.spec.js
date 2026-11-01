@@ -178,9 +178,9 @@ for (const size of sizes) {
     expect(response.status()).toBe(200);
     await expect(page.locator("h1")).toContainText("ready on desktop");
     await expect(page.locator('.desktop-nav a[aria-current="page"]')).toHaveText("Download");
-    await expect(page.locator(".download-primary")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.7/EchoDesk-Desktop-v0.2.7-win-x64-setup.exe");
+    await expect(page.locator(".download-primary")).toHaveAttribute("href", "./download-windows.html");
     await expect(page.locator(".download-portable")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.7/EchoDesk-Desktop-v0.2.7-win-x64.zip");
-    await expect(page.locator(".download-macos")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.7/EchoDesk-Desktop-v0.2.7-macos-universal.dmg");
+    await expect(page.locator(".download-macos")).toHaveAttribute("href", "./download-macos.html");
     await expect(page.locator(".download-macos-zip")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.7/EchoDesk-Desktop-v0.2.7-macos-universal.zip");
     await expect(page.locator("[data-installer-sha256]")).toHaveText(/Pending final|^[A-F0-9]{64}$/);
     await expect(page.locator("[data-portable-sha256]")).toHaveText(/Pending final|^[A-F0-9]{64}$/);
@@ -197,6 +197,79 @@ for (const size of sizes) {
     }
   });
 }
+
+const guidePages = [
+  {
+    name: "macOS",
+    path: "./download-macos.html",
+    url: "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.7/EchoDesk-Desktop-v0.2.7-macos-universal.dmg",
+    filename: "EchoDesk-Desktop-v0.2.7-macos-universal.dmg",
+    steps: 6
+  },
+  {
+    name: "Windows",
+    path: "./download-windows.html",
+    url: "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.7/EchoDesk-Desktop-v0.2.7-win-x64-setup.exe",
+    filename: "EchoDesk-Desktop-v0.2.7-win-x64-setup.exe",
+    steps: 5
+  }
+];
+
+for (const guide of guidePages) {
+  for (const size of sizes) {
+    test(`${size.name}: ${guide.name} install guide is accessible and responsive`, async ({ page }) => {
+      const problems = [];
+      page.on("console", message => {
+        if (message.type() === "error") problems.push(`console: ${message.text()}`);
+      });
+      page.on("pageerror", error => problems.push(`pageerror: ${error.message}`));
+      page.on("requestfailed", request => problems.push(`request: ${request.url()} ${request.failure()?.errorText || "failed"}`));
+
+      await page.setViewportSize({ width: size.width, height: size.height });
+      const response = await page.goto(`${guide.path}?manual=1`, { waitUntil: "networkidle" });
+      expect(response.status()).toBe(200);
+      await expect(page.locator("h1")).toHaveText("Thanks! You’re nearly done.");
+      await expect(page.locator(".install-step")).toHaveCount(guide.steps);
+      await expect(page.locator(".install-step.is-complete")).toHaveCount(1);
+      await expect(page.locator("[data-direct-download]")).toHaveAttribute("href", guide.url);
+      await expect(page.locator("[data-download-status]")).toContainText("Automatic download paused");
+
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      expect(overflow).toBeLessThanOrEqual(1);
+      expect(problems).toEqual([]);
+    });
+  }
+
+  test(`${guide.name} install guide automatically starts the correct installer`, async ({ page }) => {
+    await page.route(guide.url, route => route.fulfill({
+      status: 200,
+      contentType: "application/octet-stream",
+      headers: { "Content-Disposition": `attachment; filename="${guide.filename}"` },
+      body: "EchoDesk installer test"
+    }));
+    const downloadStarted = page.waitForEvent("download");
+    await page.goto(guide.path, { waitUntil: "networkidle" });
+    const download = await downloadStarted;
+    expect(download.suggestedFilename()).toBe(guide.filename);
+    await expect(page.locator("body")).toHaveAttribute("data-download-started", "true");
+    await expect(page.locator("[data-download-status]")).toHaveText("Your download has started.");
+    await download.delete();
+  });
+}
+
+test("macOS install guide includes the complete Privacy & Security recovery path", async ({ page }) => {
+  await page.goto("./download-macos.html?manual=1", { waitUntil: "networkidle" });
+  await expect(page.locator(".security-route")).toContainText("System Settings");
+  await expect(page.locator(".security-route")).toContainText("Privacy & Security");
+  await expect(page.locator(".security-route")).toContainText("Open Anyway");
+});
+
+test("Windows install guide explains SmartScreen safely", async ({ page }) => {
+  await page.goto("./download-windows.html?manual=1", { waitUntil: "networkidle" });
+  await expect(page.locator(".install-step").nth(2)).toContainText("Microsoft Defender SmartScreen");
+  await expect(page.locator(".install-step").nth(2)).toContainText("Run anyway");
+  await expect(page.locator(".install-step").nth(2)).toContainText("SHA-256");
+});
 
 test("home page exposes the Desktop download route", async ({ page }) => {
   await page.goto("./", { waitUntil: "networkidle" });
