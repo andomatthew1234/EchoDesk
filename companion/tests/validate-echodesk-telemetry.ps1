@@ -18,6 +18,9 @@ if (-not (Test-Path -LiteralPath $telemetryPath)) {
 
 $main = Get-Content -LiteralPath $mainPath -Raw
 $telemetry = Get-Content -LiteralPath $telemetryPath -Raw
+if ($telemetry.Contains('HOST_VM_INFO64_COUNT')) {
+    throw 'Telemetry must not use the unavailable HOST_VM_INFO64_COUNT Swift macro.'
+}
 $codex = Get-Content -LiteralPath $codexPath -Raw
 $build = Get-Content -LiteralPath $buildPath -Raw
 $plist = Get-Content -LiteralPath $plistPath -Raw

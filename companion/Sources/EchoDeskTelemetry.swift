@@ -183,7 +183,12 @@ private struct MacPerformanceCollector {
 
     private func sampleMemory() -> (used: UInt64, total: UInt64, percent: Double)? {
         var stats = vm_statistics64()
-        var count = mach_msg_type_number_t(HOST_VM_INFO64_COUNT)
+        // The SDK's VM-info count macro is unavailable to newer Swift imports.
+        // Derive the same word count from the imported struct so
+        // this builds across both current and older macOS SDKs.
+        var count = mach_msg_type_number_t(
+            MemoryLayout.size(ofValue: stats) / MemoryLayout<integer_t>.size
+        )
         let result = withUnsafeMutablePointer(to: &stats) { pointer in
             pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
                 host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
