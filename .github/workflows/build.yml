@@ -3,7 +3,9 @@ name: Build & Release Firmware
 on:
   push:
     branches: [main]
-    tags: ['v*', 'fw-beta-v*']
+    # Stable firmware uses major version 1 or newer. Desktop releases use
+    # v0.x.y, so keep those tags out of the firmware release pipeline.
+    tags: ['v[1-9]*', 'fw-beta-v*']
     paths:
       - 'src/**'
       - 'platformio.ini'
