@@ -155,6 +155,9 @@ done
 CODEXBAR_REPORTED_VERSION=$("$APP/Contents/Helpers/CodexBarCLI" --version 2>&1 | head -1)
 case "$CODEXBAR_REPORTED_VERSION" in
   *"$CODEXBAR_VERSION"*) ;;
+  # CodexBar CLI 0.82.0 reports only its product name. The two release archive
+  # hashes above are the authoritative version pins in that case.
+  "CodexBar") ;;
   *) echo "ERROR: unexpected CodexBarCLI version: $CODEXBAR_REPORTED_VERSION"; exit 1 ;;
 esac
 "$APP/Contents/Helpers/CodexBarCLI" usage --help 2>&1 | grep -q -- '--source' \
