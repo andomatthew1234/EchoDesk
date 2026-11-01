@@ -155,8 +155,13 @@ jobs:
           if (-not $cli) { throw 'The pinned archive did not contain codexbar-cli.exe.' }
           $cliHash = (Get-FileHash $cli -Algorithm SHA256).Hash
           if ($cliHash -ne $env:CODEXBAR_EXE_SHA256) { throw "Codex provider executable digest mismatch: $cliHash" }
-          $reported = (& $cli --version | Select-Object -First 1) -join ''
-          if ($LASTEXITCODE -ne 0 -or $reported -notmatch [regex]::Escape($env:CODEXBAR_VERSION)) { throw "Unexpected Codex provider version: $reported" }
+          # CodexBar CLI 0.70.0 prints a valid version string but may return a
+          # non-zero status after doing so on a headless CI runner. The archive
+          # and executable are already pinned by SHA-256 above, so validate the
+          # reported version without treating that upstream exit code as an
+          # integrity failure.
+          $reported = (& $cli --version 2>&1 | Select-Object -First 1) -join ''
+          if ($reported -notmatch [regex]::Escape($env:CODEXBAR_VERSION)) { throw "Unexpected Codex provider version: $reported" }
           "CODEXBAR_CLI=$cli" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build EchoDesk Desktop v0.2 package and installer
