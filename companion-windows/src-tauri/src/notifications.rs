@@ -154,15 +154,25 @@ fn request_windows_access(app: &AppHandle) -> Result<String, String> {
 
 #[cfg(windows)]
 fn capture_windows(app: &AppHandle) -> Result<(String, Vec<CapturedNotification>), String> {
+    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
     use windows::UI::Notifications::Management::UserNotificationListener;
     use windows::UI::Notifications::{KnownNotificationBindings, NotificationKinds};
+
+    struct ComApartment;
+    impl Drop for ComApartment {
+        fn drop(&mut self) {
+            unsafe { CoUninitialize() };
+        }
+    }
 
     let permission = request_windows_access(app)?;
     if permission != "allowed" {
         return Ok((permission, Vec::new()));
     }
-    let _apartment = windows::core::initialize_mta()
+    unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
+        .ok()
         .map_err(|error| format!("Windows notification apartment failed: {error}"))?;
+    let _apartment = ComApartment;
     let listener = UserNotificationListener::Current()
         .map_err(|error| format!("Windows notification listener unavailable: {error}"))?;
     let notifications = listener
@@ -234,7 +244,8 @@ pub fn start(app: AppHandle) {
             let mut device_enabled = false;
             loop {
                 let (enabled, exclusions) = {
-                    let settings = app.state::<AppState>().settings.lock().unwrap();
+                    let state = app.state::<AppState>();
+                    let settings = state.settings.lock().unwrap();
                     (
                         settings.notification_stack_enabled,
                         settings
