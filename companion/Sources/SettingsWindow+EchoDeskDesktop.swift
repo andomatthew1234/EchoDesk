@@ -47,7 +47,14 @@ final class EchoDeskAdaptiveStackView: NSStackView {
     init(views: [NSView], collapseBelow: CGFloat, equalColumns: Bool = true) {
         self.collapseBelow = collapseBelow
         self.equalColumns = equalColumns
-        super.init(views: views)
+        // Avoid NSStackView's Objective-C convenience initializer here. Swift 6.3's
+        // release optimizer can miscompile that initializer for subclasses and abort
+        // with an ownership-check failure. Building the arranged-view list explicitly
+        // is equivalent and remains stable in optimized Xcode 26 builds.
+        super.init(frame: .zero)
+        for view in views {
+            addArrangedSubview(view)
+        }
         spacing = 16
         orientation = .horizontal
         alignment = .top
