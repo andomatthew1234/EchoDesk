@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$firmware = Join-Path $repo 'desktop\firmware\echodesk-mini\2.32.0\echodesk-os.bin'
+$firmware = Join-Path $repo 'desktop\firmware\echodesk-mini\2.33.0\echodesk-os.bin'
 $manifestPath = Join-Path $repo 'desktop\firmware\firmware-manifest.json'
 $wifiSource = Join-Path $repo 'companion\Sources\EchoDeskWifiSetup.swift'
 $bundleSource = Join-Path $repo 'companion\Sources\EchoDeskFirmwareBundle.swift'
@@ -13,15 +13,15 @@ function Assert-True([bool] $Condition, [string] $Message) {
     if (-not $Condition) { throw $Message }
 }
 
-Assert-True (Test-Path -LiteralPath $firmware) 'EchoDesk OS 2.32.0 image is missing.'
+Assert-True (Test-Path -LiteralPath $firmware) 'EchoDesk OS 2.33.0 image is missing.'
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-$release = @($manifest.releases) | Where-Object firmwareVersion -eq '2.32.0' | Select-Object -First 1
-Assert-True ($null -ne $release) 'Firmware manifest has no EchoDesk OS 2.32.0 release.'
+$release = @($manifest.releases) | Where-Object firmwareVersion -eq '2.33.0' | Select-Object -First 1
+Assert-True ($null -ne $release) 'Firmware manifest has no EchoDesk OS 2.33.0 release.'
 
 $bytes = [IO.File]::ReadAllBytes($firmware)
 $digest = (Get-FileHash -LiteralPath $firmware -Algorithm SHA256).Hash.ToLowerInvariant()
-Assert-True ($bytes.Length -eq 1552080) "Unexpected firmware size: $($bytes.Length)."
-Assert-True ($digest -eq '1109b7a4afb242b9695ae60952073fd6da2e2e33e9fe53c1d000885af67dd2ea') 'Firmware SHA-256 mismatch.'
+Assert-True ($bytes.Length -eq 1570688) "Unexpected firmware size: $($bytes.Length)."
+Assert-True ($digest -eq '1ab0c89c367deef5b908d0abf84451a08a0c6cd980ae05c44c8fa591f3523bcc') 'Firmware SHA-256 mismatch.'
 Assert-True ($release.size -eq $bytes.Length -and $release.sha256.ToLowerInvariant() -eq $digest) 'Firmware manifest does not match the image.'
 Assert-True ($release.supportedChip -eq 'esp32' -and $release.imageType -eq 'merged' -and $release.flashAddress -eq 0) 'Firmware manifest has an unsafe flash target/layout.'
 Assert-True ($bytes[0x1000] -eq 0xE9 -and $bytes[0x100C] -eq 0 -and $bytes[0x100D] -eq 0) 'Merged image is not for classic ESP32.'
@@ -62,7 +62,7 @@ Assert-True ($main.Contains('try? EchoDeskFirmwareBundle.validate(image)')) 'Cac
 
 $build = Get-Content -LiteralPath $buildScript -Raw
 foreach ($required in @(
-    '-D ECHODESK_DESKTOP', 'EchoDesk-Info.plist', '0.2.8',
+    '-D ECHODESK_DESKTOP', 'EchoDesk-Info.plist', '0.2.9',
     'EchoDesk-Desktop-v${APP_VERSION}-macos-universal',
     'EchoDeskWifiSetup.swift', 'EchoDeskFirmwareBundle.swift', 'EchoDeskFirmwareUpdates.swift',
     'SettingsWindow+EchoDeskDesktop.swift', 'SettingsWindow+EchoDeskWifiSetup.swift'

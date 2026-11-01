@@ -1,14 +1,15 @@
 <Window x:Class="EchoDesk.Desktop.ClockWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="EchoDesk Clock" Width="650" Height="720" MinWidth="540" MinHeight="600"
+        Title="EchoDesk Clock" Width="520" Height="390" MinWidth="480" MinHeight="340"
+        SizeToContent="Height" MaxHeight="620" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="26">
-            <TextBlock Text="Clock" FontSize="30" FontWeight="SemiBold"/>
-            <TextBlock Text="Control the timers on your EchoDesk Mini." Foreground="{DynamicResource MutedTextBrush}" Margin="0,5,0,20"/>
+    <Grid Margin="26">
+        <StackPanel>
+            <TextBlock x:Name="WindowHeading" Text="Clock" FontSize="27" FontWeight="SemiBold"/>
+            <TextBlock x:Name="WindowSubheading" Text="Choose a timer for your EchoDesk Mini." Foreground="{DynamicResource MutedTextBrush}" Margin="0,5,0,20"/>
 
-            <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+            <Border x:Name="StopwatchPanel" Style="{StaticResource Card}">
                 <StackPanel>
                     <TextBlock Text="Stopwatch" FontSize="19" FontWeight="SemiBold"/>
                     <TextBlock Text="{Binding StopwatchDisplay}" FontSize="38" FontWeight="Light" FontFamily="Consolas" Margin="0,12,0,14"/>
@@ -20,41 +21,31 @@
                 </StackPanel>
             </Border>
 
-            <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+            <Border x:Name="CountdownPanel" Style="{StaticResource Card}" Visibility="Collapsed">
                 <StackPanel>
-                    <TextBlock Text="Countdown" FontSize="19" FontWeight="SemiBold"/>
-                    <TextBlock Text="{Binding CountdownDisplay}" FontSize="34" FontWeight="Light" FontFamily="Consolas" Margin="0,10,0,12"/>
-                    <TextBlock Text="Duration in minutes" FontWeight="SemiBold"/>
-                    <TextBox Text="{Binding CountdownDurationMinutes, UpdateSourceTrigger=PropertyChanged}" MinHeight="38" Padding="10,7" Margin="0,6,0,12"/>
-                    <WrapPanel>
-                        <Button Command="{Binding ConfigureCountdownCommand}" Content="Apply duration" Margin="0,0,8,8"/>
-                        <Button Style="{StaticResource PrimaryButton}" Command="{Binding ClockActionCommand}" CommandParameter="countdown:start" Content="Start" Margin="0,0,8,8"/>
-                        <Button Command="{Binding ClockActionCommand}" CommandParameter="countdown:pause" Content="Pause" Margin="0,0,8,8"/>
-                        <Button Command="{Binding ClockActionCommand}" CommandParameter="countdown:reset" Content="Reset" Margin="0,0,0,8"/>
-                    </WrapPanel>
+                    <TextBlock Text="How long?" FontSize="19" FontWeight="SemiBold"/>
+                    <TextBlock Text="Enter the countdown duration, then send it to EchoDesk." Foreground="{DynamicResource MutedTextBrush}" Margin="0,5,0,16"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <StackPanel><TextBlock Text="Minutes" FontWeight="SemiBold"/><TextBox Text="{Binding CountdownDurationMinutes, UpdateSourceTrigger=PropertyChanged}" MinHeight="42" Padding="12,8" Margin="0,6,0,0"/></StackPanel>
+                        <Button Grid.Column="2" Style="{StaticResource PrimaryButton}" Content="Done" MinWidth="92" VerticalAlignment="Bottom" Click="CountdownDone_Click"/>
+                    </Grid>
                 </StackPanel>
             </Border>
 
-            <Border Style="{StaticResource Card}">
+            <Border x:Name="FocusPanel" Style="{StaticResource Card}" Visibility="Collapsed">
                 <StackPanel>
-                    <TextBlock Text="Focus timer" FontSize="19" FontWeight="SemiBold"/>
-                    <TextBlock Text="{Binding FocusDisplay}" FontSize="34" FontWeight="Light" FontFamily="Consolas" Margin="0,10,0,2"/>
-                    <TextBlock Text="{Binding FocusRoundDisplay}" Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,0,12"/>
+                    <TextBlock Text="Plan a focus session" FontSize="19" FontWeight="SemiBold"/>
+                    <TextBlock Text="Choose the work and break rhythm for EchoDesk." Foreground="{DynamicResource MutedTextBrush}" Margin="0,5,0,16"/>
                     <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
                         <StackPanel><TextBlock Text="Focus minutes" FontWeight="SemiBold"/><TextBox Text="{Binding FocusDurationMinutes, UpdateSourceTrigger=PropertyChanged}" MinHeight="38" Padding="10,7" Margin="0,6,0,0"/></StackPanel>
                         <StackPanel Grid.Column="2"><TextBlock Text="Break minutes" FontWeight="SemiBold"/><TextBox Text="{Binding FocusBreakMinutes, UpdateSourceTrigger=PropertyChanged}" MinHeight="38" Padding="10,7" Margin="0,6,0,0"/></StackPanel>
                         <StackPanel Grid.Column="4"><TextBlock Text="Rounds" FontWeight="SemiBold"/><TextBox Text="{Binding FocusRounds, UpdateSourceTrigger=PropertyChanged}" MinHeight="38" Padding="10,7" Margin="0,6,0,0"/></StackPanel>
                     </Grid>
-                    <WrapPanel Margin="0,14,0,0">
-                        <Button Command="{Binding ConfigureFocusCommand}" Content="Apply plan" Margin="0,0,8,8"/>
-                        <Button Style="{StaticResource PrimaryButton}" Command="{Binding ClockActionCommand}" CommandParameter="focus:start" Content="Start" Margin="0,0,8,8"/>
-                        <Button Command="{Binding ClockActionCommand}" CommandParameter="focus:pause" Content="Pause" Margin="0,0,8,8"/>
-                        <Button Command="{Binding ClockActionCommand}" CommandParameter="focus:skip" Content="Skip" Margin="0,0,8,8"/>
-                        <Button Command="{Binding ClockActionCommand}" CommandParameter="focus:reset" Content="Reset" Margin="0,0,0,8"/>
-                    </WrapPanel>
+                    <Button Style="{StaticResource PrimaryButton}" Content="Done" HorizontalAlignment="Right" MinWidth="92" Margin="0,16,0,0" Click="FocusDone_Click"/>
                 </StackPanel>
             </Border>
         </StackPanel>
-    </ScrollViewer>
+    </Grid>
 </Window>

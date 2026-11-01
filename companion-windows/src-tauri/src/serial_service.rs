@@ -47,6 +47,8 @@ pub const CONNECTION_EVENT: &str = "connection-changed";
 pub const SETTINGS_EVENT: &str = "settings-changed";
 /// Zeilen im veröffentlichten Protokoll.
 const LOG_LINES: usize = 50;
+const PC_DASHBOARD_SET_CONFIG_COMMAND: &str = "echodesk_pc_dashboard_set_config";
+const BEDSIDE_SET_CONFIG_COMMAND: &str = "echodesk_bedside_set_config";
 /// Wie lange der Thread höchstens blockiert, bevor er wieder Aufträge liest.
 const IDLE_SLICE: Duration = Duration::from_millis(250);
 
@@ -862,7 +864,25 @@ impl Service {
             .unwrap()
             .take()
             .is_some();
-        if had_echo_desk_state || had_clock_state || had_clock_request || had_notification_state {
+        let had_pc_dashboard_state = app_state
+            .echo_desk_pc_dashboard_state
+            .lock()
+            .unwrap()
+            .take()
+            .is_some();
+        let had_bedside_state = app_state
+            .echo_desk_bedside_state
+            .lock()
+            .unwrap()
+            .take()
+            .is_some();
+        if had_echo_desk_state
+            || had_clock_state
+            || had_clock_request
+            || had_notification_state
+            || had_pc_dashboard_state
+            || had_bedside_state
+        {
             app_state
                 .desktop_broker_revision
                 .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
@@ -1112,6 +1132,11 @@ impl Service {
                 }
                 DeviceMessage::EchoDeskPcDashboardState(value) => {
                     if self.store_pc_dashboard_state(value).is_ok() {
+                        echo_desk_changed = true;
+                    }
+                }
+                DeviceMessage::EchoDeskBedsideState(value) => {
+                    if self.store_bedside_state(value).is_ok() {
                         echo_desk_changed = true;
                     }
                 }
@@ -1595,6 +1620,7 @@ impl Service {
             | DeviceMessage::EchoDeskClockState(value)
             | DeviceMessage::EchoDeskNotificationsState(value)
             | DeviceMessage::EchoDeskPcDashboardState(value)
+            | DeviceMessage::EchoDeskBedsideState(value)
             | DeviceMessage::EchoDeskAck(value)
             | DeviceMessage::EchoDeskError(value) => value,
             _ => {
@@ -1757,6 +1783,22 @@ impl Service {
         })
     }
 
+    fn pc_dashboard_set_fields(params: &Value) -> Result<serde_json::Map<String, Value>, ()> {
+        let object = params.as_object().ok_or(())?;
+        if object.len() != 2
+            || object.get("baseRevision").and_then(Value::as_u64).is_none()
+            || !object
+                .get("metrics")
+                .is_some_and(Self::valid_pc_dashboard_metrics)
+        {
+            return Err(());
+        }
+        let mut fields = serde_json::Map::new();
+        fields.insert("baseRevision".into(), object["baseRevision"].clone());
+        fields.insert("metrics".into(), object["metrics"].clone());
+        Ok(fields)
+    }
+
     fn store_pc_dashboard_state(&mut self, mut value: Value) -> Result<Value, Value> {
         if value.to_string().len() > 1024
             || value.get("version").and_then(Value::as_u64) != Some(1)
@@ -1818,6 +1860,224 @@ impl Service {
             _ => Err(Self::desktop_error(
                 "invalid_response",
                 "PC Dashboard state expected",
+            )),
+        }
+    }
+
+    fn exact_keys(value: &Value, keys: &[&str]) -> bool {
+        value.as_object().is_some_and(|object| {
+            object.len() == keys.len() && keys.iter().all(|key| object.contains_key(*key))
+        })
+    }
+
+    fn valid_minute(value: Option<&Value>) -> bool {
+        value
+            .and_then(Value::as_u64)
+            .is_some_and(|minute| minute <= 1439)
+    }
+
+    fn valid_bedside_config(config: &Value) -> bool {
+        if !Self::exact_keys(config, &["clock", "widgets", "alarms", "display"]) {
+            return false;
+        }
+        let clock = &config["clock"];
+        if !Self::exact_keys(clock, &["format", "showSeconds", "style"])
+            || !matches!(clock["format"].as_str(), Some("12h" | "24h"))
+            || clock["showSeconds"].as_bool().is_none()
+            || !matches!(clock["style"].as_str(), Some("large" | "minimal"))
+        {
+            return false;
+        }
+        let widgets = &config["widgets"];
+        if !Self::exact_keys(widgets, &["nextAlarm", "weather"])
+            || widgets["nextAlarm"].as_bool().is_none()
+            || widgets["weather"].as_bool().is_none()
+        {
+            return false;
+        }
+        let Some(alarms) = config["alarms"].as_array() else {
+            return false;
+        };
+        if alarms.len() > 8 {
+            return false;
+        }
+        let mut alarm_ids = std::collections::HashSet::new();
+        if !alarms.iter().all(|alarm| {
+            Self::exact_keys(
+                alarm,
+                &["id", "enabled", "minuteOfDay", "weekdays", "label"],
+            ) && alarm["id"]
+                .as_u64()
+                .is_some_and(|id| (1..=8).contains(&id) && alarm_ids.insert(id))
+                && alarm["enabled"].as_bool().is_some()
+                && Self::valid_minute(alarm.get("minuteOfDay"))
+                && alarm["weekdays"]
+                    .as_u64()
+                    .is_some_and(|days| (1..=127).contains(&days))
+                && alarm["label"]
+                    .as_str()
+                    .is_some_and(|label| label.len() <= 24)
+        }) {
+            return false;
+        }
+
+        let display = &config["display"];
+        if !Self::exact_keys(
+            display,
+            &[
+                "scheduleEnabled",
+                "manualBrightness",
+                "segments",
+                "nightShift",
+                "theme",
+            ],
+        ) || display["scheduleEnabled"].as_bool().is_none()
+            || !display["manualBrightness"]
+                .as_u64()
+                .is_some_and(|brightness| (1..=100).contains(&brightness))
+        {
+            return false;
+        }
+        let Some(segments) = display["segments"].as_array() else {
+            return false;
+        };
+        if !(1..=8).contains(&segments.len()) {
+            return false;
+        }
+        let mut previous_start = None;
+        if !segments.iter().all(|segment| {
+            if !Self::exact_keys(segment, &["startMinute", "brightness"])
+                || !Self::valid_minute(segment.get("startMinute"))
+                || !segment["brightness"]
+                    .as_u64()
+                    .is_some_and(|brightness| (1..=100).contains(&brightness))
+            {
+                return false;
+            }
+            let start = segment["startMinute"].as_u64().unwrap_or(0);
+            let sorted = previous_start.is_none_or(|previous| start > previous);
+            previous_start = Some(start);
+            sorted
+        }) {
+            return false;
+        }
+        let night_shift = &display["nightShift"];
+        let theme = &display["theme"];
+        Self::exact_keys(
+            night_shift,
+            &[
+                "scheduleEnabled",
+                "manualEnabled",
+                "startMinute",
+                "endMinute",
+            ],
+        ) && night_shift["scheduleEnabled"].as_bool().is_some()
+            && night_shift["manualEnabled"].as_bool().is_some()
+            && Self::valid_minute(night_shift.get("startMinute"))
+            && Self::valid_minute(night_shift.get("endMinute"))
+            && Self::exact_keys(
+                theme,
+                &["scheduleEnabled", "manualDark", "startMinute", "endMinute"],
+            )
+            && theme["scheduleEnabled"].as_bool().is_some()
+            && theme["manualDark"].as_bool().is_some()
+            && Self::valid_minute(theme.get("startMinute"))
+            && Self::valid_minute(theme.get("endMinute"))
+    }
+
+    fn bedside_set_fields(params: &Value) -> Result<serde_json::Map<String, Value>, ()> {
+        let object = params.as_object().ok_or(())?;
+        if object.len() != 2
+            || object.get("baseRevision").and_then(Value::as_u64).is_none()
+            || !object.get("config").is_some_and(Self::valid_bedside_config)
+        {
+            return Err(());
+        }
+        let mut fields = serde_json::Map::new();
+        fields.insert("baseRevision".into(), object["baseRevision"].clone());
+        fields.insert("persist".into(), Value::Bool(true));
+        fields.insert("config".into(), object["config"].clone());
+        Ok(fields)
+    }
+
+    fn valid_bedside_runtime(runtime: &Value) -> bool {
+        Self::exact_keys(
+            runtime,
+            &[
+                "timeValid",
+                "alarmRinging",
+                "displaySleeping",
+                "nextAlarmEpoch",
+                "skippedTomorrow",
+            ],
+        ) && runtime["timeValid"].as_bool().is_some()
+            && runtime["alarmRinging"].as_bool().is_some()
+            && runtime["displaySleeping"].as_bool().is_some()
+            && (runtime["nextAlarmEpoch"].is_null() || runtime["nextAlarmEpoch"].as_i64().is_some())
+            && runtime["skippedTomorrow"].as_bool().is_some()
+    }
+
+    fn store_bedside_state(&mut self, mut value: Value) -> Result<Value, Value> {
+        if value.to_string().len() > 8192
+            || value.get("version").and_then(Value::as_u64) != Some(1)
+            || value.get("revision").and_then(Value::as_u64).is_none()
+            || !value.get("config").is_some_and(Self::valid_bedside_config)
+            || !value
+                .get("runtime")
+                .is_some_and(Self::valid_bedside_runtime)
+        {
+            return Err(Self::desktop_error(
+                "invalid_state",
+                "invalid Bedside Mode state",
+            ));
+        }
+        if let Some(object) = value.as_object_mut() {
+            object.remove("type");
+            object.remove("version");
+            object.remove("requestId");
+        }
+        let state = self.app.state::<AppState>();
+        let mut cached = state.echo_desk_bedside_state.lock().unwrap();
+        let incoming = value.get("revision").and_then(Value::as_u64).unwrap_or(0);
+        if cached
+            .as_ref()
+            .and_then(|current| current.get("revision"))
+            .and_then(Value::as_u64)
+            .is_some_and(|current| incoming < current)
+        {
+            return Err(Self::desktop_error(
+                "stale_state",
+                "older Bedside Mode state ignored",
+            ));
+        }
+        let changed = cached.as_ref() != Some(&value);
+        *cached = Some(value.clone());
+        if changed {
+            state
+                .desktop_broker_revision
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
+        Ok(value)
+    }
+
+    fn refresh_bedside_state(&mut self) -> Result<Value, Value> {
+        if !matches!(&self.state, LinkState::Connected(info) if info.supports_echo_desk_bedside()) {
+            return Err(Self::desktop_error(
+                "unsupported",
+                "Connected firmware does not support Bedside Mode",
+            ));
+        }
+        let response = self.exchange_echo_desk(
+            "echodesk_bedside_get_state",
+            serde_json::Map::new(),
+            &["echodesk_bedside_state", "echodesk_error"],
+        )?;
+        match response {
+            DeviceMessage::EchoDeskBedsideState(value) => self.store_bedside_state(value),
+            DeviceMessage::EchoDeskError(value) => Err(value),
+            _ => Err(Self::desktop_error(
+                "invalid_response",
+                "Bedside Mode state expected",
             )),
         }
     }
@@ -2000,6 +2260,39 @@ impl Service {
         if method == "pc_dashboard_get_state" {
             return self.refresh_pc_dashboard_state();
         }
+        if method == "bedside_get_state" {
+            return self.refresh_bedside_state();
+        }
+        if method == "bedside_set_config" {
+            if !matches!(&self.state, LinkState::Connected(info) if info.supports_echo_desk_bedside())
+            {
+                return Err(Self::desktop_error(
+                    "unsupported",
+                    "Connected firmware does not support Bedside Mode",
+                ));
+            }
+            let fields = Self::bedside_set_fields(&params).map_err(|_| {
+                Self::desktop_error("invalid_request", "Bedside Mode configuration is invalid")
+            })?;
+            let response = self.exchange_echo_desk(
+                BEDSIDE_SET_CONFIG_COMMAND,
+                fields,
+                &["echodesk_ack", "echodesk_error"],
+            )?;
+            match response {
+                DeviceMessage::EchoDeskError(value) => return Err(value),
+                DeviceMessage::EchoDeskAck(value)
+                    if value.get("command").and_then(Value::as_str)
+                        == Some(BEDSIDE_SET_CONFIG_COMMAND) => {}
+                _ => {
+                    return Err(Self::desktop_error(
+                        "invalid_response",
+                        "Bedside Mode acknowledgement expected",
+                    ))
+                }
+            }
+            return self.refresh_bedside_state();
+        }
         if method == "pc_dashboard_set_metrics" {
             if !matches!(&self.state, LinkState::Connected(info) if info.supports_echo_desk_pc_dashboard())
             {
@@ -2008,25 +2301,14 @@ impl Service {
                     "Connected firmware does not support PC Dashboard",
                 ));
             }
-            let object = params.as_object().ok_or_else(|| {
-                Self::desktop_error("invalid_request", "PC Dashboard params must be an object")
-            })?;
-            if object.len() != 2
-                || object.get("baseRevision").and_then(Value::as_u64).is_none()
-                || !object
-                    .get("metrics")
-                    .is_some_and(Self::valid_pc_dashboard_metrics)
-            {
-                return Err(Self::desktop_error(
+            let fields = Self::pc_dashboard_set_fields(&params).map_err(|_| {
+                Self::desktop_error(
                     "invalid_request",
                     "PC Dashboard requires baseRevision and 1-4 unique metrics",
-                ));
-            }
-            let mut fields = serde_json::Map::new();
-            fields.insert("baseRevision".into(), object["baseRevision"].clone());
-            fields.insert("metrics".into(), object["metrics"].clone());
+                )
+            })?;
             let response = self.exchange_echo_desk(
-                "echodesk_pc_dashboard_set_config",
+                PC_DASHBOARD_SET_CONFIG_COMMAND,
                 fields,
                 &["echodesk_ack", "echodesk_error"],
             )?;
@@ -2034,7 +2316,7 @@ impl Service {
                 DeviceMessage::EchoDeskError(value) => return Err(value),
                 DeviceMessage::EchoDeskAck(value)
                     if value.get("command").and_then(Value::as_str)
-                        == Some("echodesk_pc_dashboard_set_config") => {}
+                        == Some(PC_DASHBOARD_SET_CONFIG_COMMAND) => {}
                 _ => {
                     return Err(Self::desktop_error(
                         "invalid_response",
@@ -2478,11 +2760,13 @@ impl Service {
                 self.transmit(&info, payload, frame_id, "music", "Windows GSMTC");
                 match snapshot.artwork {
                     Some(art)
-                        if self.last_music_art_id.as_deref() != Some(art.id.as_str())
-                            && self
-                                .pending_music_art
+                        if crate::music::should_queue_artwork(
+                            self.last_music_art_id.as_deref(),
+                            self.pending_music_art
                                 .as_ref()
-                                .is_none_or(|pending| pending.art.id != art.id) =>
+                                .map(|pending| pending.art.id.as_str()),
+                            &art.id,
+                        ) =>
                     {
                         self.pending_music_art = Some(PendingMusicArt { art, next_chunk: 0 });
                     }
@@ -3219,6 +3503,77 @@ mod tests {
             Some(&(now + chrono::Duration::hours(2))),
             POLL_INTERVAL * 2,
         ));
+    }
+
+    #[test]
+    fn dashboard_apply_builds_the_exact_versioned_device_command_fields() {
+        assert_eq!(
+            PC_DASHBOARD_SET_CONFIG_COMMAND,
+            "echodesk_pc_dashboard_set_config"
+        );
+        let fields = Service::pc_dashboard_set_fields(&json!({
+            "baseRevision": 9,
+            "metrics": ["gpu", "ram", "cpu", "microphone"]
+        }))
+        .unwrap();
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields["baseRevision"], json!(9));
+        assert_eq!(
+            fields["metrics"],
+            json!(["gpu", "ram", "cpu", "microphone"])
+        );
+        assert!(Service::pc_dashboard_set_fields(&json!({
+            "baseRevision": 9,
+            "metrics": ["cpu", "cpu"]
+        }))
+        .is_err());
+        assert!(Service::pc_dashboard_set_fields(&json!({
+            "baseRevision": 9,
+            "metrics": ["cpu"],
+            "unexpected": true
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn bedside_apply_is_whole_config_strict_and_persistent() {
+        assert_eq!(BEDSIDE_SET_CONFIG_COMMAND, "echodesk_bedside_set_config");
+        let config = json!({
+            "clock":{"format":"12h","showSeconds":false,"style":"large"},
+            "widgets":{"nextAlarm":true,"weather":false},
+            "alarms":[{"id":1,"enabled":true,"minuteOfDay":420,"weekdays":62,"label":"Weekday"}],
+            "display":{
+                "scheduleEnabled":true,"manualBrightness":40,
+                "segments":[{"startMinute":0,"brightness":1},{"startMinute":420,"brightness":70}],
+                "nightShift":{"scheduleEnabled":true,"manualEnabled":false,"startMinute":1140,"endMinute":420},
+                "theme":{"scheduleEnabled":true,"manualDark":false,"startMinute":1140,"endMinute":420}
+            }
+        });
+        assert!(Service::valid_bedside_config(&config));
+        let fields = Service::bedside_set_fields(&json!({
+            "baseRevision": 8,
+            "config": config.clone()
+        }))
+        .unwrap();
+        assert_eq!(fields.len(), 3);
+        assert_eq!(fields["baseRevision"], json!(8));
+        assert_eq!(fields["persist"], json!(true));
+        assert_eq!(fields["config"], config);
+
+        let mut unlabeled = fields["config"].clone();
+        unlabeled["alarms"][0]["label"] = json!("");
+        assert!(Service::valid_bedside_config(&unlabeled));
+
+        let mut invalid = fields["config"].clone();
+        invalid["display"]["segments"] = json!([
+            {"startMinute":420,"brightness":70},
+            {"startMinute":0,"brightness":1}
+        ]);
+        assert!(!Service::valid_bedside_config(&invalid));
+        assert!(Service::bedside_set_fields(&json!({
+            "baseRevision":8,"config":fields["config"],"persist":false
+        }))
+        .is_err());
     }
 
     #[test]

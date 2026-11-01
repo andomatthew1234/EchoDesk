@@ -17,6 +17,7 @@
 #include "ui_my_device.h"
 #include "ui_notification_stack.h"
 #include "ui_pc_dashboard.h"
+#include "ui_bedside.h"
 
 #include <Arduino.h>
 #include <lvgl.h>
@@ -36,6 +37,7 @@ enum EchoApp : uint8_t {
     ECHO_MY_DEVICE,
     ECHO_NOTIFICATION_STACK,
     ECHO_PC_DASHBOARD,
+    ECHO_BEDSIDE,
 };
 
 enum class SetupPage : uint8_t {
@@ -595,12 +597,108 @@ void on_home_card(lv_event_t *event) {
     show_app(app);
 }
 
+lv_obj_t *icon_part(lv_obj_t *parent, int16_t x, int16_t y, int16_t width,
+                    int16_t height, int16_t radius = 0) {
+    lv_obj_t *part = lv_obj_create(parent);
+    lv_obj_remove_style_all(part);
+    lv_obj_set_size(part, width, height);
+    lv_obj_set_pos(part, x, y);
+    lv_obj_set_style_bg_color(part, color(COLOR_WHITE), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(part, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(part, radius, LV_PART_MAIN);
+    lv_obj_clear_flag(part, LV_OBJ_FLAG_SCROLLABLE);
+    return part;
+}
+
+lv_obj_t *icon_outline(lv_obj_t *parent, int16_t x, int16_t y,
+                       int16_t width, int16_t height, int16_t radius) {
+    lv_obj_t *part = lv_obj_create(parent);
+    lv_obj_remove_style_all(part);
+    lv_obj_set_size(part, width, height);
+    lv_obj_set_pos(part, x, y);
+    lv_obj_set_style_bg_opa(part, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_color(part, color(COLOR_WHITE), LV_PART_MAIN);
+    lv_obj_set_style_border_width(part, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(part, radius, LV_PART_MAIN);
+    lv_obj_clear_flag(part, LV_OBJ_FLAG_SCROLLABLE);
+    return part;
+}
+
+void create_utility_icon(lv_obj_t *parent, EchoApp app) {
+    // All icons are small vector-like compositions made from LVGL primitives,
+    // so they stay crisp in both themes without font/glyph substitutions.
+    switch (app) {
+        case ECHO_CODEX:
+            icon_part(parent, 4, 5, 2, 16, 1);
+            icon_part(parent, 5, 4, 5, 2, 1);
+            icon_part(parent, 5, 20, 5, 2, 1);
+            icon_part(parent, 20, 5, 2, 16, 1);
+            icon_part(parent, 16, 4, 5, 2, 1);
+            icon_part(parent, 16, 20, 5, 2, 1);
+            break;
+        case ECHO_CLOCK:
+            icon_outline(parent, 3, 3, 20, 20, 10);
+            icon_part(parent, 12, 7, 2, 7, 1);
+            icon_part(parent, 12, 12, 6, 2, 1);
+            break;
+        case ECHO_PERFORMANCE:
+            icon_part(parent, 3, 15, 3, 8, 1);
+            icon_part(parent, 8, 10, 3, 13, 1);
+            icon_part(parent, 13, 4, 3, 19, 1);
+            icon_part(parent, 18, 8, 3, 15, 1);
+            break;
+        case ECHO_NOW_PLAYING:
+            icon_part(parent, 10, 4, 2, 15, 1);
+            icon_part(parent, 11, 4, 10, 2, 1);
+            icon_part(parent, 19, 5, 2, 12, 1);
+            icon_part(parent, 5, 17, 7, 7, 4);
+            icon_part(parent, 14, 15, 7, 7, 4);
+            break;
+        case ECHO_NOTIFICATION_STACK:
+            icon_outline(parent, 5, 6, 16, 15, 8);
+            icon_part(parent, 5, 15, 16, 7, 2);
+            icon_part(parent, 11, 22, 5, 2, 2);
+            break;
+        case ECHO_MY_DEVICE:
+            icon_outline(parent, 3, 4, 20, 15, 3);
+            icon_part(parent, 11, 19, 4, 3, 1);
+            icon_part(parent, 7, 22, 12, 2, 1);
+            break;
+        case ECHO_SETTINGS:
+            icon_part(parent, 3, 6, 20, 2, 1);
+            icon_part(parent, 3, 13, 20, 2, 1);
+            icon_part(parent, 3, 20, 20, 2, 1);
+            icon_part(parent, 7, 3, 5, 7, 3);
+            icon_part(parent, 16, 10, 5, 7, 3);
+            icon_part(parent, 9, 17, 5, 7, 3);
+            break;
+        case ECHO_PC_DASHBOARD:
+            icon_outline(parent, 3, 3, 9, 9, 2);
+            icon_outline(parent, 14, 3, 9, 9, 2);
+            icon_outline(parent, 3, 14, 9, 9, 2);
+            icon_outline(parent, 14, 14, 9, 9, 2);
+            break;
+        case ECHO_BEDSIDE:
+            // A crescent-moon silhouette, drawn as overlapping primitives so
+            // it remains a crisp custom icon without relying on font glyphs.
+            icon_part(parent, 5, 3, 17, 20, 10);
+            {
+                lv_obj_t *cutout = icon_part(parent, 11, 1, 14, 17, 9);
+                lv_obj_set_style_bg_color(cutout, color(ECHO_COLOR_PANEL), LV_PART_MAIN);
+            }
+            break;
+        default:
+            icon_outline(parent, 4, 4, 18, 18, 5);
+            break;
+    }
+}
+
 void add_home_card(lv_obj_t *screen, int16_t x, int16_t y, int16_t width,
-                   EchoApp app, const char *icon, const char *title,
+                   EchoApp app, const char *title,
                    const char *subtitle) {
     lv_obj_t *button = lv_button_create(screen);
     style_button(button, 12);
-    lv_obj_set_size(button, width, 55);
+    lv_obj_set_size(button, width, 44);
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_pad_all(button, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(button, on_home_card, LV_EVENT_CLICKED,
@@ -608,32 +706,28 @@ void add_home_card(lv_obj_t *screen, int16_t x, int16_t y, int16_t width,
 
     lv_obj_t *icon_box = lv_obj_create(button);
     lv_obj_remove_style_all(icon_box);
-    lv_obj_set_size(icon_box, 30, 30);
-    lv_obj_set_pos(icon_box, 8, 7);
+    lv_obj_set_size(icon_box, 26, 26);
+    lv_obj_set_pos(icon_box, 7, 8);
     lv_obj_set_style_border_color(icon_box, color(COLOR_WHITE), LV_PART_MAIN);
     lv_obj_set_style_border_width(icon_box, 1, LV_PART_MAIN);
-    lv_obj_set_style_radius(icon_box, 8, LV_PART_MAIN);
-    lv_obj_t *icon_label = make_label(icon_box, icon, &lv_font_montserrat_14, color(COLOR_WHITE));
-    lv_obj_center(icon_label);
+    lv_obj_set_style_radius(icon_box, 7, LV_PART_MAIN);
+    create_utility_icon(icon_box, app);
 
     const bool multiline_title = strchr(title, '\n') != nullptr;
-    const lv_font_t *title_font = strlen(title) > 9 ? &lv_font_montserrat_12
-                                                    : &lv_font_montserrat_14;
+    const lv_font_t *title_font = &lv_font_montserrat_12;
     lv_obj_t *title_label = make_label(button, title, title_font, color(COLOR_WHITE));
-    lv_obj_set_width(title_label, width - 66);
-    lv_obj_set_pos(title_label, 45, multiline_title ? 4 : 6);
+    lv_obj_set_width(title_label, width - 44);
+    lv_obj_set_pos(title_label, 39, multiline_title ? 3 : 5);
     if (multiline_title) {
         lv_obj_set_style_text_line_space(title_label, -3, LV_PART_MAIN);
     }
     if (subtitle && subtitle[0]) {
         lv_obj_t *sub_label = make_label(button, subtitle, &lv_font_montserrat_12,
                                          color(COLOR_GREY));
-        lv_obj_set_width(sub_label, width - 18);
+        lv_obj_set_width(sub_label, width - 44);
         lv_label_set_long_mode(sub_label, LV_LABEL_LONG_DOT);
-        lv_obj_set_pos(sub_label, 9, 36);
+        lv_obj_set_pos(sub_label, 39, 23);
     }
-    lv_obj_t *arrow = make_label(button, ">", &lv_font_montserrat_16, color(COLOR_GREY));
-    lv_obj_align(arrow, LV_ALIGN_TOP_RIGHT, -8, 11);
 }
 
 lv_obj_t *create_home_screen() {
@@ -646,31 +740,22 @@ lv_obj_t *create_home_screen() {
     lv_obj_remove_style_all(content);
     lv_obj_set_size(content, 320, 200);
     lv_obj_set_pos(content, 0, 40);
-    lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scroll_dir(content, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
-    lv_obj_set_style_width(content, 3, LV_PART_SCROLLBAR);
-    lv_obj_set_style_bg_color(content, color(COLOR_DIM), LV_PART_SCROLLBAR);
-    lv_obj_set_style_bg_opa(content, LV_OPA_70, LV_PART_SCROLLBAR);
-    lv_obj_set_style_radius(content, 2, LV_PART_SCROLLBAR);
+    lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
 
-    add_home_card(content, 8, 3, 146, ECHO_CODEX, "C", "CODEX", "Usage limits");
-    add_home_card(content, 166, 3, 146, ECHO_CLOCK, "12", "CLOCK", "Local time");
-    add_home_card(content, 8, 64, 146, ECHO_PERFORMANCE, "^", "PERFORMANCE", "PC activity");
-    add_home_card(content, 166, 64, 146, ECHO_NOW_PLAYING, LV_SYMBOL_AUDIO,
+    add_home_card(content, 8, 3, 94, ECHO_CODEX, "CODEX", "Usage");
+    add_home_card(content, 113, 3, 94, ECHO_CLOCK, "CLOCK", "Timers");
+    add_home_card(content, 218, 3, 94, ECHO_BEDSIDE, "BEDSIDE", "Ambient");
+    add_home_card(content, 8, 51, 146, ECHO_PERFORMANCE, "PERFORMANCE", "PC activity");
+    add_home_card(content, 166, 51, 146, ECHO_NOW_PLAYING,
                   "NOW PLAYING", "Music & media");
-    add_home_card(content, 8, 125, 146, ECHO_NOTIFICATION_STACK, LV_SYMBOL_BELL,
-                  "NOTIFICATION\nSTACK", "");
-    add_home_card(content, 166, 125, 146, ECHO_MY_DEVICE, "i", "MY DEVICE",
+    add_home_card(content, 8, 99, 146, ECHO_NOTIFICATION_STACK,
+                  "NOTIFICATIONS", "Recent alerts");
+    add_home_card(content, 166, 99, 146, ECHO_MY_DEVICE, "MY DEVICE",
                   "Health & links");
-    add_home_card(content, 8, 186, 146, ECHO_SETTINGS, "*", "SETTINGS",
-                  "Display & restart");
-    add_home_card(content, 166, 186, 146, ECHO_PC_DASHBOARD, "PC",
-                  "PC DASHBOARD", "Your selected stats");
-    lv_obj_t *end_marker = lv_obj_create(content);
-    lv_obj_remove_style_all(end_marker);
-    lv_obj_set_size(end_marker, 1, 1);
-    lv_obj_set_pos(end_marker, 0, 246);
+    add_home_card(content, 8, 147, 146, ECHO_SETTINGS, "SETTINGS",
+                  "Display & reset");
+    add_home_card(content, 166, 147, 146, ECHO_PC_DASHBOARD,
+                  "PC DASHBOARD", "Selected stats");
     return screen;
 }
 
@@ -1165,6 +1250,10 @@ void on_pc_dashboard_home(void *) {
     show_app(ECHO_HOME);
 }
 
+void on_bedside_home(void *) {
+    show_app(ECHO_HOME);
+}
+
 bool on_clock_configuration_request(EchoDeskClockMode mode, void *) {
     return serial_echodesk_clock_request_configuration(mode);
 }
@@ -1177,6 +1266,9 @@ void show_app(EchoApp app, bool animate) {
     if (app == current_app && lv_screen_active() != nullptr) return;
     if (current_app == ECHO_NOW_PLAYING && app != ECHO_NOW_PLAYING) {
         ui_now_playing_leave();
+    }
+    if (current_app == ECHO_BEDSIDE && app != ECHO_BEDSIDE) {
+        ui_bedside_leave();
     }
     lv_obj_t *target = nullptr;
     switch (app) {
@@ -1216,6 +1308,10 @@ void show_app(EchoApp app, bool animate) {
             target = ui_pc_dashboard_create();
             ui_pc_dashboard_tick();
             break;
+        case ECHO_BEDSIDE:
+            target = ui_bedside_create();
+            ui_bedside_tick();
+            break;
     }
 
     bool delete_old = current_app != ECHO_HOME && app == ECHO_HOME;
@@ -1233,7 +1329,8 @@ void show_app(EchoApp app, bool animate) {
                   app == ECHO_NOW_PLAYING ? "Now Playing" :
                   app == ECHO_MY_DEVICE ? "My device" :
                   app == ECHO_NOTIFICATION_STACK ? "Notification Stack" :
-                  app == ECHO_PC_DASHBOARD ? "PC Dashboard" : "Settings");
+                  app == ECHO_PC_DASHBOARD ? "PC Dashboard" :
+                  app == ECHO_BEDSIDE ? "Bedside" : "Settings");
     serial_echodesk_state_changed();
 }
 
@@ -1248,6 +1345,7 @@ lv_obj_t *current_screen_pointer() {
         case ECHO_MY_DEVICE: return ui_my_device_screen();
         case ECHO_NOTIFICATION_STACK: return ui_notification_stack_screen();
         case ECHO_PC_DASHBOARD: return ui_pc_dashboard_screen();
+        case ECHO_BEDSIDE: return ui_bedside_screen();
     }
     return nullptr;
 }
@@ -1263,6 +1361,7 @@ void clear_current_slot() {
         case ECHO_MY_DEVICE: break;
         case ECHO_NOTIFICATION_STACK: break;
         case ECHO_PC_DASHBOARD: break;
+        case ECHO_BEDSIDE: break;
     }
 }
 
@@ -1277,6 +1376,7 @@ lv_obj_t *rebuild_current_screen() {
         case ECHO_MY_DEVICE: return ui_my_device_recreate();
         case ECHO_NOTIFICATION_STACK: return ui_notification_stack_recreate();
         case ECHO_PC_DASHBOARD: return ui_pc_dashboard_recreate();
+        case ECHO_BEDSIDE: return ui_bedside_recreate();
     }
     return create_home_screen();
 }
@@ -1293,6 +1393,7 @@ void ui_echodesk_init() {
     ui_my_device_set_navigation_callback(on_my_device_home);
     ui_notification_stack_set_navigation_callback(on_notification_stack_home);
     ui_pc_dashboard_set_navigation_callback(on_pc_dashboard_home);
+    ui_bedside_set_navigation_callback(on_bedside_home);
     if (echodesk_setup_normalize_state(g_config.setup_state) !=
         ECHODESK_SETUP_COMPLETED) {
         load_setup_page(setup_page_for_state(g_config.setup_state));
@@ -1309,6 +1410,7 @@ void ui_echodesk_init() {
         case ECHODESK_APP_NOW_PLAYING: startup_app = ECHO_NOW_PLAYING; break;
         case ECHODESK_APP_SETTINGS: startup_app = ECHO_SETTINGS; break;
         case ECHODESK_APP_MY_DEVICE: startup_app = ECHO_MY_DEVICE; break;
+        case ECHODESK_APP_BEDSIDE: startup_app = ECHO_BEDSIDE; break;
         default: break;
     }
     if (startup_app == ECHO_HOME) {
@@ -1423,6 +1525,8 @@ void ui_echodesk_tick() {
         ui_notification_stack_tick();
     } else if (current_app == ECHO_PC_DASHBOARD) {
         ui_pc_dashboard_tick();
+    } else if (current_app == ECHO_BEDSIDE) {
+        ui_bedside_tick();
     } else if (current_app == ECHO_SETTINGS && brightness_slider &&
                !lv_obj_has_state(brightness_slider, LV_STATE_PRESSED)) {
         uint8_t value = g_config.brightness_pct < 10 ? 10 : g_config.brightness_pct;
@@ -1486,6 +1590,12 @@ void ui_echodesk_recreate() {
         Serial.println("[EchoDesk] Notification Stack recreated after display/config change");
         return;
     }
+    if (current_app == ECHO_BEDSIDE) {
+        ui_bedside_recreate();
+        lv_refr_now(nullptr);
+        Serial.println("[EchoDesk] Bedside app recreated after display/config change");
+        return;
+    }
     if (current_app == ECHO_PC_DASHBOARD) {
         ui_pc_dashboard_recreate();
         lv_refr_now(nullptr);
@@ -1518,6 +1628,8 @@ bool ui_echodesk_request_open_app(const char *app) {
         pending_remote_app = ECHO_NOTIFICATION_STACK;
     else if (strcmp(app, "pcDashboard") == 0)
         pending_remote_app = ECHO_PC_DASHBOARD;
+    else if (strcmp(app, "bedside") == 0)
+        pending_remote_app = ECHO_BEDSIDE;
     else return false;
     remote_app_pending = true;
     return true;
@@ -1533,6 +1645,7 @@ const char *ui_echodesk_active_app_name() {
         case ECHO_MY_DEVICE: return "myDevice";
         case ECHO_NOTIFICATION_STACK: return "notificationStack";
         case ECHO_PC_DASHBOARD: return "pcDashboard";
+        case ECHO_BEDSIDE: return "bedside";
         default: return "home";
     }
 }

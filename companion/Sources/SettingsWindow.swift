@@ -126,7 +126,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskWiFiProvisionButton: NSButton!
     var echoDeskWiFiCancelButton: NSButton!
 
-    // EchoDesk Desktop 0.2.8 parity shell. The mature USB/Wi-Fi/firmware
+    // EchoDesk Desktop 0.2.9 parity shell. The mature USB/Wi-Fi/firmware
     // owners remain below this presentation layer; these references are only
     // the native desktop-window state and never duplicate hardware ownership.
     var echoDeskSidebarButtons: [NSButton] = []
@@ -150,6 +150,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskNotificationStatus: NSTextField!
     var echoDeskNotificationDetail: NSTextField!
     var echoDeskNotificationExclusions: NSTextField!
+    var echoDeskNotificationSetupWindow: NSWindow?
+    var echoDeskNotificationSetupExclusions: NSTextField?
+    var echoDeskNotificationSetupAllButton: NSButton?
+    var echoDeskNotificationSetupFilteredButton: NSButton?
+    var echoDeskNotificationSyncedPort: String?
     var echoDeskFooterStatus: NSTextField!
     var echoDeskSetupViews: [NSView] = []
     var echoDeskSetupStepLabels: [NSTextField] = []
@@ -183,6 +188,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskSettingControls: [String: NSControl] = [:]
     var echoDeskAppButtons: [String: [NSButton]] = [:]
     var echoDeskClockWindow: NSWindow?
+    var echoDeskClockSelectedMode: String?
     var echoDeskClockStopwatchLabel: NSTextField?
     var echoDeskClockCountdownLabel: NSTextField?
     var echoDeskClockFocusLabel: NSTextField?
@@ -195,6 +201,36 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskClockStateRequestInFlight = false
     var echoDeskPcDashboardPopups: [NSPopUpButton] = []
     var echoDeskPcDashboardRevision: Int = 0
+    var echoDeskBedsideRevision: Int = 0
+    var echoDeskBedsideStatePort: String?
+    var echoDeskBedsideStateRequestInFlight = false
+    var echoDeskBedsideConfig = EchoDeskBedsideConfig.defaults
+    var echoDeskBedsideRuntime: [String: Any] = [:]
+    var echoDeskBedsideSection = "root"
+    var echoDeskBedsideStatus: NSTextField?
+    var echoDeskBedsideDocument: NSStackView?
+    var echoDeskBedsidePreview: EchoDeskBedsidePreviewView?
+    var echoDeskBedsidePreviewTimer: Timer?
+    var echoDeskBedsideClockFormat: NSPopUpButton?
+    var echoDeskBedsideClockStyle: NSPopUpButton?
+    var echoDeskBedsideShowSeconds: NSButton?
+    var echoDeskBedsideNextAlarmWidget: NSButton?
+    var echoDeskBedsideWeatherWidget: NSButton?
+    var echoDeskBedsideAlarmDrafts: [EchoDeskBedsideAlarm] = []
+    var echoDeskBedsideAlarmRows: [EchoDeskBedsideAlarmRow] = []
+    var echoDeskBedsideScheduleDrafts: [EchoDeskBedsideScheduleSegment] = []
+    var echoDeskBedsideScheduleRows: [EchoDeskBedsideScheduleRow] = []
+    var echoDeskBedsideScheduleEnabled: NSButton?
+    var echoDeskBedsideManualBrightness: NSSlider?
+    var echoDeskBedsideNightScheduleEnabled: NSButton?
+    var echoDeskBedsideNightManual: NSButton?
+    var echoDeskBedsideNightStart: NSDatePicker?
+    var echoDeskBedsideNightEnd: NSDatePicker?
+    var echoDeskBedsideThemeScheduleEnabled: NSButton?
+    var echoDeskBedsideThemeManualDark: NSButton?
+    var echoDeskBedsideThemeStart: NSDatePicker?
+    var echoDeskBedsideThemeEnd: NSDatePicker?
+    var echoDeskBedsideSaveInFlight = false
     var echoDeskLastState: [String: Any]?
     var echoDeskLastStatePort: String?
     var echoDeskLastStateMAC: String?

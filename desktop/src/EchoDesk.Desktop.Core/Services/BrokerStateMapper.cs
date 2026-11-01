@@ -87,9 +87,126 @@ public static class BrokerStateMapper
             Clock = ParseClock(payload),
             NotificationStack = ParseNotificationStack(payload),
             PcDashboard = ParsePcDashboard(payload),
+            Bedside = ParseBedside(payload),
             FirmwareManager = ParseFirmwareManager(payload),
             WifiSetup = ParseWifiSetup(payload),
         };
+    }
+
+    private static BedsideModeState ParseBedside(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("bedside", out var bedside) || bedside.ValueKind != JsonValueKind.Object)
+            return BedsideModeState.Unavailable;
+
+        var available = Bool(bedside, "available") ?? false;
+        var protocol = Int(bedside, "protocol") ?? 0;
+        if (!bedside.TryGetProperty("state", out var state) || state.ValueKind != JsonValueKind.Object
+            || !state.TryGetProperty("config", out var config) || config.ValueKind != JsonValueKind.Object)
+        {
+            return new BedsideModeState { Available = available, Protocol = protocol };
+        }
+
+        var defaults = BedsideConfig.Default;
+        var clock = config.TryGetProperty("clock", out var clockNode) ? clockNode : default;
+        var widgets = config.TryGetProperty("widgets", out var widgetNode) ? widgetNode : default;
+        var display = config.TryGetProperty("display", out var displayNode) ? displayNode : default;
+        var nightShift = display.ValueKind == JsonValueKind.Object && display.TryGetProperty("nightShift", out var ns) ? ns : default;
+        var theme = display.ValueKind == JsonValueKind.Object && display.TryGetProperty("theme", out var th) ? th : default;
+
+        var alarms = new List<BedsideAlarm>();
+        if (config.TryGetProperty("alarms", out var alarmNodes) && alarmNodes.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var alarm in alarmNodes.EnumerateArray().Take(8))
+            {
+                var id = Int(alarm, "id") ?? 0;
+                var minute = Int(alarm, "minuteOfDay") ?? -1;
+                var weekdays = Int(alarm, "weekdays") ?? 0;
+                var label = BoundedText(alarm, "label", 24);
+                if (id is < 1 or > 8 || minute is < 0 or > 1439 || weekdays is < 1 or > 127 || label is null
+                    || alarms.Any(item => item.Id == id)) continue;
+                alarms.Add(new BedsideAlarm
+                {
+                    Id = id,
+                    Enabled = Bool(alarm, "enabled") ?? false,
+                    MinuteOfDay = minute,
+                    Weekdays = weekdays,
+                    Label = label,
+                });
+            }
+        }
+
+        var segments = new List<BedsideBrightnessSegment>();
+        if (display.ValueKind == JsonValueKind.Object && display.TryGetProperty("segments", out var segmentNodes)
+            && segmentNodes.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var segment in segmentNodes.EnumerateArray().Take(8))
+            {
+                var start = Int(segment, "startMinute") ?? -1;
+                var brightness = Int(segment, "brightness") ?? 0;
+                if (start is < 0 or > 1439 || brightness is < 1 or > 100
+                    || segments.Any(item => item.StartMinute == start)) continue;
+                segments.Add(new BedsideBrightnessSegment { StartMinute = start, Brightness = brightness });
+            }
+        }
+        segments.Sort((left, right) => left.StartMinute.CompareTo(right.StartMinute));
+        if (segments.Count == 0) segments.AddRange(defaults.Display.Segments);
+
+        var runtime = state.TryGetProperty("runtime", out var runtimeNode) ? runtimeNode : default;
+        return new BedsideModeState
+        {
+            Available = available,
+            Protocol = protocol,
+            Revision = ULong(state, "revision") ?? 0,
+            Config = new BedsideConfig
+            {
+                Clock = new BedsideClockConfig
+                {
+                    Format = Text(clock, "format") is "24h" ? "24h" : "12h",
+                    ShowSeconds = Bool(clock, "showSeconds") ?? false,
+                    Style = Text(clock, "style") is "minimal" ? "minimal" : "large",
+                },
+                Widgets = new BedsideWidgetConfig
+                {
+                    NextAlarm = Bool(widgets, "nextAlarm") ?? true,
+                    Weather = Bool(widgets, "weather") ?? false,
+                },
+                Alarms = alarms,
+                Display = new BedsideDisplayConfig
+                {
+                    ScheduleEnabled = Bool(display, "scheduleEnabled") ?? true,
+                    ManualBrightness = Math.Clamp(Int(display, "manualBrightness") ?? 40, 1, 100),
+                    Segments = segments,
+                    NightShift = new BedsideNightShiftConfig
+                    {
+                        ScheduleEnabled = Bool(nightShift, "scheduleEnabled") ?? true,
+                        ManualEnabled = Bool(nightShift, "manualEnabled") ?? false,
+                        StartMinute = Minute(nightShift, "startMinute", 1140),
+                        EndMinute = Minute(nightShift, "endMinute", 420),
+                    },
+                    Theme = new BedsideThemeConfig
+                    {
+                        ScheduleEnabled = Bool(theme, "scheduleEnabled") ?? true,
+                        ManualDark = Bool(theme, "manualDark") ?? false,
+                        StartMinute = Minute(theme, "startMinute", 1140),
+                        EndMinute = Minute(theme, "endMinute", 420),
+                    },
+                },
+            },
+            Runtime = new BedsideRuntimeState
+            {
+                TimeValid = Bool(runtime, "timeValid") ?? false,
+                AlarmRinging = Bool(runtime, "alarmRinging") ?? false,
+                DisplaySleeping = Bool(runtime, "displaySleeping") ?? false,
+                NextAlarmEpoch = Long(runtime, "nextAlarmEpoch"),
+                SkippedTomorrow = Bool(runtime, "skippedTomorrow") ?? false,
+            },
+        };
+    }
+
+    private static int Minute(JsonElement node, string name, int fallback)
+    {
+        var value = Int(node, name);
+        return value is >= 0 and <= 1439 ? value.Value : fallback;
     }
 
     private static PcDashboardState ParsePcDashboard(JsonElement payload)
@@ -402,6 +519,10 @@ public static class BrokerStateMapper
     private static ulong? ULong(JsonElement node, string name) =>
         node.ValueKind == JsonValueKind.Object && node.TryGetProperty(name, out var value)
             && value.ValueKind == JsonValueKind.Number && value.TryGetUInt64(out var number) ? number : null;
+
+    private static long? Long(JsonElement node, string name) =>
+        node.ValueKind == JsonValueKind.Object && node.TryGetProperty(name, out var value)
+            && value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var number) ? number : null;
 
     private static bool? Bool(JsonElement node, string name) =>
         node.ValueKind == JsonValueKind.Object && node.TryGetProperty(name, out var value)

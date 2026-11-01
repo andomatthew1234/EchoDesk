@@ -10,7 +10,7 @@ if [ "${ECHODESK_DESKTOP:-0}" = "1" ]; then PRODUCT_MODE="echodesk"; fi
 if [ "$PRODUCT_MODE" = "echodesk" ]; then
   BUILD_DIR="/tmp/echodesk-desktop-build"
   APP_NAME="EchoDesk Desktop"
-  APP_VERSION="0.2.8"
+  APP_VERSION="0.2.9"
   EXECUTABLE_NAME="EchoDeskDesktop"
   INFO_PLIST="Resources/EchoDesk-Info.plist"
   RELEASE_STEM="EchoDesk-Desktop-v${APP_VERSION}-macos-universal"
@@ -92,6 +92,7 @@ SWIFT_SOURCES=(
   Sources/EchoDeskTelemetry.swift
   Sources/SettingsWindow+EchoDeskWifiSetup.swift
   Sources/SettingsWindow+EchoDeskDesktop.swift
+  Sources/SettingsWindow+EchoDeskBedside.swift
 )
 
 SLICES=()
@@ -193,18 +194,18 @@ done
 cp "$INFO_PLIST" "$APP/Contents/Info.plist"
 
 if [ "$PRODUCT_MODE" = "echodesk" ]; then
-  FIRMWARE_SOURCE="$SCRIPT_DIR/../desktop/firmware/echodesk-mini/2.32.0/echodesk-os.bin"
-  FIRMWARE_DEST="$APP/Contents/Resources/firmware/echodesk-mini/2.32.0"
-  [ -f "$FIRMWARE_SOURCE" ] || { echo "ERROR: EchoDesk OS 2.32.0 is missing"; exit 1; }
-  EXPECTED_FIRMWARE_SHA="1109b7a4afb242b9695ae60952073fd6da2e2e33e9fe53c1d000885af67dd2ea"
+  FIRMWARE_SOURCE="$SCRIPT_DIR/../desktop/firmware/echodesk-mini/2.33.0/echodesk-os.bin"
+  FIRMWARE_DEST="$APP/Contents/Resources/firmware/echodesk-mini/2.33.0"
+  [ -f "$FIRMWARE_SOURCE" ] || { echo "ERROR: EchoDesk OS 2.33.0 is missing"; exit 1; }
+  EXPECTED_FIRMWARE_SHA="1ab0c89c367deef5b908d0abf84451a08a0c6cd980ae05c44c8fa591f3523bcc"
   ACTUAL_FIRMWARE_SHA=$(shasum -a 256 "$FIRMWARE_SOURCE" | awk '{print tolower($1)}')
   [ "$ACTUAL_FIRMWARE_SHA" = "$EXPECTED_FIRMWARE_SHA" ] \
-    || { echo "ERROR: EchoDesk OS 2.32.0 SHA-256 mismatch"; exit 1; }
-  [ "$(stat -f %z "$FIRMWARE_SOURCE")" = "1552080" ] \
-    || { echo "ERROR: EchoDesk OS 2.32.0 size mismatch"; exit 1; }
+    || { echo "ERROR: EchoDesk OS 2.33.0 SHA-256 mismatch"; exit 1; }
+  [ "$(stat -f %z "$FIRMWARE_SOURCE")" = "1570688" ] \
+    || { echo "ERROR: EchoDesk OS 2.33.0 size mismatch"; exit 1; }
   mkdir -p "$FIRMWARE_DEST"
   cp "$FIRMWARE_SOURCE" "$FIRMWARE_DEST/echodesk-os.bin"
-  echo "Bundled and validated EchoDesk OS 2.32.0"
+  echo "Bundled and validated EchoDesk OS 2.33.0"
 fi
 
 # -----------------------------------------------------------------------------

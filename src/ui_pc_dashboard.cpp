@@ -17,6 +17,7 @@ namespace {
 constexpr uint32_t REFRESH_INTERVAL_MS = 1000;
 constexpr uint32_t NAVIGATION_GUARD_MS = 250;
 constexpr uint8_t GRAPH_POINTS = 24;
+constexpr uint8_t PICKER_ITEMS_PER_PAGE = 6;
 
 enum class DashboardView : uint8_t { DASHBOARD, CUSTOMISE };
 
@@ -44,6 +45,7 @@ uint32_t editing_revision = 0;
 uint32_t known_revision = 0;
 uint32_t last_refresh_ms = 0;
 uint32_t last_navigation_ms = 0;
+uint8_t picker_page = 0;
 char transient_message[48] = {};
 
 lv_color_t background_color() {
@@ -179,7 +181,17 @@ void on_customise(lv_event_t *event) {
     editing_config = snapshot.config;
     editing_revision = snapshot.revision;
     transient_message[0] = '\0';
+    picker_page = 0;
     current_view = DashboardView::CUSTOMISE;
+    render();
+}
+
+void on_picker_page(lv_event_t *event) {
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !navigation_allowed()) return;
+    const intptr_t direction =
+        reinterpret_cast<intptr_t>(lv_event_get_user_data(event));
+    if (direction < 0 && picker_page > 0) --picker_page;
+    else if (direction > 0) ++picker_page;
     render();
 }
 
@@ -270,41 +282,23 @@ void create_header() {
     lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, LV_PART_MAIN);
 }
 
-void prepare_content(bool scrollable = false) {
+void prepare_content() {
     if (content) lv_obj_delete(content);
     content = lv_obj_create(screen);
     lv_obj_remove_style_all(content);
     lv_obj_set_size(content, 320, 200);
     lv_obj_set_pos(content, 0, 40);
-    if (scrollable) {
-        lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_scroll_dir(content, LV_DIR_VER);
-        lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
-        lv_obj_set_style_width(content, 3, LV_PART_SCROLLBAR);
-        lv_obj_set_style_bg_color(content, divider_color(), LV_PART_SCROLLBAR);
-        lv_obj_set_style_bg_opa(content, LV_OPA_70, LV_PART_SCROLLBAR);
-    } else {
-        lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
-    }
+    lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
     clear_tile_references();
 }
 
-void tile_geometry(uint8_t count, uint8_t index, int16_t &x, int16_t &y,
-                   int16_t &width, int16_t &height) {
-    if (count == 1) {
-        x = 8; y = 7; width = 304; height = 184;
-    } else if (count == 2) {
-        x = index == 0 ? 8 : 164; y = 7; width = 148; height = 184;
-    } else {
-        x = (index % 2) == 0 ? 8 : 164;
-        y = index < 2 ? 7 : 101;
-        width = 148; height = 88;
-    }
-}
-
 void create_tile(uint8_t index, uint8_t count, PcDashboardMetric metric) {
-    int16_t x, y, width, height;
-    tile_geometry(count, index, x, y, width, height);
+    const PcDashboardTileGeometry geometry =
+        pc_dashboard_tile_geometry(count, index);
+    const int16_t x = geometry.x;
+    const int16_t y = geometry.y;
+    const int16_t width = geometry.width;
+    const int16_t height = geometry.height;
     lv_obj_t *tile = lv_obj_create(content);
     lv_obj_set_size(tile, width, height);
     lv_obj_set_pos(tile, x, y);
@@ -533,7 +527,7 @@ void refresh_dashboard() {
 }
 
 void render_dashboard() {
-    prepare_content(false);
+    prepare_content();
     lv_obj_clear_flag(header_action, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *label = lv_obj_get_child(header_action, 0);
     if (label) lv_label_set_text(label, "EDIT");
@@ -547,7 +541,7 @@ void render_dashboard() {
 }
 
 void render_picker() {
-    prepare_content(true);
+    prepare_content();
     lv_obj_add_flag(header_action, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(heading, "CUSTOMISE");
 
@@ -559,22 +553,57 @@ void render_picker() {
     else snprintf(count_text, sizeof(count_text), "%u OF 4 SELECTED",
                   static_cast<unsigned>(editing_config.count));
     lv_label_set_text(selection_count, count_text);
-    lv_obj_set_pos(selection_count, 10, 7);
+    lv_obj_set_width(selection_count, 172);
+    lv_obj_set_style_text_align(selection_count, LV_TEXT_ALIGN_CENTER,
+                                LV_PART_MAIN);
+    lv_obj_set_pos(selection_count, 74, 8);
 
     const uint8_t metric_count = static_cast<uint8_t>(PcDashboardMetric::COUNT);
-    for (uint8_t raw = 0; raw < metric_count; ++raw) {
+    const uint8_t page_count = static_cast<uint8_t>(
+        (metric_count + PICKER_ITEMS_PER_PAGE - 1) / PICKER_ITEMS_PER_PAGE);
+    if (picker_page >= page_count) picker_page = page_count - 1;
+    const uint8_t start = picker_page * PICKER_ITEMS_PER_PAGE;
+    const uint8_t end = static_cast<uint8_t>(
+        start + PICKER_ITEMS_PER_PAGE < metric_count
+            ? start + PICKER_ITEMS_PER_PAGE : metric_count);
+
+    lv_obj_t *previous = lv_button_create(content);
+    style_button(previous, 7);
+    lv_obj_set_size(previous, 58, 25);
+    lv_obj_set_pos(previous, 8, 3);
+    lv_obj_center(make_label(previous, "PREV", &lv_font_montserrat_12,
+                             foreground_color()));
+    if (picker_page == 0) lv_obj_add_state(previous, LV_STATE_DISABLED);
+    lv_obj_add_event_cb(previous, on_picker_page, LV_EVENT_CLICKED,
+                        reinterpret_cast<void *>(static_cast<intptr_t>(-1)));
+
+    lv_obj_t *next = lv_button_create(content);
+    style_button(next, 7);
+    lv_obj_set_size(next, 58, 25);
+    lv_obj_set_pos(next, 254, 3);
+    lv_obj_center(make_label(next, "NEXT", &lv_font_montserrat_12,
+                             foreground_color()));
+    if (picker_page + 1 >= page_count) lv_obj_add_state(next, LV_STATE_DISABLED);
+    lv_obj_add_event_cb(next, on_picker_page, LV_EVENT_CLICKED,
+                        reinterpret_cast<void *>(static_cast<intptr_t>(1)));
+
+    for (uint8_t raw = start; raw < end; ++raw) {
         const PcDashboardMetric metric = static_cast<PcDashboardMetric>(raw);
-        const int16_t y = static_cast<int16_t>(29 + raw * 42);
+        const uint8_t slot = raw - start;
+        const int16_t x = (slot % 2) == 0 ? 8 : 164;
+        const int16_t y = static_cast<int16_t>(32 + (slot / 2) * 40);
         lv_obj_t *button = lv_button_create(content);
         picker_buttons[raw] = button;
         style_button(button, 8);
-        lv_obj_set_size(button, 304, 36);
-        lv_obj_set_pos(button, 8, y);
+        lv_obj_set_size(button, 148, 35);
+        lv_obj_set_pos(button, x, y);
         lv_obj_add_event_cb(button, on_picker_toggle, LV_EVENT_CLICKED,
                             reinterpret_cast<void *>(static_cast<uintptr_t>(metric)));
         lv_obj_t *name = make_label(button, metric_title(metric),
                                     &lv_font_montserrat_14, foreground_color());
-        lv_obj_set_pos(name, 12, 10);
+        lv_obj_set_width(name, 105);
+        lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+        lv_obj_set_pos(name, 10, 10);
         const uint8_t order = selection_index(metric);
         lv_obj_t *badge = lv_obj_create(button);
         picker_badges[raw] = badge;
@@ -595,10 +624,10 @@ void render_picker() {
         lv_obj_center(badge_label);
     }
 
-    const int16_t action_y = static_cast<int16_t>(29 + metric_count * 42 + 7);
+    const int16_t action_y = 155;
     lv_obj_t *cancel = lv_button_create(content);
     style_button(cancel, 9);
-    lv_obj_set_size(cancel, 146, 42);
+    lv_obj_set_size(cancel, 146, 38);
     lv_obj_set_pos(cancel, 8, action_y);
     lv_obj_t *cancel_label = make_label(cancel, "CANCEL",
                                         &lv_font_montserrat_14,
@@ -608,7 +637,7 @@ void render_picker() {
 
     lv_obj_t *save = lv_button_create(content);
     style_button(save, 9);
-    lv_obj_set_size(save, 146, 42);
+    lv_obj_set_size(save, 146, 38);
     lv_obj_set_pos(save, 166, action_y);
     lv_obj_set_style_bg_color(save, accent_color(), LV_PART_MAIN);
     lv_obj_t *save_label = make_label(save, "SAVE",
@@ -617,10 +646,6 @@ void render_picker() {
     lv_obj_center(save_label);
     lv_obj_add_event_cb(save, on_picker_save, LV_EVENT_CLICKED, nullptr);
 
-    lv_obj_t *end = lv_obj_create(content);
-    lv_obj_remove_style_all(end);
-    lv_obj_set_size(end, 1, 1);
-    lv_obj_set_pos(end, 0, action_y + 50);
 }
 
 void render() {

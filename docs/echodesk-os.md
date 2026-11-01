@@ -16,8 +16,10 @@ continue to compile their original dashboard and settings paths.
 screen. App screens are deleted after returning Home, which keeps LVGL object
 memory bounded on the ESP32.
 
-- **Home** — five large touch cards in a non-scrolling 2×3 layout for Codex
-  Usage, Clock, Performance, Now Playing and Settings.
+- **Home** — large, non-scrolling touch cards for the installed utilities. The
+  layout includes Codex Usage, Clock, Performance, Now Playing, My Device,
+  Notification Stack, PC Dashboard, Bedside Mode and Settings without making
+  the user drag a small resistive touchscreen viewport.
 - **Codex Usage** — reads the cached OpenAI provider state without changing the
   companion-managed active view. It displays the live 5-hour and weekly
   values, `PERCENT USED` or `PERCENT LEFT`, progress bars, reset countdowns and
@@ -52,6 +54,16 @@ memory bounded on the ESP32.
   decay, and settles on pause/stop or stale data. No PCM reaches the ESP32.
   The four EchoDesk artwork brackets still animate by two pixels at 25 FPS only
   during confirmed playback. The companion remains the sole COM-port owner.
+- **Bedside Mode** — is a separate, full-screen clock experience whose clock,
+  alarms, widgets, brightness, Night Shift and Light/Dark schedules are stored
+  on the ESP32 independently of the rest of EchoDesk OS. It continues running
+  from a power-only USB source after setup. Tapping the clock reveals large
+  Cancel Tomorrow's Alarm, Display Off and Exit Bedside controls; a sleeping
+  display wakes on the next tap. The lower half can show the next alarm and a
+  deliberately non-functional Weather Coming Soon placeholder. An active alarm
+  wakes the display, performs the 60/100/60/100% visual flash sequence and shows
+  a Stop Alarm target. The Freenove board has no speaker in this design, so the
+  alarm is visual rather than audible.
 - **Settings** — contains the 10–100% live backlight slider, a persisted
   Dark/Light theme control, and Restart. The Light theme inverts the product
   palette to white surfaces with black type while retaining grey hierarchy.
@@ -71,6 +83,40 @@ uses an expiring `EchoDesk-XXXX` access point and the version-1 protocol in
 Firmware 2.32.0 adds Clock timers, Notification Stack, PC Dashboard, My Device
 health, and staged on-device update progress while retaining the same setup
 and recovery paths.
+
+Firmware 2.33.0 adds the standalone Bedside Mode, its independent alarm and
+display schedules, and the revisioned Bedside protocol used by Desktop 0.2.9.
+
+## Bedside Mode and power-only operation
+
+The dedicated Bedside Mode editor in EchoDesk Desktop writes one complete,
+revision-checked configuration to the device. The ESP32 then owns alarm
+evaluation and all Bedside display decisions; EchoDesk Desktop does not need to
+remain open and the USB connection does not need a data-capable host.
+
+The default auto-brightness schedule is:
+
+| Local time | Brightness |
+| --- | ---: |
+| 00:00–04:59 | 1% |
+| 05:00–06:59 | 40% |
+| 07:00–07:59 | 70% |
+| 08:00–17:59 | 100% |
+| 18:00–18:59 | 60% |
+| 19:00–20:29 | 40% |
+| 20:30–21:29 | 30% |
+| 21:30–23:59 | 1% |
+
+Night Shift and the Bedside-only dark appearance both default to 19:00–07:00.
+Each schedule can be disabled in favour of its own manual value. None of these
+values changes the normal EchoDesk OS theme or brightness preference.
+
+The FNK0114A_2P4 does not provide a battery-backed real-time clock. A warm
+restart retains the ESP32 system time, but after a cold power-on Bedside Mode
+needs saved Wi-Fi credentials and an NTP connection before it can safely show
+the clock or evaluate alarms. Until time is valid, the screen explicitly shows
+that it is connecting instead of inventing a time. Once synchronized, Bedside
+Mode again operates without EchoDesk Desktop.
 
 Firmware 2.30.0 introduced the version-1 setup
 handshake documented in [`guided-device-setup.md`](guided-device-setup.md).

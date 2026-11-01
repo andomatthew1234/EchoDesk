@@ -33,6 +33,7 @@ public sealed record BrokerState
 
     public NotificationStackState NotificationStack { get; init; } = NotificationStackState.Unavailable;
     public PcDashboardState PcDashboard { get; init; } = PcDashboardState.Unavailable;
+    public BedsideModeState Bedside { get; init; } = BedsideModeState.Unavailable;
 
     [JsonPropertyName("firmwareManager")]
     public FirmwareManagerState FirmwareManager { get; init; } = FirmwareManagerState.Unavailable;
@@ -204,6 +205,148 @@ public sealed record PcDashboardState
     public int Protocol { get; init; }
     public ulong Revision { get; init; }
     public IReadOnlyList<string> Metrics { get; init; } = ["cpu", "ram", "battery", "storage"];
+}
+
+public sealed record BedsideModeState
+{
+    public static BedsideModeState Unavailable { get; } = new();
+    public bool Available { get; init; }
+    public int Protocol { get; init; }
+    public ulong Revision { get; init; }
+    public BedsideConfig Config { get; init; } = BedsideConfig.Default;
+    public BedsideRuntimeState Runtime { get; init; } = new();
+}
+
+public sealed record BedsideConfig
+{
+    public static BedsideConfig Default { get; } = new();
+
+    [JsonPropertyName("clock")]
+    public BedsideClockConfig Clock { get; init; } = new();
+
+    [JsonPropertyName("widgets")]
+    public BedsideWidgetConfig Widgets { get; init; } = new();
+
+    [JsonPropertyName("alarms")]
+    public IReadOnlyList<BedsideAlarm> Alarms { get; init; } = [];
+
+    [JsonPropertyName("display")]
+    public BedsideDisplayConfig Display { get; init; } = new();
+}
+
+public sealed record BedsideClockConfig
+{
+    [JsonPropertyName("format")]
+    public string Format { get; init; } = "12h";
+
+    [JsonPropertyName("showSeconds")]
+    public bool ShowSeconds { get; init; }
+
+    [JsonPropertyName("style")]
+    public string Style { get; init; } = "large";
+}
+
+public sealed record BedsideWidgetConfig
+{
+    [JsonPropertyName("nextAlarm")]
+    public bool NextAlarm { get; init; } = true;
+
+    [JsonPropertyName("weather")]
+    public bool Weather { get; init; }
+}
+
+public sealed record BedsideAlarm
+{
+    [JsonPropertyName("id")]
+    public int Id { get; init; }
+
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; init; } = true;
+
+    [JsonPropertyName("minuteOfDay")]
+    public int MinuteOfDay { get; init; } = 420;
+
+    [JsonPropertyName("weekdays")]
+    public int Weekdays { get; init; } = 127;
+
+    [JsonPropertyName("label")]
+    public string Label { get; init; } = "Alarm";
+}
+
+public sealed record BedsideDisplayConfig
+{
+    [JsonPropertyName("scheduleEnabled")]
+    public bool ScheduleEnabled { get; init; } = true;
+
+    [JsonPropertyName("manualBrightness")]
+    public int ManualBrightness { get; init; } = 40;
+
+    [JsonPropertyName("segments")]
+    public IReadOnlyList<BedsideBrightnessSegment> Segments { get; init; } =
+    [
+        new() { StartMinute = 0, Brightness = 1 },
+        new() { StartMinute = 300, Brightness = 40 },
+        new() { StartMinute = 420, Brightness = 70 },
+        new() { StartMinute = 480, Brightness = 100 },
+        new() { StartMinute = 1080, Brightness = 60 },
+        new() { StartMinute = 1140, Brightness = 40 },
+        new() { StartMinute = 1230, Brightness = 30 },
+        new() { StartMinute = 1290, Brightness = 1 },
+    ];
+
+    [JsonPropertyName("nightShift")]
+    public BedsideNightShiftConfig NightShift { get; init; } = new();
+
+    [JsonPropertyName("theme")]
+    public BedsideThemeConfig Theme { get; init; } = new();
+}
+
+public sealed record BedsideBrightnessSegment
+{
+    [JsonPropertyName("startMinute")]
+    public int StartMinute { get; init; }
+
+    [JsonPropertyName("brightness")]
+    public int Brightness { get; init; }
+}
+
+public sealed record BedsideNightShiftConfig
+{
+    [JsonPropertyName("scheduleEnabled")]
+    public bool ScheduleEnabled { get; init; } = true;
+
+    [JsonPropertyName("manualEnabled")]
+    public bool ManualEnabled { get; init; }
+
+    [JsonPropertyName("startMinute")]
+    public int StartMinute { get; init; } = 1140;
+
+    [JsonPropertyName("endMinute")]
+    public int EndMinute { get; init; } = 420;
+}
+
+public sealed record BedsideThemeConfig
+{
+    [JsonPropertyName("scheduleEnabled")]
+    public bool ScheduleEnabled { get; init; } = true;
+
+    [JsonPropertyName("manualDark")]
+    public bool ManualDark { get; init; }
+
+    [JsonPropertyName("startMinute")]
+    public int StartMinute { get; init; } = 1140;
+
+    [JsonPropertyName("endMinute")]
+    public int EndMinute { get; init; } = 420;
+}
+
+public sealed record BedsideRuntimeState
+{
+    public bool TimeValid { get; init; }
+    public bool AlarmRinging { get; init; }
+    public bool DisplaySleeping { get; init; }
+    public long? NextAlarmEpoch { get; init; }
+    public bool SkippedTomorrow { get; init; }
 }
 
 public sealed record ClockStopwatchState
@@ -387,6 +530,7 @@ public static class EchoDeskApps
         ("myDevice", "My device", "\uE946"),
         ("notificationStack", "Notification Stack", "\uE7E7"),
         ("pcDashboard", "PC Dashboard", "\uE9D2"),
+        ("bedside", "Bedside Mode", "\uE708"),
         ("settings", "Settings", "\uE713"),
     ];
 }

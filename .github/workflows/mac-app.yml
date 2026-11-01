@@ -26,7 +26,7 @@ on:
       tag:
         description: 'Existing release tag used by manual upload'
         required: true
-        default: 'v0.2.8'
+        default: 'v0.2.9'
 
 # contents: write wird fuer `gh release upload` gebraucht — ohne diese
 # permission liefert die API 403 ('Resource not accessible by integration').
@@ -59,8 +59,8 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.product }}" == "echodesk" ]]; then
             echo "PRODUCT_MODE=echodesk" >> "$GITHUB_ENV"
             echo "APP_BUNDLE=EchoDesk Desktop.app" >> "$GITHUB_ENV"
-            echo "RELEASE_STEM=EchoDesk-Desktop-v0.2.8-macos-universal" >> "$GITHUB_ENV"
-            echo "ARTIFACT_LABEL=EchoDesk-Desktop-v0.2.8-macOS" >> "$GITHUB_ENV"
+            echo "RELEASE_STEM=EchoDesk-Desktop-v0.2.9-macos-universal" >> "$GITHUB_ENV"
+            echo "ARTIFACT_LABEL=EchoDesk-Desktop-v0.2.9-macOS" >> "$GITHUB_ENV"
           else
             echo "PRODUCT_MODE=ai-monitor" >> "$GITHUB_ENV"
             echo "APP_BUNDLE=AI Monitor.app" >> "$GITHUB_ENV"
@@ -94,7 +94,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.product == 'echodesk'
         run: |
           set -euo pipefail
-          EXPECTED=0.2.8
+          EXPECTED=0.2.9
           CODE=$(grep 'let kAppVersion' companion/Sources/main.swift | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
           BUILDSH=$(grep 'APP_VERSION="0\.' companion/build.sh | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
           PLIST=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' companion/Resources/EchoDesk-Info.plist)
@@ -103,7 +103,7 @@ jobs:
             exit 1
           }
           [[ "${{ inputs.tag }}" == "v$EXPECTED" ]] || {
-            echo "::error::EchoDesk 0.2.8 assets must use release tag v$EXPECTED"
+            echo "::error::EchoDesk 0.2.9 assets must use release tag v$EXPECTED"
             exit 1
           }
           echo "EchoDesk Desktop release metadata is consistent ($EXPECTED)."

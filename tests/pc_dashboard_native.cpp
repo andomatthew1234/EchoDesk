@@ -5,6 +5,27 @@
 #include <string.h>
 
 int main() {
+    for (uint8_t count = 1; count <= PC_DASHBOARD_MAX_WIDGETS; ++count) {
+        for (uint8_t index = 0; index < count; ++index) {
+            const PcDashboardTileGeometry tile =
+                pc_dashboard_tile_geometry(count, index);
+            assert(tile.x >= 0 && tile.y >= 0);
+            assert(tile.x + tile.width <= 320);
+            assert(tile.y + tile.height <= 200);
+            for (uint8_t earlier = 0; earlier < index; ++earlier) {
+                const PcDashboardTileGeometry other =
+                    pc_dashboard_tile_geometry(count, earlier);
+                const bool overlaps = tile.x < other.x + other.width &&
+                    tile.x + tile.width > other.x &&
+                    tile.y < other.y + other.height &&
+                    tile.y + tile.height > other.y;
+                assert(!overlaps);
+            }
+        }
+    }
+    const PcDashboardTileGeometry third = pc_dashboard_tile_geometry(3, 2);
+    assert(third.x == 8 && third.width == 304);
+
     PcDashboardConfig defaults = pc_dashboard_default_config();
     assert(defaults.count == 4);
     assert(defaults.metrics[0] == PcDashboardMetric::CPU);

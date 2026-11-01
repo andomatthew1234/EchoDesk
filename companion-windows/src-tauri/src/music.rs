@@ -11,7 +11,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
 pub const MUSIC_VERSION: u8 = 1;
@@ -20,6 +20,7 @@ pub const MUSIC_ART_MAX_BYTES: usize = 12_288;
 pub const MUSIC_ART_CHUNK_BYTES: usize = 1536;
 pub const MUSIC_BACKGROUND_MAX_BYTES: usize = 32_768;
 pub const MUSIC_BACKGROUND_CHUNK_BYTES: usize = 1536;
+const ARTWORK_RETRY_INTERVAL: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -42,6 +43,28 @@ pub struct MusicBackground {
     pub id: String,
     pub bytes: Arc<Vec<u8>>,
     pub crc32: u32,
+}
+
+fn should_retry_artwork(
+    track_changed: bool,
+    cached_artwork: bool,
+    last_attempt: Option<Instant>,
+    now: Instant,
+) -> bool {
+    if cached_artwork {
+        return false;
+    }
+    track_changed
+        || last_attempt
+            .is_none_or(|attempt| now.saturating_duration_since(attempt) >= ARTWORK_RETRY_INTERVAL)
+}
+
+pub(crate) fn should_queue_artwork(
+    last_id: Option<&str>,
+    pending_id: Option<&str>,
+    next_id: &str,
+) -> bool {
+    last_id != Some(next_id) && pending_id != Some(next_id)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -414,6 +437,7 @@ fn run_manager(
     let mut track_key = String::new();
     let mut cached_artwork: Option<Artwork> = None;
     let mut cached_background: Option<MusicBackground> = None;
+    let mut last_artwork_attempt: Option<Instant> = None;
     loop {
         let sessions = manager.GetSessions().map_err(|error| error.to_string())?;
         let current_source = manager
@@ -458,6 +482,7 @@ fn run_manager(
                 track_key.clear();
                 cached_artwork = None;
                 cached_background = None;
+                last_artwork_attempt = None;
             }
             feed.take_commands();
             publish_snapshot(app, feed, MusicSnapshot::empty(generation));
@@ -485,6 +510,7 @@ fn run_manager(
             &mut track_key,
             &mut cached_artwork,
             &mut cached_background,
+            &mut last_artwork_attempt,
         )?;
         publish_snapshot(app, feed, snapshot);
         feed.wait(Duration::from_secs(1));
@@ -532,6 +558,7 @@ fn sample_session(
     track_key: &mut String,
     cached_artwork: &mut Option<Artwork>,
     cached_background: &mut Option<MusicBackground>,
+    last_artwork_attempt: &mut Option<Instant>,
 ) -> Result<MusicSnapshot, String> {
     use windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status;
 
@@ -579,8 +606,21 @@ fn sample_session(
     let artist = truncate_utf8(&artist, 64);
     let album = truncate_utf8(&properties.AlbumTitle().unwrap_or_default().to_string(), 64);
     let next_track_key = format!("{source}\u{1f}{title}\u{1f}{artist}\u{1f}{album}");
-    if *track_key != next_track_key {
+    let track_changed = *track_key != next_track_key;
+    if track_changed {
         *track_key = next_track_key;
+        *cached_artwork = None;
+        *cached_background = None;
+        *last_artwork_attempt = None;
+    }
+    let artwork_attempted_at = Instant::now();
+    if should_retry_artwork(
+        track_changed,
+        cached_artwork.is_some(),
+        *last_artwork_attempt,
+        artwork_attempted_at,
+    ) {
+        *last_artwork_attempt = Some(artwork_attempted_at);
         let images = read_artwork(&properties).ok().flatten();
         *cached_artwork = images.as_ref().map(|images| images.0.clone());
         *cached_background = images.and_then(|images| images.1);
@@ -873,5 +913,37 @@ mod tests {
         let commands = feed.take_commands();
         assert_eq!(commands.len(), 16);
         assert_eq!(commands[0].generation, 16);
+    }
+
+    #[test]
+    fn late_artwork_is_retried_without_spamming_or_reloading_success() {
+        let start = Instant::now();
+        assert!(should_retry_artwork(true, false, None, start));
+        assert!(!should_retry_artwork(
+            false,
+            false,
+            Some(start),
+            start + Duration::from_secs(2)
+        ));
+        assert!(should_retry_artwork(
+            false,
+            false,
+            Some(start),
+            start + ARTWORK_RETRY_INTERVAL
+        ));
+        assert!(!should_retry_artwork(
+            false,
+            true,
+            Some(start),
+            start + Duration::from_secs(30)
+        ));
+    }
+
+    #[test]
+    fn artwork_delivery_deduplicates_completed_and_in_flight_images() {
+        assert!(should_queue_artwork(None, None, "cover-a"));
+        assert!(!should_queue_artwork(Some("cover-a"), None, "cover-a"));
+        assert!(!should_queue_artwork(None, Some("cover-a"), "cover-a"));
+        assert!(should_queue_artwork(Some("cover-a"), None, "cover-b"));
     }
 }

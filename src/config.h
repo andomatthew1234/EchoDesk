@@ -8,7 +8,7 @@
 // ============================================================
 
 // App version
-#define APP_VERSION "2.32.0"
+#define APP_VERSION "2.33.0"
 #define APP_NAME    "AI Usage Monitor"
 
 // Display-Controller-ID (aus Build-Flags abgeleitet, Compile-Zeit).
@@ -186,6 +186,7 @@ extern uint16_t SCREEN_HEIGHT;
 #define ECHODESK_APP_NOW_PLAYING  4
 #define ECHODESK_APP_SETTINGS     5
 #define ECHODESK_APP_MY_DEVICE    6
+#define ECHODESK_APP_BEDSIDE      7
 #define ECHODESK_APP_DEFAULT      ECHODESK_APP_HOME
 
 #define CLOCK_FORMAT_12_HOUR  0

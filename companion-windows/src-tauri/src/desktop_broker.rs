@@ -187,6 +187,7 @@ pub fn status(app: &AppHandle) -> Value {
             "echoDeskClock": info.supports_echo_desk_clock(),
             "echoDeskNotifications": info.supports_echo_desk_notifications(),
             "echoDeskPcDashboard": info.supports_echo_desk_pc_dashboard(),
+            "echoDeskBedside": info.supports_echo_desk_bedside(),
         })
     });
     let enabled = state.settings.lock().unwrap().ai_usage_enabled;
@@ -218,6 +219,11 @@ pub fn status(app: &AppHandle) -> Value {
         .as_ref()
         .is_some_and(|info| info.supports_echo_desk_pc_dashboard());
     let pc_dashboard_state = state.echo_desk_pc_dashboard_state.lock().unwrap().clone();
+    let bedside_supported = connection
+        .info
+        .as_ref()
+        .is_some_and(|info| info.supports_echo_desk_bedside());
+    let bedside_state = state.echo_desk_bedside_state.lock().unwrap().clone();
     let notification_settings = state.settings.lock().unwrap();
     let notification_exclusions = notification_settings.notification_stack_exclusions.clone();
     drop(notification_settings);
@@ -356,6 +362,11 @@ pub fn status(app: &AppHandle) -> Value {
             "protocol": if pc_dashboard_supported { 1 } else { 0 },
             "state": pc_dashboard_state,
         },
+        "bedside": {
+            "available": connected && bedside_supported,
+            "protocol": if bedside_supported { 1 } else { 0 },
+            "state": bedside_state,
+        },
         "firmwareManager": firmware_manager::snapshot(app),
         "wifiSetup": wifi_setup::snapshot(app),
     })
@@ -420,7 +431,9 @@ fn dispatch(app: &AppHandle, request: &BrokerRequest) -> Result<Value, BrokerErr
         | "clock_get_state"
         | "clock_control"
         | "pc_dashboard_get_state"
-        | "pc_dashboard_set_metrics" => {
+        | "pc_dashboard_set_metrics"
+        | "bedside_get_state"
+        | "bedside_set_config" => {
             request_device(app, &request.method, request.params.clone())?;
             Ok(status(app))
         }

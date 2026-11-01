@@ -45,6 +45,13 @@ public sealed class BrokerClient : IAsyncDisposable
         CancellationToken cancellationToken = default) =>
         StateRequestAsync("pc_dashboard_set_metrics", new { baseRevision, metrics }, cancellationToken);
 
+    public Task<BrokerState> GetBedsideStateAsync(CancellationToken cancellationToken = default) =>
+        StateRequestAsync("bedside_get_state", null, cancellationToken);
+
+    public Task<BrokerState> SetBedsideConfigAsync(ulong baseRevision, BedsideConfig config,
+        CancellationToken cancellationToken = default) =>
+        StateRequestAsync("bedside_set_config", new { baseRevision, config }, cancellationToken);
+
     public Task<BrokerState> ControlClockAsync(
         string action,
         string mode,
@@ -168,7 +175,7 @@ public sealed class BrokerClient : IAsyncDisposable
                 pipe = connected;
                 delay = TimeSpan.FromSeconds(1);
                 var readerTask = ReadLoopAsync(connected, cancellationToken);
-                await StateRequestAsync("hello", new { client = "EchoDesk Desktop", clientVersion = "0.2.8" }, cancellationToken)
+                await StateRequestAsync("hello", new { client = "EchoDesk Desktop", clientVersion = "0.2.9" }, cancellationToken)
                     .ConfigureAwait(false);
                 await readerTask.ConfigureAwait(false);
             }

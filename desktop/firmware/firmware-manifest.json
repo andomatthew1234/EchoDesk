@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-01T21:35:12+11:00",
+  "generatedAt": "2026-11-02T00:29:38+11:00",
   "releases": [
     {
-      "firmwareVersion": "2.32.0",
+      "firmwareVersion": "2.33.0",
       "hardwareModel": "EchoDesk Mini",
       "hardwareId": "freenove-fnk0114a-2p4",
       "supportedChip": "esp32",
@@ -12,12 +12,12 @@
       "flashMode": "dio",
       "flashFrequency": "40m",
       "flashSize": "4MB",
-      "imageFile": "echodesk-mini/2.32.0/echodesk-os.bin",
+      "imageFile": "echodesk-mini/2.33.0/echodesk-os.bin",
       "downloadUrl": null,
-      "sha256": "1109B7A4AFB242B9695AE60952073FD6DA2E2E33E9FE53C1D000885AF67DD2EA",
-      "size": 1552080,
-      "releaseNotes": "Adds Clock timers, Notification Stack, PC Dashboard, My Device health, staged update progress, and optional protected Wi-Fi setup. USB remains the default connection and recovery path.",
-      "minimumDesktopVersion": "0.2.8"
+      "sha256": "1AB0C89C367DEEF5B908D0ABF84451A08A0C6CD980AE05C44C8FA591F3523BCC",
+      "size": 1570688,
+      "releaseNotes": "Adds Bedside Mode with standalone alarms, clock and display schedules, plus dedicated Windows and macOS customisation pages. USB remains the default connection and recovery path.",
+      "minimumDesktopVersion": "0.2.9"
     }
   ]
 }

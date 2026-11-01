@@ -3,6 +3,9 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
 using System.IO;
+using System.Globalization;
+using System.Text;
+using System.ComponentModel;
 using EchoDesk.Desktop.Core.Models;
 using EchoDesk.Desktop.Core.Services;
 using EchoDesk.Desktop.Infrastructure;
@@ -35,6 +38,22 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string pcDashboardMetric2 = "ram";
     private string pcDashboardMetric3 = "battery";
     private string pcDashboardMetric4 = "storage";
+    private string bedsideSection = "Clock";
+    private string bedsideClockFormat = "12h";
+    private string bedsideClockStyle = "large";
+    private bool bedsideShowSeconds;
+    private bool bedsideNextAlarmWidget = true;
+    private bool bedsideBrightnessScheduleEnabled = true;
+    private int bedsideManualBrightness = 40;
+    private bool bedsideNightShiftScheduleEnabled = true;
+    private bool bedsideNightShiftManualEnabled;
+    private string bedsideNightShiftStart = "19:00";
+    private string bedsideNightShiftEnd = "07:00";
+    private bool bedsideThemeScheduleEnabled = true;
+    private bool bedsideThemeManualDark;
+    private string bedsideThemeStart = "19:00";
+    private string bedsideThemeEnd = "07:00";
+    private ulong bedsideEditorRevision = ulong.MaxValue;
     private int countdownDurationMinutes = 5;
     private int focusDurationMinutes = 25;
     private int focusBreakMinutes = 5;
@@ -66,6 +85,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         guidedSetup = new GuidedSetupFlow();
         preferences = preferencesService.Load();
         firstRun = new FirstRunFlow(preferences.FirstRunCompleted);
+        BedsideAlarms = [];
+        BedsideBrightnessSegments =
+        [
+            new("00:00", 1), new("05:00", 40), new("07:00", 70), new("08:00", 100),
+            new("18:00", 60), new("19:00", 40), new("20:30", 30), new("21:30", 1),
+        ];
         selectedPage = preferences.FirstRunCompleted ? "Overview" : "First run";
         broker.StateChanged += OnStateChanged;
         NavigateCommand = new RelayCommand(page => SelectedPage = page as string ?? "Overview");
@@ -78,6 +103,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         SetThemeCommand = new AsyncRelayCommand(SetThemeAsync, _ => IsConnected && SupportsSettings);
         SetNowPlayingCommand = new AsyncRelayCommand(_ => SetNowPlayingAsync(), _ => IsConnected && SupportsSettings);
         SavePcDashboardCommand = new AsyncRelayCommand(_ => SavePcDashboardAsync(), _ => PcDashboardAvailable);
+        OpenBedsideModeCommand = new AsyncRelayCommand(_ => OpenBedsideModeAsync(), _ => IsConnected);
+        SelectBedsideSectionCommand = new RelayCommand(section => BedsideSection = section as string ?? "Clock");
+        SaveBedsideModeCommand = new AsyncRelayCommand(_ => SaveBedsideModeAsync(), _ => BedsideAvailable);
+        AddBedsideAlarmCommand = new RelayCommand(_ => AddBedsideAlarm(), _ => BedsideAlarms.Count < 8);
+        RemoveBedsideAlarmCommand = new RelayCommand(RemoveBedsideAlarm);
+        AddBedsideBrightnessSegmentCommand = new RelayCommand(_ => AddBedsideBrightnessSegment(), _ => BedsideBrightnessSegments.Count < 8);
+        RemoveBedsideBrightnessSegmentCommand = new RelayCommand(RemoveBedsideBrightnessSegment, _ => BedsideBrightnessSegments.Count > 1);
         SetAdvancedSettingCommand = new AsyncRelayCommand(
             SetAdvancedSettingAsync,
             setting => setting is string key && SupportsDeviceSetting(key));
@@ -167,6 +199,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             new Choice("clock", "Clock"), new Choice("performance", "Performance"),
             new Choice("nowPlaying", "Now Playing"), new Choice("myDevice", "My device"),
             new Choice("notificationStack", "Notification Stack"),
+            new Choice("bedside", "Bedside Mode"),
             new Choice("settings", "Settings"),
         ];
         ClockFormatOptions = [new Choice("12h", "12-hour"), new Choice("24h", "24-hour")];
@@ -195,6 +228,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             new Choice("networkUp", "Network upload"), new Choice("cpuTemperature", "CPU temperature"),
             new Choice("gpuTemperature", "GPU temperature"), new Choice("motherboardTemperature", "Motherboard temperature"),
         ];
+        BedsideClockStyleOptions = [new Choice("large", "Large"), new Choice("minimal", "Minimal")];
         AppTiles = new ObservableCollection<AppTile>(EchoDeskApps.All.Select(app => new AppTile(app.Id, app.Label, app.Glyph)));
         ThemeService.Apply(preferences.Appearance);
     }
@@ -209,6 +243,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public AsyncRelayCommand SetThemeCommand { get; }
     public AsyncRelayCommand SetNowPlayingCommand { get; }
     public AsyncRelayCommand SavePcDashboardCommand { get; }
+    public AsyncRelayCommand OpenBedsideModeCommand { get; }
+    public RelayCommand SelectBedsideSectionCommand { get; }
+    public AsyncRelayCommand SaveBedsideModeCommand { get; }
+    public RelayCommand AddBedsideAlarmCommand { get; }
+    public RelayCommand RemoveBedsideAlarmCommand { get; }
+    public RelayCommand AddBedsideBrightnessSegmentCommand { get; }
+    public RelayCommand RemoveBedsideBrightnessSegmentCommand { get; }
     public AsyncRelayCommand SetAdvancedSettingCommand { get; }
     public AsyncRelayCommand ToggleAiUsageCommand { get; }
     public AsyncRelayCommand ConfigureNotificationStackCommand { get; }
@@ -253,6 +294,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public IReadOnlyList<Choice> PerformanceDefaultViewOptions { get; }
     public IReadOnlyList<Choice> PcDashboardMetricOptions { get; }
     public IReadOnlyList<Choice> PcDashboardRequiredMetricOptions => PcDashboardMetricOptions.Where(choice => choice.Value.Length > 0).ToArray();
+    public IReadOnlyList<Choice> BedsideClockStyleOptions { get; }
+    public ObservableCollection<BedsideAlarmEditor> BedsideAlarms { get; }
+    public ObservableCollection<BedsideBrightnessSegmentEditor> BedsideBrightnessSegments { get; }
     public IReadOnlyList<Choice> FirmwareHardwareOptions { get; }
 
     public string SelectedPage
@@ -261,7 +305,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         set
         {
             if (!Set(ref selectedPage, value)) return;
-            Raise(nameof(IsOverview)); Raise(nameof(IsDeviceControl)); Raise(nameof(IsCustomisation)); Raise(nameof(IsSetupUpdates));
+            Raise(nameof(IsOverview)); Raise(nameof(IsDeviceControl)); Raise(nameof(IsCustomisation)); Raise(nameof(IsBedsideMode)); Raise(nameof(IsSetupUpdates));
             Raise(nameof(IsGuidedSetup)); Raise(nameof(IsFirstRun)); Raise(nameof(IsMainShellEnabled));
             if (IsSetupUpdates && IsBrokerAvailable && !FirmwareOperationActive)
             {
@@ -285,6 +329,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsFirstRunSetupPrompt => IsFirstRun && firstRun.Step == FirstRunStep.SetupPrompt;
     public bool IsDeviceControl => SelectedPage == "Device Control";
     public bool IsCustomisation => SelectedPage == "Customisation";
+    public bool IsBedsideMode => SelectedPage == "Bedside Mode";
     public bool IsSetupUpdates => SelectedPage == "Device recovery & updates";
     public bool IsGuidedSetup => SelectedPage == "Set up a new device";
     public bool IsCompact { get => isCompact; set => Set(ref isCompact, value); }
@@ -732,6 +777,59 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public string PcDashboardMetric3 { get => pcDashboardMetric3; set => Set(ref pcDashboardMetric3, value); }
     public string PcDashboardMetric4 { get => pcDashboardMetric4; set => Set(ref pcDashboardMetric4, value); }
 
+    public bool BedsideAvailable => IsConnected && state.Bedside.Available && state.Bedside.Protocol == 1;
+    public string BedsideSection
+    {
+        get => bedsideSection;
+        set
+        {
+            if (!Set(ref bedsideSection, value)) return;
+            Raise(nameof(IsBedsideClockSection)); Raise(nameof(IsBedsideWidgetsSection));
+            Raise(nameof(IsBedsideAlarmsSection)); Raise(nameof(IsBedsideDisplaySection));
+        }
+    }
+    public bool IsBedsideClockSection => BedsideSection == "Clock";
+    public bool IsBedsideWidgetsSection => BedsideSection == "Widgets";
+    public bool IsBedsideAlarmsSection => BedsideSection == "Alarms";
+    public bool IsBedsideDisplaySection => BedsideSection == "Display";
+    public string BedsideClockFormat
+    {
+        get => bedsideClockFormat;
+        set { if (Set(ref bedsideClockFormat, value)) { Raise(nameof(BedsidePreviewTime)); Raise(nameof(BedsidePreviewPeriod)); } }
+    }
+    public string BedsideClockStyle
+    {
+        get => bedsideClockStyle;
+        set { if (Set(ref bedsideClockStyle, value)) Raise(nameof(BedsideClockIsLarge)); }
+    }
+    public bool BedsideClockIsLarge => BedsideClockStyle == "large";
+    public bool BedsideShowSeconds
+    {
+        get => bedsideShowSeconds;
+        set { if (Set(ref bedsideShowSeconds, value)) Raise(nameof(BedsidePreviewTime)); }
+    }
+    public bool BedsideNextAlarmWidget { get => bedsideNextAlarmWidget; set => Set(ref bedsideNextAlarmWidget, value); }
+    public bool BedsideBrightnessScheduleEnabled { get => bedsideBrightnessScheduleEnabled; set => Set(ref bedsideBrightnessScheduleEnabled, value); }
+    public int BedsideManualBrightness { get => bedsideManualBrightness; set => Set(ref bedsideManualBrightness, Math.Clamp(value, 1, 100)); }
+    public bool BedsideNightShiftScheduleEnabled { get => bedsideNightShiftScheduleEnabled; set => Set(ref bedsideNightShiftScheduleEnabled, value); }
+    public bool BedsideNightShiftManualEnabled { get => bedsideNightShiftManualEnabled; set => Set(ref bedsideNightShiftManualEnabled, value); }
+    public string BedsideNightShiftStart { get => bedsideNightShiftStart; set => Set(ref bedsideNightShiftStart, value); }
+    public string BedsideNightShiftEnd { get => bedsideNightShiftEnd; set => Set(ref bedsideNightShiftEnd, value); }
+    public bool BedsideThemeScheduleEnabled { get => bedsideThemeScheduleEnabled; set => Set(ref bedsideThemeScheduleEnabled, value); }
+    public bool BedsideThemeManualDark { get => bedsideThemeManualDark; set => Set(ref bedsideThemeManualDark, value); }
+    public string BedsideThemeStart { get => bedsideThemeStart; set => Set(ref bedsideThemeStart, value); }
+    public string BedsideThemeEnd { get => bedsideThemeEnd; set => Set(ref bedsideThemeEnd, value); }
+    public string BedsidePreviewTime => BedsideClockFormat == "24h"
+        ? (BedsideShowSeconds ? "22:09:41" : "22:09")
+        : (BedsideShowSeconds ? "10:09:41" : "10:09");
+    public string BedsidePreviewPeriod => BedsideClockFormat == "24h" ? "" : "PM";
+    public string BedsidePreviewAlarm => BedsideAlarms.FirstOrDefault(alarm => alarm.Enabled) is { } alarm
+        ? $"Next alarm  {alarm.Time}"
+        : "No alarm scheduled";
+    public string BedsideRuntimeSummary => state.Bedside.Runtime.AlarmRinging
+        ? "Alarm is ringing"
+        : state.Bedside.Runtime.DisplaySleeping ? "Display is sleeping" : "Bedside Mode is ready";
+
     public string DesktopAppearance
     {
         get => preferences.Appearance;
@@ -820,6 +918,211 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             "PC Dashboard layout saved to EchoDesk.");
     }
 
+    private async Task OpenBedsideModeAsync()
+    {
+        SelectedPage = "Bedside Mode";
+        BedsideSection = "Clock";
+        await ExecuteAsync(() => broker.GetBedsideStateAsync(), "Bedside Mode settings synchronised.");
+    }
+
+    private void AddBedsideAlarm()
+    {
+        if (BedsideAlarms.Count >= 8) return;
+        var id = Enumerable.Range(1, 8).First(value => BedsideAlarms.All(alarm => alarm.Id != value));
+        var alarm = new BedsideAlarmEditor(id, true, "07:00", 127, "Alarm");
+        alarm.PropertyChanged += BedsideAlarmChanged;
+        BedsideAlarms.Add(alarm);
+        Raise(nameof(BedsidePreviewAlarm));
+        AddBedsideAlarmCommand.Refresh(); RemoveBedsideAlarmCommand.Refresh();
+    }
+
+    private void RemoveBedsideAlarm(object? parameter)
+    {
+        if (parameter is BedsideAlarmEditor alarm)
+        {
+            alarm.PropertyChanged -= BedsideAlarmChanged;
+            BedsideAlarms.Remove(alarm);
+        }
+        Raise(nameof(BedsidePreviewAlarm));
+        AddBedsideAlarmCommand.Refresh(); RemoveBedsideAlarmCommand.Refresh();
+    }
+
+    private void AddBedsideBrightnessSegment()
+    {
+        if (BedsideBrightnessSegments.Count >= 8) return;
+        var minute = BedsideBrightnessSegments
+            .Select(segment => TryParseMinute(segment.Time, out var value) ? value : 0)
+            .DefaultIfEmpty(0).Max();
+        minute = (minute + 60) % 1440;
+        while (BedsideBrightnessSegments.Any(segment => TryParseMinute(segment.Time, out var value) && value == minute))
+            minute = (minute + 30) % 1440;
+        BedsideBrightnessSegments.Add(new BedsideBrightnessSegmentEditor(MinuteText(minute), 40));
+        AddBedsideBrightnessSegmentCommand.Refresh(); RemoveBedsideBrightnessSegmentCommand.Refresh();
+    }
+
+    private void RemoveBedsideBrightnessSegment(object? parameter)
+    {
+        if (parameter is BedsideBrightnessSegmentEditor segment && BedsideBrightnessSegments.Count > 1)
+            BedsideBrightnessSegments.Remove(segment);
+        AddBedsideBrightnessSegmentCommand.Refresh(); RemoveBedsideBrightnessSegmentCommand.Refresh();
+    }
+
+    private async Task SaveBedsideModeAsync()
+    {
+        if (!TryBuildBedsideConfig(out var config, out var error))
+        {
+            Feedback = error;
+            return;
+        }
+        try
+        {
+            // Always base the write on a just-read authoritative revision.
+            var refreshed = await broker.GetBedsideStateAsync();
+            ApplyState(refreshed);
+            var next = await broker.SetBedsideConfigAsync(refreshed.Bedside.Revision, config!);
+            ApplyState(next);
+            Feedback = "Bedside Mode settings saved to EchoDesk.";
+        }
+        catch (Exception exception)
+        {
+            Feedback = Friendly(exception);
+        }
+    }
+
+    private bool TryBuildBedsideConfig(out BedsideConfig? config, out string error)
+    {
+        config = null;
+        error = "";
+        if (BedsideClockFormat is not ("12h" or "24h") || BedsideClockStyle is not ("large" or "minimal"))
+        {
+            error = "Choose a valid Bedside clock format and style.";
+            return false;
+        }
+        var alarms = new List<BedsideAlarm>();
+        foreach (var editor in BedsideAlarms)
+        {
+            if (!TryParseMinute(editor.Time, out var minute)
+                || editor.Id is < 1 or > 8 || editor.Weekdays is < 1 or > 127
+                || Encoding.UTF8.GetByteCount(editor.Label) > 24)
+            {
+                error = "Each alarm needs a valid time, at least one day, and an optional label up to 24 UTF-8 bytes.";
+                return false;
+            }
+            alarms.Add(new BedsideAlarm
+            {
+                Id = editor.Id, Enabled = editor.Enabled, MinuteOfDay = minute,
+                Weekdays = editor.Weekdays, Label = editor.Label,
+            });
+        }
+        if (alarms.Select(alarm => alarm.Id).Distinct().Count() != alarms.Count)
+        {
+            error = "Alarm identifiers must be unique.";
+            return false;
+        }
+        var segments = new List<BedsideBrightnessSegment>();
+        foreach (var editor in BedsideBrightnessSegments)
+        {
+            if (!TryParseMinute(editor.Time, out var minute) || editor.Brightness is < 1 or > 100)
+            {
+                error = "Each display schedule entry needs a 24-hour time and brightness from 1 to 100%.";
+                return false;
+            }
+            segments.Add(new BedsideBrightnessSegment { StartMinute = minute, Brightness = editor.Brightness });
+        }
+        segments = segments.OrderBy(segment => segment.StartMinute).ToList();
+        if (segments.Count is < 1 or > 8 || segments.Select(segment => segment.StartMinute).Distinct().Count() != segments.Count)
+        {
+            error = "Use one to eight display schedule entries with different start times.";
+            return false;
+        }
+        if (!TryParseMinute(BedsideNightShiftStart, out var nightStart)
+            || !TryParseMinute(BedsideNightShiftEnd, out var nightEnd)
+            || !TryParseMinute(BedsideThemeStart, out var themeStart)
+            || !TryParseMinute(BedsideThemeEnd, out var themeEnd))
+        {
+            error = "Night Shift and appearance schedules require valid 24-hour times.";
+            return false;
+        }
+        config = new BedsideConfig
+        {
+            Clock = new BedsideClockConfig
+            {
+                Format = BedsideClockFormat, ShowSeconds = BedsideShowSeconds, Style = BedsideClockStyle,
+            },
+            Widgets = new BedsideWidgetConfig { NextAlarm = BedsideNextAlarmWidget, Weather = false },
+            Alarms = alarms,
+            Display = new BedsideDisplayConfig
+            {
+                ScheduleEnabled = BedsideBrightnessScheduleEnabled,
+                ManualBrightness = BedsideManualBrightness,
+                Segments = segments,
+                NightShift = new BedsideNightShiftConfig
+                {
+                    ScheduleEnabled = BedsideNightShiftScheduleEnabled,
+                    ManualEnabled = BedsideNightShiftManualEnabled,
+                    StartMinute = nightStart, EndMinute = nightEnd,
+                },
+                Theme = new BedsideThemeConfig
+                {
+                    ScheduleEnabled = BedsideThemeScheduleEnabled,
+                    ManualDark = BedsideThemeManualDark,
+                    StartMinute = themeStart, EndMinute = themeEnd,
+                },
+            },
+        };
+        return true;
+    }
+
+    private static bool TryParseMinute(string value, out int minute)
+    {
+        minute = 0;
+        if (!TimeSpan.TryParseExact(value?.Trim(), "hh\\:mm", CultureInfo.InvariantCulture, out var time)
+            || time < TimeSpan.Zero || time >= TimeSpan.FromDays(1)) return false;
+        minute = (int)time.TotalMinutes;
+        return true;
+    }
+
+    private static string MinuteText(int minute) => TimeSpan.FromMinutes(Math.Clamp(minute, 0, 1439)).ToString(@"hh\:mm");
+
+    private void SyncBedsideEditor(BedsideModeState bedside)
+    {
+        if (!bedside.Available || bedsideEditorRevision == bedside.Revision) return;
+        bedsideEditorRevision = bedside.Revision;
+        var config = bedside.Config;
+        BedsideClockFormat = config.Clock.Format;
+        BedsideClockStyle = config.Clock.Style;
+        BedsideShowSeconds = config.Clock.ShowSeconds;
+        BedsideNextAlarmWidget = config.Widgets.NextAlarm;
+        BedsideBrightnessScheduleEnabled = config.Display.ScheduleEnabled;
+        BedsideManualBrightness = config.Display.ManualBrightness;
+        BedsideNightShiftScheduleEnabled = config.Display.NightShift.ScheduleEnabled;
+        BedsideNightShiftManualEnabled = config.Display.NightShift.ManualEnabled;
+        BedsideNightShiftStart = MinuteText(config.Display.NightShift.StartMinute);
+        BedsideNightShiftEnd = MinuteText(config.Display.NightShift.EndMinute);
+        BedsideThemeScheduleEnabled = config.Display.Theme.ScheduleEnabled;
+        BedsideThemeManualDark = config.Display.Theme.ManualDark;
+        BedsideThemeStart = MinuteText(config.Display.Theme.StartMinute);
+        BedsideThemeEnd = MinuteText(config.Display.Theme.EndMinute);
+        foreach (var current in BedsideAlarms) current.PropertyChanged -= BedsideAlarmChanged;
+        BedsideAlarms.Clear();
+        foreach (var alarm in config.Alarms)
+        {
+            var editor = new BedsideAlarmEditor(alarm.Id, alarm.Enabled, MinuteText(alarm.MinuteOfDay), alarm.Weekdays, alarm.Label);
+            editor.PropertyChanged += BedsideAlarmChanged;
+            BedsideAlarms.Add(editor);
+        }
+        BedsideBrightnessSegments.Clear();
+        foreach (var segment in config.Display.Segments)
+            BedsideBrightnessSegments.Add(new BedsideBrightnessSegmentEditor(MinuteText(segment.StartMinute), segment.Brightness));
+        Raise(nameof(BedsidePreviewTime)); Raise(nameof(BedsidePreviewPeriod));
+        Raise(nameof(BedsidePreviewAlarm)); Raise(nameof(BedsideRuntimeSummary));
+        AddBedsideAlarmCommand.Refresh(); RemoveBedsideAlarmCommand.Refresh();
+        AddBedsideBrightnessSegmentCommand.Refresh(); RemoveBedsideBrightnessSegmentCommand.Refresh();
+    }
+
+    private void BedsideAlarmChanged(object? sender, PropertyChangedEventArgs args) =>
+        Raise(nameof(BedsidePreviewAlarm));
+
     private void OnStateChanged(object? sender, BrokerState next) =>
         uiContext.Post(_ => ApplyState(next), null);
 
@@ -869,6 +1172,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 PcDashboardMetric3 = next.PcDashboard.Metrics.ElementAtOrDefault(2) ?? "";
                 PcDashboardMetric4 = next.PcDashboard.Metrics.ElementAtOrDefault(3) ?? "";
             }
+            SyncBedsideEditor(next.Bedside);
         }
         finally { applyingState = false; }
 
@@ -933,6 +1237,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                      nameof(NotificationStack), nameof(NotificationStackEnabled), nameof(NotificationStackStatus),
                      nameof(NotificationStackGuidance), nameof(NotificationStackSourceSummary),
                      nameof(PcDashboardAvailable),
+                     nameof(BedsideAvailable), nameof(BedsideRuntimeSummary),
                      nameof(FirmwareManager), nameof(FirmwareDevices), nameof(SelectedFirmwarePort), nameof(SelectedFirmwareDevice),
                      nameof(WifiSetup), nameof(GuidedWifiDevices), nameof(GuidedWifiHasDevices),
                      nameof(GuidedPairedWifiDevices), nameof(GuidedWifiHasPairedDevice),
@@ -1316,11 +1621,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         await ExecuteAsync(() => broker.ControlClockAsync(parts[1], parts[0]), "Clock updated.");
     }
 
-    private Task ConfigureCountdownAsync() => ExecuteAsync(
+    private async Task ConfigureCountdownAsync() =>
+        _ = await ConfigureCountdownForDeviceAsync();
+
+    public Task<bool> ConfigureCountdownForDeviceAsync() => ExecuteWithResultAsync(
         () => broker.ControlClockAsync("configure", "countdown", durationSeconds: CountdownDurationMinutes * 60),
         "Countdown configured.");
 
-    private Task ConfigureFocusAsync() => ExecuteAsync(
+    private async Task ConfigureFocusAsync() =>
+        _ = await ConfigureFocusForDeviceAsync();
+
+    public Task<bool> ConfigureFocusForDeviceAsync() => ExecuteWithResultAsync(
         () => broker.ControlClockAsync("configure", "focus", focusMinutes: FocusDurationMinutes,
             breakMinutes: FocusBreakMinutes, rounds: FocusRounds),
         "Focus timer configured.");
@@ -1494,10 +1805,16 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task ExecuteAsync(Func<Task<BrokerState>> action, string success)
     {
+        _ = await ExecuteWithResultAsync(action, success);
+    }
+
+    private async Task<bool> ExecuteWithResultAsync(Func<Task<BrokerState>> action, string success)
+    {
         try
         {
             var next = await action();
             uiContext.Post(_ => { ApplyState(next); Feedback = success; }, null);
+            return true;
         }
         catch (Exception error)
         {
@@ -1507,6 +1824,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 ApplyState(state);
                 Feedback = Friendly(error);
             }, null);
+            return false;
         }
     }
 
@@ -1533,6 +1851,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         RefreshCommand.Refresh(); ReconnectCommand.Refresh(); OpenAppCommand.Refresh();
         SavePcDashboardCommand.Refresh();
+        OpenBedsideModeCommand.Refresh(); SaveBedsideModeCommand.Refresh();
+        AddBedsideAlarmCommand.Refresh(); RemoveBedsideAlarmCommand.Refresh();
+        AddBedsideBrightnessSegmentCommand.Refresh(); RemoveBedsideBrightnessSegmentCommand.Refresh();
         ClockActionCommand.Refresh(); ConfigureCountdownCommand.Refresh(); ConfigureFocusCommand.Refresh();
         SetThemeCommand.Refresh(); SetNowPlayingCommand.Refresh(); SetAdvancedSettingCommand.Refresh();
         ToggleAiUsageCommand.Refresh();
@@ -1723,3 +2044,50 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
 public sealed record AppTile(string Id, string Label, string Glyph);
 public sealed record Choice(string Value, string Label);
+
+public sealed class BedsideAlarmEditor : ObservableObject
+{
+    private bool enabled;
+    private string time;
+    private string label;
+    private int weekdays;
+
+    public BedsideAlarmEditor(int id, bool enabled, string time, int weekdays, string label)
+    {
+        Id = id; this.enabled = enabled; this.time = time; this.weekdays = weekdays; this.label = label;
+    }
+
+    public int Id { get; }
+    public bool Enabled { get => enabled; set => Set(ref enabled, value); }
+    public string Time { get => time; set => Set(ref time, value); }
+    public string Label { get => label; set => Set(ref label, value); }
+    public int Weekdays => weekdays;
+    // Firmware wire mask is Sunday at bit 0 through Saturday at bit 6.
+    public bool Sunday { get => Day(0); set => SetDay(0, value); }
+    public bool Monday { get => Day(1); set => SetDay(1, value); }
+    public bool Tuesday { get => Day(2); set => SetDay(2, value); }
+    public bool Wednesday { get => Day(3); set => SetDay(3, value); }
+    public bool Thursday { get => Day(4); set => SetDay(4, value); }
+    public bool Friday { get => Day(5); set => SetDay(5, value); }
+    public bool Saturday { get => Day(6); set => SetDay(6, value); }
+    private bool Day(int day) => (weekdays & (1 << day)) != 0;
+    private void SetDay(int day, bool value)
+    {
+        var next = value ? weekdays | (1 << day) : weekdays & ~(1 << day);
+        if (next == weekdays) return;
+        weekdays = next;
+        Raise();
+    }
+}
+
+public sealed class BedsideBrightnessSegmentEditor : ObservableObject
+{
+    private string time;
+    private int brightness;
+    public BedsideBrightnessSegmentEditor(string time, int brightness)
+    {
+        this.time = time; this.brightness = brightness;
+    }
+    public string Time { get => time; set => Set(ref time, value); }
+    public int Brightness { get => brightness; set => Set(ref brightness, Math.Clamp(value, 1, 100)); }
+}

@@ -64,6 +64,8 @@ pub struct AppState {
     pub echo_desk_notification_state: Mutex<Option<serde_json::Value>>,
     /// Validated PC Dashboard metric selection. Samples are intentionally not persisted.
     pub echo_desk_pc_dashboard_state: Mutex<Option<serde_json::Value>>,
+    /// Last fully validated, authoritative Bedside Mode state from firmware.
+    pub echo_desk_bedside_state: Mutex<Option<serde_json::Value>>,
     /// Monotonic status/event revision for stale-update protection in the WPF
     /// client. Device settings additionally carry their firmware revision.
     pub desktop_broker_revision: AtomicU64,
@@ -118,6 +120,7 @@ impl AppState {
             notification_stack: Mutex::new(NotificationStackState::default()),
             echo_desk_notification_state: Mutex::new(None),
             echo_desk_pc_dashboard_state: Mutex::new(None),
+            echo_desk_bedside_state: Mutex::new(None),
             desktop_broker_revision: AtomicU64::new(1),
             releases: Mutex::new(ReleaseCache::default()),
             release_check: (Mutex::new(false), Condvar::new()),

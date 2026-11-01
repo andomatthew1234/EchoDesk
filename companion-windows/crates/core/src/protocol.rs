@@ -249,6 +249,8 @@ pub struct DeviceInfo {
     pub echo_desk_notification_protocol: Option<u32>,
     /// EchoDesk configurable PC Dashboard contract.
     pub echo_desk_pc_dashboard_protocol: Option<u32>,
+    /// EchoDesk autonomous bedside clock, alarm, widget, and display contract.
+    pub echo_desk_bedside_protocol: Option<u32>,
     pub wifi_configured: Option<bool>,
     pub wifi_connected: Option<bool>,
     pub time_synced: Option<bool>,
@@ -346,6 +348,10 @@ impl DeviceInfo {
                 .get("echoDeskPcDashboardProtocol")
                 .and_then(Value::as_u64)
                 .map(|n| n as u32),
+            echo_desk_bedside_protocol: v
+                .get("echoDeskBedsideProtocol")
+                .and_then(Value::as_u64)
+                .map(|n| n as u32),
             wifi_configured: v.get("wifiConfigured").and_then(Value::as_bool),
             wifi_connected: v.get("wifiConnected").and_then(Value::as_bool),
             time_synced: v.get("timeSynced").and_then(Value::as_bool),
@@ -427,6 +433,10 @@ impl DeviceInfo {
         self.supports_echo_desk_control() && self.echo_desk_pc_dashboard_protocol.unwrap_or(0) >= 1
     }
 
+    pub fn supports_echo_desk_bedside(&self) -> bool {
+        self.supports_echo_desk_control() && self.echo_desk_bedside_protocol.unwrap_or(0) >= 1
+    }
+
     pub fn max_frame_bytes(&self) -> usize {
         self.max_frame_bytes.unwrap_or(MAX_FRAME_BYTES)
     }
@@ -475,6 +485,7 @@ pub enum DeviceMessage {
     },
     EchoDeskNotificationsState(Value),
     EchoDeskPcDashboardState(Value),
+    EchoDeskBedsideState(Value),
     EchoDeskAck(Value),
     EchoDeskError(Value),
     Other(Value),
@@ -607,6 +618,13 @@ impl DeviceMessage {
                     DeviceMessage::Other(v)
                 }
             }
+            "echodesk_bedside_state" => {
+                if v.get("version").and_then(Value::as_u64) == Some(1) {
+                    DeviceMessage::EchoDeskBedsideState(v)
+                } else {
+                    DeviceMessage::Other(v)
+                }
+            }
             "echodesk_ack" => DeviceMessage::EchoDeskAck(v),
             "echodesk_error" => DeviceMessage::EchoDeskError(v),
             _ => DeviceMessage::Other(v),
@@ -630,6 +648,7 @@ impl DeviceMessage {
             DeviceMessage::EchoDeskClockConfigRequest { .. } => "echodesk_clock_config_request",
             DeviceMessage::EchoDeskNotificationsState(_) => "echodesk_notifications_state",
             DeviceMessage::EchoDeskPcDashboardState(_) => "echodesk_pc_dashboard_state",
+            DeviceMessage::EchoDeskBedsideState(_) => "echodesk_bedside_state",
             DeviceMessage::EchoDeskAck(_) => "echodesk_ack",
             DeviceMessage::EchoDeskError(_) => "echodesk_error",
             DeviceMessage::Other(_) => "other",
@@ -1027,7 +1046,7 @@ mod tests {
     #[test]
     fn parses_versioned_notification_state_and_capability() {
         let info = DeviceInfo::from_value(&serde_json::json!({
-            "type":"info", "version":"2.32.0", "mac":"aa:bb:cc:dd:ee:ff",
+            "type":"info", "version":"2.33.0", "mac":"aa:bb:cc:dd:ee:ff",
             "echoDeskControlProtocol":1, "echoDeskNotificationProtocol":1
         }))
         .unwrap();
@@ -1061,6 +1080,26 @@ mod tests {
         ));
         assert!(matches!(
             DeviceMessage::parse_line(r#"{"type":"echodesk_pc_dashboard_state","version":2}"#),
+            Some(DeviceMessage::Other(_))
+        ));
+    }
+
+    #[test]
+    fn parses_bedside_capability_and_versioned_state() {
+        let info = DeviceInfo::from_value(&serde_json::json!({
+            "type":"info", "version":"2.34.0", "mac":"aa:bb:cc:dd:ee:ff",
+            "echoDeskControlProtocol":1, "echoDeskBedsideProtocol":1
+        }))
+        .unwrap();
+        assert!(info.supports_echo_desk_bedside());
+        assert!(matches!(
+            DeviceMessage::parse_line(
+                r#"{"type":"echodesk_bedside_state","version":1,"requestId":7,"revision":2,"config":{},"runtime":{}}"#
+            ),
+            Some(DeviceMessage::EchoDeskBedsideState(_))
+        ));
+        assert!(matches!(
+            DeviceMessage::parse_line(r#"{"type":"echodesk_bedside_state","version":2}"#),
             Some(DeviceMessage::Other(_))
         ));
     }

@@ -1,5 +1,6 @@
 import Cocoa
 import CoreAudio
+import CryptoKit
 import Darwin
 import Foundation
 import IOKit.ps
@@ -41,7 +42,9 @@ final class EchoDeskTelemetry {
         musicTimer.schedule(deadline: .now(), repeating: 1.0, leeway: .milliseconds(150))
         musicTimer.setEventHandler { [weak self] in
             guard let self else { return }
-            self.publish("music", self.music.sample())
+            for frame in self.music.sample() {
+                self.publish(frame["type"] as? String ?? "music", frame)
+            }
         }
         self.musicTimer = musicTimer
         musicTimer.resume()
@@ -233,6 +236,8 @@ private struct MacPerformanceCollector {
 }
 
 private struct MacNowPlayingCollector {
+    private static let artworkChunkBytes = 1536
+
     private struct Snapshot {
         let state: String
         let title: String
@@ -242,16 +247,22 @@ private struct MacNowPlayingCollector {
         let positionMs: Int
         let durationMs: Int
         let bundleIdentifier: String
+        let artworkData: Data?
 
         var rank: Int { state == "playing" ? 2 : (state == "paused" ? 1 : 0) }
         var signature: String { "\(bundleIdentifier)\u{1f}\(title)\u{1f}\(artist)\u{1f}\(album)" }
     }
 
     private var generation = 1
+    private var artworkId = ""
+    private var artworkBytes = Data()
+    private var nextArtworkChunk = 0
+    private var artworkSignature = ""
+    private var artworkCompletedAt: Date?
     private var lastSignature = ""
     private var activeBundleIdentifier: String?
 
-    mutating func sample() -> [String: Any] {
+    mutating func sample() -> [[String: Any]] {
         let candidates = [queryMusic(), querySpotify()].compactMap { $0 }
         let current = candidates.sorted {
             if $0.rank != $1.rank { return $0.rank > $1.rank }
@@ -264,14 +275,34 @@ private struct MacNowPlayingCollector {
             if current.signature != lastSignature {
                 generation &+= 1
                 lastSignature = current.signature
+                artworkId = ""
+                artworkBytes.removeAll(keepingCapacity: true)
+                nextArtworkChunk = 0
+                artworkSignature = ""
+                artworkCompletedAt = nil
             }
             activeBundleIdentifier = current.bundleIdentifier
+            if artworkSignature != current.signature,
+               let raw = current.artworkData,
+               let encoded = encodedArtwork(raw) {
+                artworkBytes = encoded
+                artworkId = SHA256.hash(data: encoded).prefix(8)
+                    .map { String(format: "%02x", $0) }.joined()
+                artworkSignature = current.signature
+                nextArtworkChunk = 0
+                artworkCompletedAt = nil
+            }
         } else {
             activeBundleIdentifier = nil
             lastSignature = ""
+            artworkId = ""
+            artworkBytes.removeAll(keepingCapacity: true)
+            nextArtworkChunk = 0
+            artworkSignature = ""
+            artworkCompletedAt = nil
         }
 
-        return [
+        let metadata: [String: Any] = [
             "type": "music",
             "version": 1,
             "timestamp": max(1, Int(Date().timeIntervalSince1970)),
@@ -286,9 +317,75 @@ private struct MacNowPlayingCollector {
             "canPlayPause": current != nil,
             "canPrevious": current != nil,
             "canNext": current != nil,
-            "artId": "",
+            "artId": artworkId,
             "backgroundId": "",
         ]
+        var frames = [metadata]
+        if let artwork = nextArtworkFrame() { frames.append(artwork) }
+        return frames
+    }
+
+    private mutating func nextArtworkFrame() -> [String: Any]? {
+        guard !artworkId.isEmpty, !artworkBytes.isEmpty else { return nil }
+        let chunks = (artworkBytes.count + Self.artworkChunkBytes - 1) / Self.artworkChunkBytes
+        if nextArtworkChunk >= chunks,
+           let completed = artworkCompletedAt,
+           Date().timeIntervalSince(completed) >= 30 {
+            // The firmware does not persist album art across reconnects. A
+            // bounded periodic replay repairs a missed/rebooted transfer while
+            // keeping normal metadata responsive.
+            nextArtworkChunk = 0
+            artworkCompletedAt = nil
+        }
+        guard nextArtworkChunk < chunks else { return nil }
+        let offset = nextArtworkChunk * Self.artworkChunkBytes
+        let end = min(artworkBytes.count, offset + Self.artworkChunkBytes)
+        let index = nextArtworkChunk
+        nextArtworkChunk += 1
+        if nextArtworkChunk == chunks { artworkCompletedAt = Date() }
+        return [
+            "type": "music_art", "version": 1,
+            "id": artworkId, "width": 96, "height": 96,
+            "index": index, "chunks": chunks, "offset": offset,
+            "totalBytes": artworkBytes.count, "crc32": crc32(artworkBytes),
+            "data": artworkBytes.subdata(in: offset..<end).base64EncodedString(),
+        ]
+    }
+
+    private func encodedArtwork(_ raw: Data) -> Data? {
+        guard let source = NSImage(data: raw), source.size.width > 0, source.size.height > 0 else {
+            return nil
+        }
+        let target = NSImage(size: NSSize(width: 96, height: 96))
+        target.lockFocus()
+        NSColor.black.setFill()
+        NSRect(x: 0, y: 0, width: 96, height: 96).fill()
+        let scale = max(96 / source.size.width, 96 / source.size.height)
+        let size = NSSize(width: source.size.width * scale, height: source.size.height * scale)
+        let destination = NSRect(x: (96 - size.width) / 2, y: (96 - size.height) / 2,
+                                 width: size.width, height: size.height)
+        source.draw(in: destination, from: .zero, operation: .copy, fraction: 1)
+        target.unlockFocus()
+        guard let tiff = target.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff) else { return nil }
+        for quality in [0.70, 0.60, 0.50, 0.40] {
+            if let data = bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality]),
+               !data.isEmpty, data.count <= 12_288 {
+                return data
+            }
+        }
+        return nil
+    }
+
+    private func crc32(_ data: Data) -> UInt32 {
+        var crc = UInt32.max
+        for byte in data {
+            crc ^= UInt32(byte)
+            for _ in 0..<8 {
+                crc = (crc >> 1) ^ (0xedb8_8320 & (0 &- (crc & 1)))
+            }
+        }
+        return ~crc
     }
 
     mutating func handleControl(_ message: [String: Any]) {
@@ -319,9 +416,13 @@ private struct MacNowPlayingCollector {
         let script = """
         tell application "Music"
           set playbackState to (player state as text)
-          if playbackState is "stopped" then return {playbackState, "", "", "", 0, 0}
+          if playbackState is "stopped" then return {playbackState, "", "", "", 0, 0, missing value}
           set mediaTrack to current track
-          return {playbackState, (name of mediaTrack as text), (artist of mediaTrack as text), (album of mediaTrack as text), (player position as real), (duration of mediaTrack as real)}
+          set coverData to missing value
+          try
+            set coverData to raw data of artwork 1 of mediaTrack
+          end try
+          return {playbackState, (name of mediaTrack as text), (artist of mediaTrack as text), (album of mediaTrack as text), (player position as real), (duration of mediaTrack as real), coverData}
         end tell
         """
         return decode(runAppleScript(script), application: "Music", bundleIdentifier: "com.apple.Music",
@@ -359,7 +460,8 @@ private struct MacNowPlayingCollector {
             application: application,
             positionMs: Int(min(Double(UInt32.max), position * 1000)),
             durationMs: Int(min(Double(UInt32.max), durationIsMilliseconds ? rawDuration : rawDuration * 1000)),
-            bundleIdentifier: bundleIdentifier)
+            bundleIdentifier: bundleIdentifier,
+            artworkData: descriptor.numberOfItems >= 7 ? descriptor.atIndex(7)?.data : nil)
     }
 
     private func bounded(_ value: String?, maximum: Int) -> String {

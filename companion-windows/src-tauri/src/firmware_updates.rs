@@ -207,25 +207,25 @@ mod tests {
             draft: false,
             prerelease: false,
             assets: vec![GitHubAsset {
-                name: "echodesk-os-freenove-fnk0114a-2p4-v2.32.0.bin".into(),
+                name: "echodesk-os-freenove-fnk0114a-2p4-v2.33.0.bin".into(),
                 browser_download_url: image_url.into(),
             }],
         }
     }
 
     fn manifest(url: &str) -> Vec<u8> {
-        format!(r#"{{"schemaVersion":1,"generatedAt":"2026-11-01T00:00:00Z","releases":[{{"firmwareVersion":"2.32.0","hardwareModel":"EchoDesk Mini","hardwareId":"freenove-fnk0114a-2p4","supportedChip":"esp32","imageType":"merged","flashAddress":0,"flashMode":"dio","flashFrequency":"40m","flashSize":"4MB","imageFile":"echodesk-mini/2.32.0/echodesk-os.bin","downloadUrl":"{url}","sha256":"{}","size":1516400,"releaseNotes":"Test","minimumDesktopVersion":"0.2.8"}}]}}"#, "A".repeat(64)).into_bytes()
+        format!(r#"{{"schemaVersion":1,"generatedAt":"2026-11-01T00:00:00Z","releases":[{{"firmwareVersion":"2.33.0","hardwareModel":"EchoDesk Mini","hardwareId":"freenove-fnk0114a-2p4","supportedChip":"esp32","imageType":"merged","flashAddress":0,"flashMode":"dio","flashFrequency":"40m","flashSize":"4MB","imageFile":"echodesk-mini/2.33.0/echodesk-os.bin","downloadUrl":"{url}","sha256":"{}","size":1516400,"releaseNotes":"Test","minimumDesktopVersion":"0.2.9"}}]}}"#, "A".repeat(64)).into_bytes()
     }
 
     #[test]
     fn stable_tags_are_strict() {
-        assert_eq!(parse_stable_version("fw-v2.32.0"), Some("2.32.0"));
+        assert_eq!(parse_stable_version("fw-v2.33.0"), Some("2.33.0"));
         for tag in [
-            "v2.32.0",
-            "fw-beta-v2.32.0",
+            "v2.33.0",
+            "fw-beta-v2.33.0",
             "fw-v2.032.0",
             "fw-v2.32",
-            "fw-v2.32.0-rc.1",
+            "fw-v2.33.0-rc.1",
         ] {
             assert_eq!(parse_stable_version(tag), None, "{tag}");
         }
@@ -233,8 +233,8 @@ mod tests {
 
     #[test]
     fn manifest_is_bound_to_tag_hardware_and_asset() {
-        let tag = "fw-v2.32.0";
-        let image_name = "echodesk-os-freenove-fnk0114a-2p4-v2.32.0.bin";
+        let tag = "fw-v2.33.0";
+        let image_name = "echodesk-os-freenove-fnk0114a-2p4-v2.33.0.bin";
         let url = expected_asset_url(tag, image_name);
         let release = release(tag, &url);
         let candidate = bind_manifest(
@@ -244,7 +244,7 @@ mod tests {
             "freenove-fnk0114a-2p4",
         )
         .unwrap();
-        assert_eq!(candidate.firmware_version, "2.32.0");
+        assert_eq!(candidate.firmware_version, "2.33.0");
 
         let wrong_origin = manifest("https://example.com/firmware.bin");
         assert_eq!(

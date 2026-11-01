@@ -32,7 +32,7 @@ import Darwin
 // ============================================================
 
 #if ECHODESK_DESKTOP
-let kAppVersion = "0.2.8"
+let kAppVersion = "0.2.9"
 let kProductName = "EchoDesk Desktop"
 let kProductRepository = "andomatthew1234/EchoDesk"
 let kProductBundleIdentifier = "com.echodesk.desktop"
@@ -169,7 +169,7 @@ let kFirmwareCheckInterval: TimeInterval = 6 * 3600
 let kFirmwareUpdateBannerID = "firmware-update"
 let kFlashBaudRate = 460800
 #if ECHODESK_DESKTOP
-let kAppAssetName = "EchoDesk-Desktop-v0.2.8-macos-universal.zip"
+let kAppAssetName = "EchoDesk-Desktop-v0.2.9-macos-universal.zip"
 #else
 let kAppAssetName = "AIMonitor.zip"
 #endif
@@ -2151,6 +2151,7 @@ class SerialPortManager {
     var deviceEchoDeskClockProtocol: Int?
     var deviceEchoDeskNotificationProtocol: Int?
     var deviceEchoDeskPcDashboardProtocol: Int?
+    var deviceEchoDeskBedsideProtocol: Int?
     /// Vom Geraet ausgelesener Display-Controller (`panel`, ab FW 2.23.0).
     /// Anders als `display` beschreibt er die Hardware, nicht die Firmware.
     var devicePanel: String?
@@ -2390,6 +2391,7 @@ class SerialPortManager {
                     self.deviceEchoDeskClockProtocol = json["echoDeskClockProtocol"] as? Int
                     self.deviceEchoDeskNotificationProtocol = json["echoDeskNotificationProtocol"] as? Int
                     self.deviceEchoDeskPcDashboardProtocol = json["echoDeskPcDashboardProtocol"] as? Int
+                    self.deviceEchoDeskBedsideProtocol = json["echoDeskBedsideProtocol"] as? Int
                     self.devicePanel = Self.reportedPanel(in: json)
                     Settings.shared.installedFirmwareVersion = "v\(version)"
                     NSLog("[Serial] ESP32 firmware: v%@ (state=connected)", version)
@@ -2483,6 +2485,7 @@ class SerialPortManager {
                 self.deviceEchoDeskClockProtocol = json["echoDeskClockProtocol"] as? Int
                 self.deviceEchoDeskNotificationProtocol = json["echoDeskNotificationProtocol"] as? Int
                 self.deviceEchoDeskPcDashboardProtocol = json["echoDeskPcDashboardProtocol"] as? Int
+                self.deviceEchoDeskBedsideProtocol = json["echoDeskBedsideProtocol"] as? Int
                 self.devicePanel = Self.reportedPanel(in: json)
                 Settings.shared.installedFirmwareVersion = "v\(version)"
                 let reportedMAC = (json["mac"] as? String)?
@@ -2547,6 +2550,7 @@ class SerialPortManager {
         deviceEchoDeskClockProtocol = nil
         deviceEchoDeskNotificationProtocol = nil
         deviceEchoDeskPcDashboardProtocol = nil
+        deviceEchoDeskBedsideProtocol = nil
         devicePanel = nil
         lastDisconnectAt = Date()
         connectionGeneration &+= 1
@@ -3396,7 +3400,7 @@ class UsageMonitor {
         guard serialPort.isReadyForCommands else { return }
         switch kind {
         case "performance": guard (serialPort.devicePerformanceProtocol ?? 0) >= 1 else { return }
-        case "music": guard (serialPort.deviceMusicProtocol ?? 0) >= 1 else { return }
+        case "music", "music_art": guard (serialPort.deviceMusicProtocol ?? 0) >= 1 else { return }
         case "pc_dashboard_sample": guard (serialPort.deviceEchoDeskPcDashboardProtocol ?? 0) >= 1 else { return }
         default: return
         }
@@ -3404,8 +3408,9 @@ class UsageMonitor {
         let frameId = allocateFrameId()
         var envelope = payload
         envelope["frameId"] = frameId
+        let payloadLimit = kind == "music" ? 1536 : (kind == "music_art" ? 4095 : 1024)
         guard let bytes = try? JSONSerialization.data(withJSONObject: envelope),
-              bytes.count < (kind == "music" ? 1536 : 1024),
+              bytes.count < payloadLimit,
               bytes.count <= (serialPort.deviceMaxFrameBytes ?? 4095),
               let json = String(data: bytes, encoding: .utf8) else {
             NSLog("[Telemetry] Rejected oversized or invalid %@ frame", kind)

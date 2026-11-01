@@ -55,6 +55,13 @@ struct PcDashboardConfig {
     PcDashboardMetric metrics[PC_DASHBOARD_MAX_WIDGETS];
 };
 
+struct PcDashboardTileGeometry {
+    int16_t x;
+    int16_t y;
+    int16_t width;
+    int16_t height;
+};
+
 struct PcDashboardHostSample {
     uint32_t timestamp_epoch;
     uint32_t received_ms;
@@ -83,6 +90,8 @@ bool pc_dashboard_validate_config(const PcDashboardConfig &config,
 bool pc_dashboard_metric_from_name(const char *name, PcDashboardMetric &metric);
 const char *pc_dashboard_metric_name(PcDashboardMetric metric);
 const char *pc_dashboard_result_message(PcDashboardResult result);
+PcDashboardTileGeometry pc_dashboard_tile_geometry(uint8_t count,
+                                                   uint8_t index);
 
 void pc_dashboard_init(const PcDashboardConfig &config);
 const PcDashboardConfig &pc_dashboard_get_config();

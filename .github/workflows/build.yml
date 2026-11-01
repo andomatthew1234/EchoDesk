@@ -140,7 +140,7 @@ jobs:
           SIGNATURE="release-assets/firmware-update-manifest.json.sig"
           python3 scripts/create_firmware_release_manifest.py \
             --image "$IMAGE" --tag "$GITHUB_REF_NAME" --output "$MANIFEST" \
-            --minimum-desktop-version 0.2.8
+            --minimum-desktop-version 0.2.9
           openssl pkeyutl -sign -rawin -inkey "$KEY" -in "$MANIFEST" -out "$SIGNATURE"
           python3 scripts/test_firmware_release_contract.py \
             --image "$IMAGE" --manifest "$MANIFEST" --signature "$SIGNATURE" \

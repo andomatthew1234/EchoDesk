@@ -66,6 +66,7 @@ public partial class MainWindow : Window
         }
         else
         {
+            clockWindow.ShowOnlyRequestedMode(requestedMode);
             clockWindow.Show();
         }
         if (clockWindow.WindowState == WindowState.Minimized) clockWindow.WindowState = WindowState.Normal;

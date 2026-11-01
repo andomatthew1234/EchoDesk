@@ -13,6 +13,7 @@ namespace {
 
 constexpr uint32_t REFRESH_INTERVAL_MS = 350;
 constexpr uint32_t NAVIGATION_GUARD_MS = 250;
+constexpr uint8_t NOTIFICATIONS_PER_PAGE = 2;
 
 enum class NotificationView : uint8_t {
     LIST,
@@ -29,6 +30,7 @@ uint32_t selected_id = 0;
 uint32_t known_revision = 0;
 uint32_t last_refresh_ms = 0;
 uint32_t last_navigation_ms = 0;
+uint8_t notification_page = 0;
 
 lv_color_t background_color() {
     return g_config.theme == THEME_LIGHT ? lv_color_hex(0xFFFFFF)
@@ -104,6 +106,16 @@ void invoke_home(lv_event_t *event) {
 void on_clear(lv_event_t *event) {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED || !navigation_allowed()) return;
     echodesk_notifications_clear();
+    notification_page = 0;
+    render();
+}
+
+void on_page(lv_event_t *event) {
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !navigation_allowed()) return;
+    const intptr_t direction =
+        reinterpret_cast<intptr_t>(lv_event_get_user_data(event));
+    if (direction < 0 && notification_page > 0) --notification_page;
+    else if (direction > 0) ++notification_page;
     render();
 }
 
@@ -178,27 +190,17 @@ void create_header() {
     lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, LV_PART_MAIN);
 }
 
-void prepare_content(bool scrollable) {
+void prepare_content() {
     if (content) lv_obj_delete(content);
     content = lv_obj_create(screen);
     lv_obj_remove_style_all(content);
     lv_obj_set_size(content, 320, 200);
     lv_obj_set_pos(content, 0, 40);
-    if (scrollable) {
-        lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_scroll_dir(content, LV_DIR_VER);
-        lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
-        lv_obj_set_style_width(content, 3, LV_PART_SCROLLBAR);
-        lv_obj_set_style_bg_color(content, divider_color(), LV_PART_SCROLLBAR);
-        lv_obj_set_style_bg_opa(content, LV_OPA_70, LV_PART_SCROLLBAR);
-        lv_obj_set_style_radius(content, 2, LV_PART_SCROLLBAR);
-    } else {
-        lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
-    }
+    lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
 }
 
 void render_not_set_up() {
-    prepare_content(false);
+    prepare_content();
     lv_obj_add_flag(header_action, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *badge = lv_obj_create(content);
@@ -228,7 +230,7 @@ void render_not_set_up() {
 }
 
 void render_empty() {
-    prepare_content(false);
+    prepare_content();
     lv_obj_add_flag(header_action, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *icon = make_label(content, LV_SYMBOL_OK, &lv_font_montserrat_36,
                                 foreground_color());
@@ -246,11 +248,20 @@ void render_empty() {
 }
 
 void render_list(const EchoDeskNotificationSnapshot &snapshot) {
-    prepare_content(true);
+    prepare_content();
     lv_obj_clear_flag(header_action, LV_OBJ_FLAG_HIDDEN);
-    for (uint8_t i = 0; i < snapshot.count; ++i) {
+    const uint8_t page_count = static_cast<uint8_t>(
+        (snapshot.count + NOTIFICATIONS_PER_PAGE - 1) / NOTIFICATIONS_PER_PAGE);
+    if (notification_page >= page_count) {
+        notification_page = page_count == 0 ? 0 : page_count - 1;
+    }
+    const uint8_t start = notification_page * NOTIFICATIONS_PER_PAGE;
+    const uint8_t end = static_cast<uint8_t>(
+        start + NOTIFICATIONS_PER_PAGE < snapshot.count
+            ? start + NOTIFICATIONS_PER_PAGE : snapshot.count);
+    for (uint8_t i = start; i < end; ++i) {
         const EchoDeskNotificationItem &item = snapshot.items[i];
-        const int16_t y = static_cast<int16_t>(6 + i * 73);
+        const int16_t y = static_cast<int16_t>(4 + (i - start) * 70);
         lv_obj_t *card = lv_button_create(content);
         style_button(card, 10);
         lv_obj_set_size(card, 304, 65);
@@ -286,10 +297,37 @@ void render_list(const EchoDeskNotificationSnapshot &snapshot) {
         lv_label_set_long_mode(body, LV_LABEL_LONG_DOT);
         lv_obj_set_pos(body, 11, 45);
     }
-    lv_obj_t *end_marker = lv_obj_create(content);
-    lv_obj_remove_style_all(end_marker);
-    lv_obj_set_size(end_marker, 1, 1);
-    lv_obj_set_pos(end_marker, 0, static_cast<int16_t>(snapshot.count * 73 + 5));
+    lv_obj_t *previous = lv_button_create(content);
+    style_button(previous, 8);
+    lv_obj_set_size(previous, 70, 42);
+    lv_obj_set_pos(previous, 8, 148);
+    lv_obj_center(make_label(previous, "PREV", &lv_font_montserrat_12,
+                             foreground_color()));
+    if (notification_page == 0) lv_obj_add_state(previous, LV_STATE_DISABLED);
+    lv_obj_add_event_cb(previous, on_page, LV_EVENT_CLICKED,
+                        reinterpret_cast<void *>(static_cast<intptr_t>(-1)));
+
+    char page_text[24];
+    snprintf(page_text, sizeof(page_text), "%u / %u",
+             static_cast<unsigned>(notification_page + 1),
+             static_cast<unsigned>(page_count));
+    lv_obj_t *page = make_label(content, page_text, &lv_font_montserrat_12,
+                                muted_color());
+    lv_obj_set_width(page, 144);
+    lv_obj_set_style_text_align(page, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_pos(page, 88, 161);
+
+    lv_obj_t *next = lv_button_create(content);
+    style_button(next, 8);
+    lv_obj_set_size(next, 70, 42);
+    lv_obj_set_pos(next, 242, 148);
+    lv_obj_center(make_label(next, "NEXT", &lv_font_montserrat_12,
+                             foreground_color()));
+    if (notification_page + 1 >= page_count) {
+        lv_obj_add_state(next, LV_STATE_DISABLED);
+    }
+    lv_obj_add_event_cb(next, on_page, LV_EVENT_CLICKED,
+                        reinterpret_cast<void *>(static_cast<intptr_t>(1)));
 }
 
 const EchoDeskNotificationItem *find_selected(
@@ -309,7 +347,7 @@ void render_detail(const EchoDeskNotificationSnapshot &snapshot) {
         else render_list(snapshot);
         return;
     }
-    prepare_content(true);
+    prepare_content();
     lv_obj_add_flag(header_action, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *back_label = lv_obj_get_child(lv_obj_get_child(screen, 0), 0);
@@ -328,7 +366,8 @@ void render_detail(const EchoDeskNotificationSnapshot &snapshot) {
     lv_obj_t *title = make_label(content, item->title, &lv_font_montserrat_20,
                                  foreground_color());
     lv_obj_set_width(title, 294);
-    lv_label_set_long_mode(title, LV_LABEL_LONG_WRAP);
+    lv_obj_set_height(title, 48);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
     lv_obj_set_pos(title, 13, 36);
     lv_obj_update_layout(title);
 
@@ -336,7 +375,8 @@ void render_detail(const EchoDeskNotificationSnapshot &snapshot) {
                                 item->body[0] ? item->body : "No message preview.",
                                 &lv_font_montserrat_14, foreground_color());
     lv_obj_set_width(body, 294);
-    lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
+    lv_obj_set_height(body, 52);
+    lv_label_set_long_mode(body, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_line_space(body, 4, LV_PART_MAIN);
     const int32_t body_y = lv_obj_get_y(title) + lv_obj_get_height(title) + 12;
     lv_obj_set_pos(body, 13, body_y);
@@ -345,8 +385,7 @@ void render_detail(const EchoDeskNotificationSnapshot &snapshot) {
     lv_obj_t *dismiss = lv_button_create(content);
     style_button(dismiss, 9);
     lv_obj_set_size(dismiss, 294, 40);
-    int32_t dismiss_y = lv_obj_get_y(body) + lv_obj_get_height(body) + 18;
-    if (dismiss_y < 151) dismiss_y = 151;
+    const int32_t dismiss_y = 160;
     lv_obj_set_pos(dismiss, 13, dismiss_y);
     lv_obj_t *dismiss_label = make_label(dismiss, "DISMISS",
                                          &lv_font_montserrat_14,
@@ -354,10 +393,6 @@ void render_detail(const EchoDeskNotificationSnapshot &snapshot) {
     lv_obj_center(dismiss_label);
     lv_obj_add_event_cb(dismiss, on_dismiss, LV_EVENT_CLICKED, nullptr);
 
-    lv_obj_t *end_marker = lv_obj_create(content);
-    lv_obj_remove_style_all(end_marker);
-    lv_obj_set_size(end_marker, 1, 1);
-    lv_obj_set_pos(end_marker, 0, dismiss_y + 48);
 }
 
 void render() {

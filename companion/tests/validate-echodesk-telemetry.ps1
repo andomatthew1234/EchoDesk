@@ -39,7 +39,11 @@ foreach ($needle in @(
     'host_statistics64', 'HOST_CPU_LOAD_INFO', 'getifaddrs',
     'type": "performance', 'type": "music',
     'com.apple.Music', 'com.spotify.client', 'NSAppleScript',
-    'canPlayPause', 'ramUsedBytes', 'downBps'
+    'canPlayPause', 'ramUsedBytes', 'downBps',
+    'type": "music_art"', 'raw data of artwork 1 of mediaTrack',
+    'nextArtworkFrame()', 'base64EncodedString()', 'crc32(artworkBytes)',
+    'artworkSignature != current.signature', 'artworkCompletedAt',
+    'Date().timeIntervalSince(completed) >= 30'
 )) {
     Assert-Contains $telemetry $needle "macOS telemetry producer is missing '$needle'."
 }
@@ -54,5 +58,7 @@ foreach ($needle in @(
 }
 Assert-Contains $build 'MAIN_ENTITLEMENT_ARGS=(--entitlements "$ECHODESK_ENTITLEMENTS")' 'The EchoDesk signing path does not apply the Automation entitlement.'
 Assert-Contains $main '#if ECHODESK_DESKTOP' 'EchoDesk-only telemetry is not compile-time isolated from AI Monitor.'
+Assert-Contains $main 'case "music", "music_art"' 'macOS artwork chunks are not capability-gated with music telemetry.'
+Assert-Contains $main 'kind == "music_art" ? 4095' 'macOS artwork chunks are still rejected by the small telemetry frame limit.'
 
 Write-Host 'EchoDesk macOS telemetry validation passed.'

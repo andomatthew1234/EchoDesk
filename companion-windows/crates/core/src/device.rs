@@ -358,6 +358,7 @@ mod tests {
             echo_desk_clock_protocol: None,
             echo_desk_notification_protocol: None,
             echo_desk_pc_dashboard_protocol: None,
+            echo_desk_bedside_protocol: None,
             wifi_configured: None,
             wifi_connected: None,
             time_synced: None,

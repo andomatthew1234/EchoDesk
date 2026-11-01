@@ -19,7 +19,7 @@ def main() -> None:
     parser.add_argument("--image", required=True, type=pathlib.Path)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--output", required=True, type=pathlib.Path)
-    parser.add_argument("--minimum-desktop-version", default="0.2.8")
+    parser.add_argument("--minimum-desktop-version", default="0.2.9")
     parser.add_argument("--release-notes")
     args = parser.parse_args()
 

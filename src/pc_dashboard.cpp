@@ -116,6 +116,23 @@ const char *pc_dashboard_result_message(PcDashboardResult result) {
     return "invalid PC Dashboard request";
 }
 
+PcDashboardTileGeometry pc_dashboard_tile_geometry(uint8_t count,
+                                                   uint8_t index) {
+    // Geometry is relative to the 320x200 content area below the header.
+    // Three metrics deliberately use the full available width: the final
+    // metric spans the lower row instead of leaving a blank fourth quadrant.
+    if (count <= 1) return {8, 7, 304, 184};
+    if (count == 2) return {
+        static_cast<int16_t>(index == 0 ? 8 : 164), 7, 148, 184};
+    if (count == 3) {
+        if (index < 2) return {
+            static_cast<int16_t>(index == 0 ? 8 : 164), 7, 148, 88};
+        return {8, 101, 304, 88};
+    }
+    return {static_cast<int16_t>((index % 2) == 0 ? 8 : 164),
+            static_cast<int16_t>(index < 2 ? 7 : 101), 148, 88};
+}
+
 void pc_dashboard_init(const PcDashboardConfig &config) {
     dashboard_config = pc_dashboard_validate_config(config)
         ? config : pc_dashboard_default_config();

@@ -408,4 +408,24 @@ mod tests {
             true
         );
     }
+
+    #[test]
+    fn notification_setup_survives_an_application_restart() {
+        let mut settings = Settings::default();
+        settings.notification_stack_enabled = true;
+        settings.notification_stack_exclusions = vec!["Calendar".into(), "Mail".into()];
+        let bytes = settings.to_disk_bytes().unwrap();
+        let restored = Settings::from_disk(&bytes).unwrap();
+        assert!(restored.notification_stack_enabled);
+        assert_eq!(
+            restored.notification_stack_exclusions,
+            vec!["Calendar".to_string(), "Mail".to_string()]
+        );
+        let json: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["notificationStackEnabled"], true);
+        assert_eq!(
+            json["notificationStackExclusions"],
+            json!(["Calendar", "Mail"])
+        );
+    }
 }

@@ -346,7 +346,9 @@ impl Link {
                 event @ (DeviceMessage::EchoDeskState(_)
                 | DeviceMessage::EchoDeskClockState(_)
                 | DeviceMessage::EchoDeskClockConfigRequest { .. }
-                | DeviceMessage::EchoDeskNotificationsState(_)) => {
+                | DeviceMessage::EchoDeskNotificationsState(_)
+                | DeviceMessage::EchoDeskPcDashboardState(_)
+                | DeviceMessage::EchoDeskBedsideState(_)) => {
                     if self.echo_desk_events.len() >= 8 {
                         self.echo_desk_events.remove(0);
                     }

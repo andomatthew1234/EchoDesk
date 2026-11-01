@@ -52,6 +52,7 @@ const char *echodesk_app_name(uint8_t app) {
         case ECHODESK_APP_NOW_PLAYING: return "nowPlaying";
         case ECHODESK_APP_SETTINGS: return "settings";
         case ECHODESK_APP_MY_DEVICE: return "myDevice";
+        case ECHODESK_APP_BEDSIDE: return "bedside";
         default: return "home";
     }
 }
@@ -98,6 +99,7 @@ bool echodesk_parse_app(const char *name, uint8_t &app) {
     else if (strcmp(name, "nowPlaying") == 0) app = ECHODESK_APP_NOW_PLAYING;
     else if (strcmp(name, "settings") == 0) app = ECHODESK_APP_SETTINGS;
     else if (strcmp(name, "myDevice") == 0) app = ECHODESK_APP_MY_DEVICE;
+    else if (strcmp(name, "bedside") == 0) app = ECHODESK_APP_BEDSIDE;
     else return false;
     return true;
 }
@@ -181,7 +183,7 @@ EchoDeskControlApplyResult echodesk_apply_settings_patch(
          patch.values.now_playing_layout >= NOW_PLAYING_LAYOUT_COUNT) ||
         (patch.has_now_playing_background &&
          patch.values.now_playing_background >= NOW_PLAYING_BACKGROUND_COUNT) ||
-        (patch.has_default_app && patch.values.default_app > ECHODESK_APP_MY_DEVICE) ||
+        (patch.has_default_app && patch.values.default_app > ECHODESK_APP_BEDSIDE) ||
         (patch.has_clock_format && patch.values.clock_format > CLOCK_FORMAT_24_HOUR) ||
         (patch.has_timezone && patch.values.timezone > ECHODESK_TIMEZONE_UTC) ||
         (patch.has_codex_percentage_mode &&

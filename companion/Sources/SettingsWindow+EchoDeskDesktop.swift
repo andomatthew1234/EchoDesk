@@ -5,7 +5,7 @@ import UserNotifications
 private let echoDeskFirstRunOnboardingKey = "EchoDeskFirstRunOnboardingCompletedV1"
 
 enum EchoDeskDesktopPage: Int, CaseIterable {
-    case overview, deviceControl, customisation, setup, recovery
+    case overview, deviceControl, customisation, bedside, setup, recovery
 }
 
 enum EchoDeskSetupStep: Int {
@@ -195,11 +195,14 @@ extension SettingsWindowController {
     }
 
     private func buildEchoDeskSidebar(in sidebar: NSView) {
-        let mark = NSTextField(labelWithString: "⌗")
-        mark.font = .systemFont(ofSize: 28, weight: .bold)
-        mark.alignment = .center
+        let mark = NSImageView()
+        mark.image = NSImage(systemSymbolName: "display", accessibilityDescription: "EchoDesk")
+        mark.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
+        mark.contentTintColor = .controlAccentColor
+        mark.imageScaling = .scaleProportionallyDown
         mark.translatesAutoresizingMaskIntoConstraints = false
-        mark.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        mark.widthAnchor.constraint(equalToConstant: 34).isActive = true
+        mark.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
         let brand = NSTextField(labelWithString: "EchoDesk")
         brand.font = .systemFont(ofSize: 18, weight: .semibold)
@@ -216,11 +219,11 @@ extension SettingsWindowController {
         brandRow.spacing = 9
 
         let items: [(EchoDeskDesktopPage, String, String)] = [
-            (.overview, "Overview", "house"),
+            (.overview, "Overview", "house.fill"),
             (.deviceControl, "Device Control", "switch.2"),
-            (.customisation, "Customisation", "gearshape"),
-            (.setup, "Setup new device", "plus.circle"),
-            (.recovery, "Device recovery & updates", "heart.text.square"),
+            (.customisation, "Customisation", "paintbrush.fill"),
+            (.setup, "Setup new device", "display.badge.plus"),
+            (.recovery, "Device recovery & updates", "heart.text.square.fill"),
         ]
         echoDeskSidebarButtons = items.map { item in
             let (page, title, symbol) = item
@@ -228,13 +231,15 @@ extension SettingsWindowController {
             button.tag = page.rawValue
             button.bezelStyle = .recessed
             button.isBordered = false
-            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 16, weight: .medium))
             button.imagePosition = .imageLeading
+            button.imageScaling = .scaleProportionallyDown
             button.alignment = .left
-            button.font = .systemFont(ofSize: 13, weight: .medium)
+            button.font = .systemFont(ofSize: 13, weight: .semibold)
             button.contentTintColor = .labelColor
             button.translatesAutoresizingMaskIntoConstraints = false
-            button.heightAnchor.constraint(equalToConstant: 42).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 40).isActive = true
             button.setAccessibilityLabel(title)
             return button
         }
@@ -288,6 +293,7 @@ extension SettingsWindowController {
             buildEchoDeskOverviewPage(),
             buildEchoDeskDeviceControlPage(),
             buildEchoDeskCustomisationPage(),
+            buildEchoDeskBedsidePage(),
             buildEchoDeskSetupPage(),
             buildEchoDeskRecoveryPage(),
         ]
@@ -357,12 +363,14 @@ extension SettingsWindowController {
         echoDeskSelectedPage = page
         for (index, view) in echoDeskPageViews.enumerated() { view.isHidden = index != page.rawValue }
         for button in echoDeskSidebarButtons {
-            let selected = button.tag == page.rawValue
+            let selectedPage = page == .bedside ? EchoDeskDesktopPage.customisation.rawValue : page.rawValue
+            let selected = button.tag == selectedPage
             button.state = selected ? .on : .off
             button.contentTintColor = selected ? .controlAccentColor : .labelColor
         }
         if page == .setup { refreshEchoDeskSetupDevices() }
         if page == .recovery { refreshEchoDeskRecoveryDevices() }
+        if page == .bedside { requestEchoDeskBedsideState() }
     }
 
     // MARK: Pages
@@ -419,8 +427,10 @@ extension SettingsWindowController {
         let notificationHeading = NSStackView(views: [notificationTitle, echoDeskNotificationStatus])
         notificationHeading.orientation = .horizontal; notificationHeading.spacing = 12
         echoDeskNotificationDetail = echoDeskMuted("macOS only exposes notifications delivered by EchoDesk Desktop itself. Other apps remain private.")
-        echoDeskNotificationExclusions = NSTextField(string: UserDefaults.standard.string(forKey: "EchoDeskNotificationExclusions") ?? "")
-        echoDeskNotificationExclusions.placeholderString = "Excluded apps (comma-separated; everything included by default)"
+        let savedNotificationExclusions = UserDefaults.standard.string(forKey: "EchoDeskNotificationExclusions") ?? ""
+        echoDeskNotificationExclusions = echoDeskMuted(savedNotificationExclusions.isEmpty
+            ? "Delivery: All EchoDesk Desktop notifications"
+            : "Silenced sources: \(savedNotificationExclusions)")
         let notificationButtons = NSStackView(views: [
             echoDeskPrimaryButton("Set up notifications", #selector(echoDeskSetupNotifications)),
             NSButton(title: "Send test", target: self, action: #selector(echoDeskTestNotification)),
@@ -453,6 +463,18 @@ extension SettingsWindowController {
     private func buildEchoDeskCustomisationPage() -> NSView {
         let header = echoDeskPageHeader("Customisation",
             "Every enabled control writes to the physical EchoDesk and waits for confirmation.")
+        let bedsideIcon = NSImageView()
+        bedsideIcon.image = NSImage(systemSymbolName: "bed.double.fill", accessibilityDescription: nil)
+        bedsideIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 28, weight: .medium)
+        bedsideIcon.contentTintColor = .controlAccentColor
+        let bedsideText = echoDeskPageStack([
+            echoDeskSectionTitle("Bedside Mode"),
+            echoDeskMuted("A completely separate, power-only clock experience with alarms, widgets and its own display schedules."),
+        ], spacing: 5)
+        let bedsideButton = echoDeskPrimaryButton("Customise Bedside Mode…", #selector(echoDeskOpenBedsideCustomisation))
+        let bedsideRow = NSStackView(views: [bedsideIcon, bedsideText, NSView(), bedsideButton])
+        bedsideRow.orientation = .horizontal; bedsideRow.alignment = .centerY; bedsideRow.spacing = 14
+        let bedside = echoDeskCard(bedsideRow)
         echoDeskQuickTheme = NSSegmentedControl(labels: ["Light", "Dark"], trackingMode: .selectOne,
                                                  target: self, action: #selector(echoDeskQuickThemeChanged))
         echoDeskQuickTheme.selectedSegment = Settings.shared.themeMode == "light" ? 0 : 1
@@ -476,7 +498,8 @@ extension SettingsWindowController {
             echoDeskLabeledControl("Default app on startup", echoDeskSettingPopup("defaultApp", [
                 ("Home", "home"), ("Codex Usage", "codex"), ("Clock", "clock"),
                 ("Performance", "performance"), ("Now Playing", "nowPlaying"),
-                ("My device", "myDevice"), ("Notification Stack", "notificationStack"), ("PC Dashboard", "pcDashboard"), ("Settings", "settings"),
+                ("My device", "myDevice"), ("Notification Stack", "notificationStack"),
+                ("PC Dashboard", "pcDashboard"), ("Bedside Mode", "bedside"), ("Settings", "settings"),
             ])),
         ]))
         let nowPlaying = echoDeskCard(echoDeskPageStack([
@@ -548,11 +571,14 @@ extension SettingsWindowController {
         let desktop = echoDeskCard(echoDeskPageStack([
             echoDeskSectionTitle("Desktop app"), echoDeskLabeledControl("Desktop appearance", desktopAppearance),
         ]))
-        return echoDeskPageStack([header, quick, general, nowPlaying, clock, codex, performance, dashboard, desktop])
+        return echoDeskPageStack([header, bedside, quick, general, nowPlaying, clock, codex, performance, dashboard, desktop])
     }
 
-    private func requestEchoDeskPcDashboardState() {
-        guard let monitor, (monitor.serialPort.deviceEchoDeskPcDashboardProtocol ?? 0) >= 1 else { return }
+    private func requestEchoDeskPcDashboardState(completion: ((Bool) -> Void)? = nil) {
+        guard let monitor, (monitor.serialPort.deviceEchoDeskPcDashboardProtocol ?? 0) >= 1 else {
+            completion?(false)
+            return
+        }
         let request = nextEchoDeskRequest()
         monitor.serialPort.performJSONCommand([
             "cmd": "echodesk_pc_dashboard_get_state", "version": 1, "requestId": request,
@@ -564,21 +590,39 @@ extension SettingsWindowController {
                   Set(metrics).count == metrics.count,
                   Set(metrics).isSubset(of: Set(["battery", "microphone", "storage", "ram", "cpu", "gpu",
                                                   "networkDown", "networkUp", "cpuTemperature", "gpuTemperature",
-                                                  "motherboardTemperature"])) else { return }
+                                                  "motherboardTemperature"])) else {
+                completion?(false)
+                return
+            }
             self.echoDeskPcDashboardRevision = revision
             for (index, popup) in self.echoDeskPcDashboardPopups.enumerated() {
                 let value = index < metrics.count ? metrics[index] : ""
                 if let item = popup.itemArray.first(where: { ($0.representedObject as? String) == value }) { popup.select(item) }
             }
+            completion?(true)
         }
     }
 
     @objc private func echoDeskApplyPcDashboard() {
         let metrics = echoDeskPcDashboardPopups.compactMap { $0.selectedItem?.representedObject as? String }
             .filter { !$0.isEmpty }
-        guard metrics.count >= 1, metrics.count <= 4, Set(metrics).count == metrics.count, let monitor else {
+        guard metrics.count >= 1, metrics.count <= 4, Set(metrics).count == metrics.count else {
             NSSound.beep(); return
         }
+        echoDeskFooterStatus?.stringValue = "Checking the current PC Dashboard…"
+        requestEchoDeskPcDashboardState { [weak self] ready in
+            guard let self else { return }
+            guard ready else {
+                NSSound.beep()
+                self.echoDeskFooterStatus?.stringValue = "EchoDesk did not return its current Dashboard settings. Try again."
+                return
+            }
+            self.sendEchoDeskPcDashboardConfig(metrics)
+        }
+    }
+
+    private func sendEchoDeskPcDashboardConfig(_ metrics: [String]) {
+        guard let monitor else { return }
         let request = nextEchoDeskRequest()
         monitor.serialPort.performJSONCommand([
             "cmd": "echodesk_pc_dashboard_set_config", "version": 1, "requestId": request,
@@ -590,6 +634,7 @@ extension SettingsWindowController {
                 NSSound.beep(); return
             }
             UserDefaults.standard.set(metrics, forKey: "EchoDeskPcDashboardMetrics")
+            self?.echoDeskFooterStatus?.stringValue = "PC Dashboard updated."
             self?.requestEchoDeskPcDashboardState()
         }
     }
@@ -815,6 +860,8 @@ extension SettingsWindowController {
             echoDeskLastStateRequest = .distantPast
             echoDeskObservedConnectionPort = observedPort
             echoDeskObservedConnectionMAC = observedMAC
+            echoDeskNotificationSyncedPort = nil
+            echoDeskBedsideStatePort = nil
         }
         echoDeskConnectionDot?.state = ready ? .ok : (serial.state == .probing ? .pending : .attention)
         echoDeskSidebarConnectionDot?.state = ready ? .ok : (serial.state == .probing ? .pending : .attention)
@@ -858,6 +905,7 @@ extension SettingsWindowController {
         echoDeskNotificationDetail?.stringValue = !notificationSupported
             ? "Update EchoDesk OS to use Notification Stack."
             : "macOS has no public API for reading other apps’ Notification Centre history. EchoDesk Desktop can safely relay its own notifications and test messages."
+        if ready { syncEchoDeskNotificationPreferenceIfNeeded() }
         if echoDeskSelectedPage == .setup {
             if echoDeskSetupStep == .usbDevice { refreshEchoDeskSetupDevices() }
             continueEchoDeskSetupAfterReconnect(profile: profile)
@@ -866,6 +914,12 @@ extension SettingsWindowController {
             if !echoDeskRecoveryOperationStarted { refreshEchoDeskRecoveryDevices() }
             continueEchoDeskRecoveryAfterReconnect()
             refreshEchoDeskRecoveryProgress()
+        }
+        if echoDeskSelectedPage == .bedside, ready,
+           (serial.deviceEchoDeskBedsideProtocol ?? 0) >= 1,
+           echoDeskBedsideStatePort != serial.connectedPort,
+           !echoDeskBedsideStateRequestInFlight {
+            requestEchoDeskBedsideState()
         }
         if ready && (forceStateRequest || Date().timeIntervalSince(echoDeskLastStateRequest) > 5) {
             requestEchoDeskState()
@@ -957,24 +1011,154 @@ extension SettingsWindowController {
             echoDeskFooterStatus?.stringValue = "Update EchoDesk OS to set up Notification Stack."
             return
         }
-        let exclusions = echoDeskNotificationExclusions?.stringValue ?? ""
-        UserDefaults.standard.set(exclusions, forKey: "EchoDeskNotificationExclusions")
-        UserDefaults.standard.set(true, forKey: "EchoDeskNotificationStackEnabled")
-        sendEchoDeskCommand("echodesk_notifications_set_enabled", extra: ["enabled": true]) { [weak self] ok in
-            guard let self else { return }
-            self.echoDeskFooterStatus?.stringValue = ok
-                ? "Notification Stack is ready for EchoDesk Desktop notifications."
-                : "EchoDesk did not confirm Notification Stack setup."
-            if ok { self.relayEchoDeskOwnedNotifications() }
-            self.refreshEchoDeskDesktopState(forceStateRequest: false)
+        presentEchoDeskNotificationSetup()
+    }
+
+    private func presentEchoDeskNotificationSetup() {
+        if let setup = echoDeskNotificationSetupWindow {
+            setup.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let setup = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 390),
+                             styleMask: [.titled, .closable, .fullSizeContentView],
+                             backing: .buffered, defer: false)
+        setup.title = "Set up Notification Stack"
+        setup.titlebarAppearsTransparent = true
+        setup.isReleasedWhenClosed = false
+
+        let icon = NSImageView()
+        icon.image = NSImage(systemSymbolName: "bell.badge.fill", accessibilityDescription: nil)
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 34, weight: .medium)
+        icon.contentTintColor = .controlAccentColor
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 44).isActive = true
+
+        let title = echoDeskHero("Choose what reaches EchoDesk")
+        let detail = echoDeskMuted("Like a Focus filter, Notification Stack can allow every EchoDesk Desktop notification or silence selected sources. macOS keeps other apps’ Notification Centre history private.")
+        detail.maximumNumberOfLines = 4
+
+        let all = NSButton(radioButtonWithTitle: "Allow all EchoDesk Desktop notifications",
+                           target: self, action: #selector(echoDeskNotificationScopeChanged(_:)))
+        all.tag = 0
+        let filtered = NSButton(radioButtonWithTitle: "Silence selected sources",
+                                target: self, action: #selector(echoDeskNotificationScopeChanged(_:)))
+        filtered.tag = 1
+        let saved = UserDefaults.standard.string(forKey: "EchoDeskNotificationExclusions") ?? ""
+        all.state = saved.isEmpty ? .on : .off
+        filtered.state = saved.isEmpty ? .off : .on
+
+        let exclusions = NSTextField(string: saved)
+        exclusions.placeholderString = "Source names, separated by commas"
+        exclusions.isEnabled = !saved.isEmpty
+        echoDeskNotificationSetupExclusions = exclusions
+        echoDeskNotificationSetupAllButton = all
+        echoDeskNotificationSetupFilteredButton = filtered
+
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(echoDeskCancelNotificationSetup))
+        let done = echoDeskPrimaryButton("Done", #selector(echoDeskFinishNotificationSetup))
+        done.keyEquivalent = "\r"
+        let actions = NSStackView(views: [NSView(), cancel, done])
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = 8
+
+        let heading = NSStackView(views: [icon, echoDeskPageStack([title, detail], spacing: 5)])
+        heading.orientation = .horizontal
+        heading.alignment = .top
+        heading.spacing = 14
+        let options = echoDeskCard(echoDeskPageStack([all, filtered, exclusions], spacing: 10), padding: 16)
+        let content = echoDeskPageStack([heading, options, actions], spacing: 18)
+        content.edgeInsets = NSEdgeInsets(top: 36, left: 28, bottom: 24, right: 28)
+        setup.contentView = content
+        echoDeskNotificationSetupWindow = setup
+        if let host = window { host.beginSheet(setup) }
+        else { setup.center(); setup.makeKeyAndOrderFront(nil) }
+    }
+
+    @objc private func echoDeskNotificationScopeChanged(_ sender: NSButton) {
+        let filtered = sender.tag == 1
+        echoDeskNotificationSetupAllButton?.state = filtered ? .off : .on
+        echoDeskNotificationSetupFilteredButton?.state = filtered ? .on : .off
+        echoDeskNotificationSetupExclusions?.isEnabled = filtered
+        if !filtered { echoDeskNotificationSetupExclusions?.stringValue = "" }
+    }
+
+    @objc private func echoDeskCancelNotificationSetup() {
+        closeEchoDeskNotificationSetup()
+    }
+
+    private func closeEchoDeskNotificationSetup() {
+        guard let setup = echoDeskNotificationSetupWindow else { return }
+        if setup.sheetParent != nil { setup.sheetParent?.endSheet(setup) }
+        else { setup.orderOut(nil) }
+        echoDeskNotificationSetupWindow = nil
+        echoDeskNotificationSetupExclusions = nil
+        echoDeskNotificationSetupAllButton = nil
+        echoDeskNotificationSetupFilteredButton = nil
+    }
+
+    @objc private func echoDeskFinishNotificationSetup() {
+        let filtered = echoDeskNotificationSetupFilteredButton?.state == .on
+        let exclusions = filtered
+            ? (echoDeskNotificationSetupExclusions?.stringValue ?? "")
+            : ""
+        echoDeskNotificationSetupWindow?.ignoresMouseEvents = true
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                self?.sendEchoDeskCommand("echodesk_notifications_set_enabled", extra: ["enabled": true]) { [weak self] ok in
+                    guard let self else { return }
+                    guard ok else {
+                        self.echoDeskNotificationSetupWindow?.ignoresMouseEvents = false
+                        self.echoDeskFooterStatus?.stringValue = "EchoDesk did not confirm Notification Stack setup."
+                        return
+                    }
+                    UserDefaults.standard.set(exclusions, forKey: "EchoDeskNotificationExclusions")
+                    UserDefaults.standard.set(true, forKey: "EchoDeskNotificationStackEnabled")
+                    self.echoDeskNotificationExclusions?.stringValue = exclusions.isEmpty
+                        ? "Delivery: All EchoDesk Desktop notifications"
+                        : "Silenced sources: \(exclusions)"
+                    self.echoDeskNotificationSyncedPort = self.monitor?.serialPort.connectedPort
+                    self.echoDeskFooterStatus?.stringValue = "Notification Stack is ready and will reconnect automatically."
+                    self.closeEchoDeskNotificationSetup()
+                    self.relayEchoDeskOwnedNotifications()
+                    self.refreshEchoDeskDesktopState(forceStateRequest: false)
+                }
+            }
         }
     }
 
     @objc private func echoDeskDisableNotifications() {
-        UserDefaults.standard.set(false, forKey: "EchoDeskNotificationStackEnabled")
         sendEchoDeskCommand("echodesk_notifications_set_enabled", extra: ["enabled": false]) { [weak self] ok in
-            self?.echoDeskFooterStatus?.stringValue = ok ? "Notification Stack disabled and cleared." : "EchoDesk did not confirm the change."
-            self?.refreshEchoDeskDesktopState(forceStateRequest: false)
+            guard let self else { return }
+            if ok {
+                UserDefaults.standard.set(false, forKey: "EchoDeskNotificationStackEnabled")
+                self.echoDeskNotificationSyncedPort = nil
+                self.echoDeskFooterStatus?.stringValue = "Notification Stack disabled and cleared."
+            } else {
+                self.echoDeskFooterStatus?.stringValue = "EchoDesk did not confirm the change. Notification Stack remains enabled."
+            }
+            self.refreshEchoDeskDesktopState(forceStateRequest: false)
+        }
+    }
+
+    private func syncEchoDeskNotificationPreferenceIfNeeded() {
+        guard UserDefaults.standard.bool(forKey: "EchoDeskNotificationStackEnabled"),
+              let monitor,
+              monitor.serialPort.isReadyForCommands,
+              (monitor.serialPort.deviceEchoDeskNotificationProtocol ?? 0) >= 1,
+              let port = monitor.serialPort.connectedPort,
+              echoDeskNotificationSyncedPort != port,
+              echoDeskNotificationSyncedPort != "syncing:\(port)" else { return }
+        echoDeskNotificationSyncedPort = "syncing:\(port)"
+        sendEchoDeskCommand("echodesk_notifications_set_enabled", extra: ["enabled": true]) { [weak self] ok in
+            guard let self else { return }
+            self.echoDeskNotificationSyncedPort = ok ? port : nil
+            self.echoDeskFooterStatus?.stringValue = ok
+                ? "Notification Stack restored automatically."
+                : "Notification Stack will retry when EchoDesk reconnects."
+            if ok { self.relayEchoDeskOwnedNotifications() }
         }
     }
 
@@ -1021,97 +1205,183 @@ extension SettingsWindowController {
             echoDeskFooterStatus?.stringValue = "Update EchoDesk OS to use Desktop Clock controls."
             return
         }
-        if echoDeskClockWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 690),
-                                  styleMask: [.titled, .closable, .resizable],
-                                  backing: .buffered, defer: false)
-            window.title = "EchoDesk Clock"
-            window.isReleasedWhenClosed = false
-            window.minSize = NSSize(width: 520, height: 560)
+        let mode = requestedMode?.lowercased()
+        guard let mode, ["stopwatch", "countdown", "focus"].contains(mode) else {
+            presentEchoDeskClockModeChooser()
+            return
+        }
+        presentEchoDeskClockConfiguration(mode: mode)
+    }
 
-            func actionButton(_ title: String, _ command: String, primary: Bool = false) -> NSButton {
-                let button = primary
-                    ? echoDeskPrimaryButton(title, #selector(echoDeskClockAction(_:)))
-                    : NSButton(title: title, target: self, action: #selector(echoDeskClockAction(_:)))
-                button.identifier = NSUserInterfaceItemIdentifier(command)
-                return button
-            }
-            func actions(_ buttons: [NSButton]) -> NSStackView {
-                let stack = NSStackView(views: buttons)
-                stack.orientation = .horizontal; stack.spacing = 8; stack.alignment = .centerY
-                return stack
-            }
+    private func makeEchoDeskClockWindow(title: String, size: NSSize) -> NSWindow {
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                              styleMask: [.titled, .closable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        window.styleMask = [.titled, .closable, .fullSizeContentView]
+        window.title = title
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        window.isReleasedWhenClosed = false
+        return window
+    }
 
-            echoDeskClockStopwatchLabel = echoDeskHero("00:00:00.0")
-            echoDeskClockStopwatchLabel?.font = .monospacedDigitSystemFont(ofSize: 32, weight: .light)
-            let stopwatch = echoDeskCard(echoDeskPageStack([
-                echoDeskSectionTitle("Stopwatch"), echoDeskClockStopwatchLabel!,
-                actions([actionButton("Start", "stopwatch:start", primary: true),
-                         actionButton("Pause", "stopwatch:pause"), actionButton("Reset", "stopwatch:reset")]),
-            ]))
+    private func presentEchoDeskClockModeChooser() {
+        closeEchoDeskClockWindow()
+        let chooser = makeEchoDeskClockWindow(title: "Clock", size: NSSize(width: 470, height: 315))
+        let icon = NSImageView()
+        icon.image = NSImage(systemSymbolName: "clock.fill", accessibilityDescription: nil)
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 32, weight: .medium)
+        icon.contentTintColor = .controlAccentColor
+        let title = echoDeskHero("What would you like to set?")
+        let detail = echoDeskMuted("Choose one Clock mode. EchoDesk Desktop will only ask for the settings that mode needs.")
+        let choices: [(String, String, String)] = [
+            ("Stopwatch", "stopwatch", "stopwatch"),
+            ("Countdown", "countdown", "timer"),
+            ("Focus timer", "focus", "brain.head.profile"),
+        ]
+        let buttons = choices.map { choice -> NSButton in
+            let (title, mode, symbol) = choice
+            let button = NSButton(title: title, target: self, action: #selector(echoDeskChooseClockMode(_:)))
+            button.identifier = NSUserInterfaceItemIdentifier(mode)
+            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            button.imagePosition = .imageLeading
+            button.bezelStyle = .rounded
+            button.controlSize = .large
+            return button
+        }
+        let row = NSStackView(views: buttons)
+        row.orientation = .horizontal
+        row.distribution = .fillEqually
+        row.spacing = 10
+        let content = echoDeskPageStack([icon, title, detail, row], spacing: 12)
+        content.alignment = .centerX
+        installEchoDeskClockContent(content, in: chooser, horizontalPadding: 28, verticalPadding: 34)
+        showEchoDeskClockWindow(chooser)
+    }
 
-            echoDeskClockCountdownLabel = echoDeskHero("00:05:00")
-            echoDeskClockCountdownLabel?.font = .monospacedDigitSystemFont(ofSize: 30, weight: .light)
+    @objc private func echoDeskChooseClockMode(_ sender: NSButton) {
+        guard let mode = sender.identifier?.rawValue else { return }
+        presentEchoDeskClockConfiguration(mode: mode)
+    }
+
+    private func presentEchoDeskClockConfiguration(mode: String) {
+        closeEchoDeskClockWindow()
+        echoDeskClockSelectedMode = mode
+        let size = mode == "focus" ? NSSize(width: 500, height: 430) : NSSize(width: 470, height: 335)
+        let title = mode == "focus" ? "Focus timer" : mode.capitalized
+        let clockWindow = makeEchoDeskClockWindow(title: "Configure EchoDesk \(title)", size: size)
+        installEchoDeskClockContent(buildEchoDeskClockConfiguration(mode: mode), in: clockWindow,
+                                    horizontalPadding: 28, verticalPadding: 34)
+        showEchoDeskClockWindow(clockWindow)
+        requestEchoDeskClockState()
+    }
+
+    private func buildEchoDeskClockConfiguration(mode: String) -> NSView {
+        let symbol: String
+        let title: String
+        let detail: String
+        var form: [NSView] = []
+        switch mode {
+        case "countdown":
+            symbol = "timer"
+            title = "Set a countdown"
+            detail = "Choose the duration to prepare on EchoDesk."
             echoDeskClockCountdownMinutes = NSTextField(string: "5")
-            let countdownApply = echoDeskPrimaryButton("Apply duration", #selector(echoDeskClockConfigureCountdown))
-            let countdown = echoDeskCard(echoDeskPageStack([
-                echoDeskSectionTitle("Countdown"), echoDeskClockCountdownLabel!,
-                echoDeskLabeledControl("Duration in minutes", echoDeskClockCountdownMinutes!),
-                actions([countdownApply, actionButton("Start", "countdown:start"),
-                         actionButton("Pause", "countdown:pause"), actionButton("Reset", "countdown:reset")]),
-            ]))
-
-            echoDeskClockFocusLabel = echoDeskHero("00:25:00")
-            echoDeskClockFocusLabel?.font = .monospacedDigitSystemFont(ofSize: 30, weight: .light)
-            echoDeskClockFocusRoundLabel = echoDeskMuted("Round 1 of 4 · FOCUS")
+            echoDeskClockCountdownMinutes?.alignment = .right
+            form = [echoDeskLabeledControl("Minutes", echoDeskClockCountdownMinutes!)]
+        case "focus":
+            symbol = "brain.head.profile"
+            title = "Plan a focus session"
+            detail = "Set focused work, break length and the number of rounds."
             echoDeskClockFocusMinutes = NSTextField(string: "25")
             echoDeskClockBreakMinutes = NSTextField(string: "5")
             echoDeskClockRounds = NSTextField(string: "4")
-            let focusFields = NSStackView(views: [
+            form = [
                 echoDeskLabeledControl("Focus minutes", echoDeskClockFocusMinutes!),
                 echoDeskLabeledControl("Break minutes", echoDeskClockBreakMinutes!),
                 echoDeskLabeledControl("Rounds", echoDeskClockRounds!),
-            ])
-            focusFields.orientation = .horizontal; focusFields.spacing = 10; focusFields.distribution = .fillEqually
-            let focusApply = echoDeskPrimaryButton("Apply plan", #selector(echoDeskClockConfigureFocus))
-            let focus = echoDeskCard(echoDeskPageStack([
-                echoDeskSectionTitle("Focus timer"), echoDeskClockFocusLabel!, echoDeskClockFocusRoundLabel!,
-                focusFields,
-                actions([focusApply, actionButton("Start", "focus:start"),
-                         actionButton("Pause", "focus:pause"), actionButton("Skip", "focus:skip"),
-                         actionButton("Reset", "focus:reset")]),
-            ]))
-
-            let heading = echoDeskHero("Clock")
-            let detail = echoDeskMuted("Control Stopwatch, Countdown and Focus Timer on your EchoDesk Mini.")
-            let content = echoDeskPageStack([heading, detail, stopwatch, countdown, focus])
-            content.edgeInsets = NSEdgeInsets(top: 24, left: 24, bottom: 24, right: 24)
-            let scroll = NSScrollView()
-            scroll.hasVerticalScroller = true; scroll.drawsBackground = false
-            let document = NSView()
-            document.translatesAutoresizingMaskIntoConstraints = false
-            content.translatesAutoresizingMaskIntoConstraints = false
-            document.addSubview(content)
-            NSLayoutConstraint.activate([
-                content.leadingAnchor.constraint(equalTo: document.leadingAnchor),
-                content.trailingAnchor.constraint(equalTo: document.trailingAnchor),
-                content.topAnchor.constraint(equalTo: document.topAnchor),
-                content.bottomAnchor.constraint(equalTo: document.bottomAnchor),
-                content.widthAnchor.constraint(equalToConstant: 570),
-            ])
-            scroll.documentView = document
-            window.contentView = scroll
-            echoDeskClockWindow = window
+            ]
+        default:
+            symbol = "stopwatch"
+            title = "Start the stopwatch"
+            detail = "Select Done and the stopwatch will begin on EchoDesk."
         }
-        echoDeskClockWindow?.title = requestedMode.map { "Configure EchoDesk \($0.capitalized)" } ?? "EchoDesk Clock"
-        echoDeskClockWindow?.center()
-        echoDeskClockWindow?.makeKeyAndOrderFront(nil)
+        let icon = NSImageView()
+        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 34, weight: .medium)
+        icon.contentTintColor = .controlAccentColor
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(echoDeskCancelClockConfiguration))
+        let done = echoDeskPrimaryButton("Done", #selector(echoDeskClockFinishConfiguration))
+        done.keyEquivalent = "\r"
+        let actions = NSStackView(views: [NSView(), cancel, done])
+        actions.orientation = .horizontal
+        actions.spacing = 8
+        let content = echoDeskPageStack([icon, echoDeskHero(title), echoDeskMuted(detail)] + form + [actions], spacing: 13)
+        content.alignment = .centerX
+        return content
+    }
+
+    private func installEchoDeskClockContent(_ content: NSView, in window: NSWindow,
+                                             horizontalPadding: CGFloat, verticalPadding: CGFloat) {
+        let root = NSView()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: horizontalPadding),
+            content.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -horizontalPadding),
+            content.topAnchor.constraint(equalTo: root.topAnchor, constant: verticalPadding),
+            content.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -24),
+        ])
+        window.contentView = root
+    }
+
+    private func showEchoDeskClockWindow(_ clockWindow: NSWindow) {
+        echoDeskClockWindow = clockWindow
+        clockWindow.center()
+        clockWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        requestEchoDeskClockState()
-        if echoDeskClockRefreshTimer == nil {
-            echoDeskClockRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-                guard self?.echoDeskClockWindow?.isVisible == true else { return }
-                self?.requestEchoDeskClockState()
+    }
+
+    @objc private func echoDeskCancelClockConfiguration() {
+        closeEchoDeskClockWindow()
+    }
+
+    private func closeEchoDeskClockWindow() {
+        echoDeskClockRefreshTimer?.invalidate()
+        echoDeskClockRefreshTimer = nil
+        echoDeskClockWindow?.orderOut(nil)
+        echoDeskClockWindow = nil
+        echoDeskClockSelectedMode = nil
+        echoDeskClockCountdownMinutes = nil
+        echoDeskClockFocusMinutes = nil
+        echoDeskClockBreakMinutes = nil
+        echoDeskClockRounds = nil
+    }
+
+    @objc private func echoDeskClockFinishConfiguration() {
+        guard let mode = echoDeskClockSelectedMode else { return }
+        let command: [String: Any]
+        switch mode {
+        case "countdown":
+            let minutes = min(1440, max(1, echoDeskClockCountdownMinutes?.integerValue ?? 5))
+            command = ["mode": mode, "action": "configure", "durationSeconds": minutes * 60]
+        case "focus":
+            let focus = min(180, max(1, echoDeskClockFocusMinutes?.integerValue ?? 25))
+            let pause = min(60, max(1, echoDeskClockBreakMinutes?.integerValue ?? 5))
+            let rounds = min(12, max(1, echoDeskClockRounds?.integerValue ?? 4))
+            command = ["mode": mode, "action": "configure", "focusMinutes": focus,
+                       "breakMinutes": pause, "rounds": rounds]
+        default:
+            command = ["mode": "stopwatch", "action": "start"]
+        }
+        echoDeskClockWindow?.ignoresMouseEvents = true
+        sendEchoDeskCommand("echodesk_clock_control", extra: command) { [weak self] ok in
+            guard let self else { return }
+            self.echoDeskClockWindow?.ignoresMouseEvents = false
+            if ok { self.closeEchoDeskClockWindow() }
+            else {
+                NSSound.beep()
+                self.echoDeskFooterStatus?.stringValue = "EchoDesk did not accept the Clock settings."
             }
         }
     }
@@ -1805,7 +2075,10 @@ extension SettingsWindowController {
         stack.alignment = .leading
         stack.spacing = spacing
         stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 22, right: 0)
-        for view in views { view.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor).isActive = true }
+        // A vertical page is one visual column. Equal widths keep every card,
+        // divider and control row aligned instead of letting AppKit size each
+        // section from whichever label happens to be longest.
+        for view in views { view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
         return stack
     }
 
@@ -1880,6 +2153,7 @@ extension SettingsWindowController {
                     ("myDevice", "My device", "desktopcomputer"),
                     ("notificationStack", "Notification Stack", "bell.badge"),
                     ("pcDashboard", "PC Dashboard", "gauge.with.dots.needle.67percent"),
+                    ("bedside", "Bedside Mode", "bed.double.fill"),
                     ("settings", "Settings", "gearshape")]
         let grid = NSGridView(views: [])
         grid.rowSpacing = 10; grid.columnSpacing = 10
@@ -1942,6 +2216,7 @@ private extension String {
         case "myDevice": return "My device"
         case "notificationStack": return "Notification Stack"
         case "pcDashboard": return "PC Dashboard"
+        case "bedside": return "Bedside Mode"
         default: return prefix(1).uppercased() + String(dropFirst())
         }
     }

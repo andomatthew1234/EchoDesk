@@ -15,7 +15,7 @@ needed for an offline installation:
   pinned espflash 4.6.0 library.
 - `firmware/firmware-manifest.json` describes the supported release.
 - `firmware/firmware-manifest.json.sha256` pins the exact bundled manifest.
-- `firmware/echodesk-mini/2.32.0/echodesk-os.bin` is the merged ESP32 image for
+- `firmware/echodesk-mini/2.33.0/echodesk-os.bin` is the merged ESP32 image for
   address `0x0`.
 
 Customers do not install Python, PlatformIO or a separate esptool program.

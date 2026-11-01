@@ -144,7 +144,7 @@ void config_load(AppConfig &cfg) {
                 ? NOW_PLAYING_BACKGROUND_ECHODESK
                 : NOW_PLAYING_BACKGROUND_ALBUM_COVER;
     }
-    if (cfg.default_app > ECHODESK_APP_MY_DEVICE) {
+    if (cfg.default_app > ECHODESK_APP_BEDSIDE) {
         cfg.default_app = ECHODESK_APP_DEFAULT;
     }
     if (cfg.clock_format > CLOCK_FORMAT_24_HOUR) {

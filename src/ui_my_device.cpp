@@ -181,9 +181,6 @@ void create_header() {
     lv_obj_set_style_text_align(heading, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_set_pos(heading, 70, 12);
 
-    lv_obj_t *scroll_hint = make_label(screen, LV_SYMBOL_DOWN, &lv_font_montserrat_12, muted_color());
-    lv_obj_set_pos(scroll_hint, 298, 13);
-
     lv_obj_t *divider = lv_obj_create(screen);
     lv_obj_remove_style_all(divider);
     lv_obj_set_size(divider, 304, 1);
@@ -197,46 +194,68 @@ void create_content() {
     lv_obj_remove_style_all(content);
     lv_obj_set_size(content, 320, 200);
     lv_obj_set_pos(content, 0, 40);
-    lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scroll_dir(content, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
-    lv_obj_set_style_width(content, 3, LV_PART_SCROLLBAR);
-    lv_obj_set_style_bg_color(content, divider_color(), LV_PART_SCROLLBAR);
-    lv_obj_set_style_bg_opa(content, LV_OPA_70, LV_PART_SCROLLBAR);
-    lv_obj_set_style_radius(content, 2, LV_PART_SCROLLBAR);
+    lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *hero = make_card(7, 76, "ECHODESK DESKTOP");
-    hero_dot = make_dot(hero, 13, 38);
+    lv_obj_t *hero = make_card(4, 48, "ECHODESK DESKTOP");
+    hero_dot = make_dot(hero, 13, 28);
     hero_state = make_label(hero, "WAITING", &lv_font_montserrat_20, foreground_color());
-    lv_obj_set_pos(hero_state, 30, 28);
+    lv_obj_set_pos(hero_state, 30, 19);
     hero_detail = make_label(hero, "Waiting for a trusted host", &lv_font_montserrat_12, muted_color());
-    lv_obj_set_width(hero_detail, 278);
+    lv_obj_set_width(hero_detail, 168);
     lv_label_set_long_mode(hero_detail, LV_LABEL_LONG_DOT);
-    lv_obj_set_pos(hero_detail, 13, 54);
+    lv_obj_set_pos(hero_detail, 126, 26);
 
-    lv_obj_t *connections = make_card(91, 91, "CONNECTIONS");
-    make_status_row(connections, 32, "USB / DESKTOP", &connection_dots[0], &connection_values[0]);
-    make_status_row(connections, 58, "WI-FI", &connection_dots[1], &connection_values[1]);
+    lv_obj_t *connections = make_card(56, 42, "CONNECTIONS");
+    for (uint8_t i = 0; i < 2; ++i) {
+        const int16_t x = static_cast<int16_t>(13 + i * 148);
+        connection_dots[i] = make_dot(connections, x, 27);
+        lv_obj_t *name = make_label(connections,
+            i == 0 ? "USB" : "WI-FI", &lv_font_montserrat_12,
+            foreground_color());
+        lv_obj_set_pos(name, x + 14, 20);
+        connection_values[i] = make_label(connections, "WAITING",
+                                           &lv_font_montserrat_12,
+                                           muted_color());
+        lv_obj_set_width(connection_values[i], 82);
+        lv_label_set_long_mode(connection_values[i], LV_LABEL_LONG_DOT);
+        lv_obj_set_pos(connection_values[i], x + 52, 20);
+    }
 
-    lv_obj_t *sources = make_card(190, 117, "DATA SOURCES");
-    make_status_row(sources, 32, "CODEX", &source_dots[0], &source_values[0]);
-    make_status_row(sources, 58, "MUSIC", &source_dots[1], &source_values[1]);
-    make_status_row(sources, 84, "PERFORMANCE", &source_dots[2], &source_values[2]);
+    lv_obj_t *sources = make_card(102, 42, "DATA SOURCES");
+    static const char *source_names[] = {"CODEX", "MUSIC", "PERF"};
+    for (uint8_t i = 0; i < 3; ++i) {
+        const int16_t x = static_cast<int16_t>(13 + i * 97);
+        source_dots[i] = make_dot(sources, x, 27);
+        lv_obj_t *name = make_label(sources, source_names[i],
+                                    &lv_font_montserrat_12,
+                                    foreground_color());
+        lv_obj_set_pos(name, x + 13, 20);
+        source_values[i] = make_label(sources, "--", &lv_font_montserrat_12,
+                                      muted_color());
+        lv_obj_set_width(source_values[i], 34);
+        lv_label_set_long_mode(source_values[i], LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_align(source_values[i], LV_TEXT_ALIGN_RIGHT,
+                                    LV_PART_MAIN);
+        lv_obj_set_pos(source_values[i], x + 50, 20);
+    }
 
-    lv_obj_t *details = make_card(315, 216, "DEVICE DETAILS");
-    make_detail_row(details, 0, 32, "FIRMWARE");
-    make_detail_row(details, 1, 57, "UPTIME");
-    make_detail_row(details, 2, 82, "FREE HEAP");
-    make_detail_row(details, 3, 107, "WI-FI NETWORK");
-    make_detail_row(details, 4, 132, "IP / SIGNAL");
-    make_detail_row(details, 5, 157, "CORE PROTOCOLS");
-    make_detail_row(details, 6, 182, "DATA PROTOCOLS");
-
-    // Explicitly defines the scroll extent even before LVGL completes layout.
-    lv_obj_t *end_marker = lv_obj_create(content);
-    lv_obj_remove_style_all(end_marker);
-    lv_obj_set_size(end_marker, 1, 1);
-    lv_obj_set_pos(end_marker, 0, 538);
+    lv_obj_t *details = make_card(148, 48, "DEVICE DETAILS");
+    static const char *detail_names[] = {
+        "FW", "UP", "HEAP", "WIFI", "IP", "CORE", "DATA"};
+    for (uint8_t i = 0; i < 7; ++i) {
+        const uint8_t column = i % 4;
+        const uint8_t row = i / 4;
+        const int16_t x = static_cast<int16_t>(9 + column * 73);
+        const int16_t y = static_cast<int16_t>(19 + row * 13);
+        lv_obj_t *name = make_label(details, detail_names[i],
+                                    &lv_font_montserrat_12, muted_color());
+        lv_obj_set_pos(name, x, y);
+        detail_values[i] = make_label(details, "--", &lv_font_montserrat_12,
+                                      foreground_color());
+        lv_obj_set_width(detail_values[i], 39);
+        lv_label_set_long_mode(detail_values[i], LV_LABEL_LONG_DOT);
+        lv_obj_set_pos(detail_values[i], x + 31, y);
+    }
 }
 
 void format_channel(const MyDeviceHealthChannel &channel, char *out, size_t out_size) {
@@ -358,15 +377,11 @@ lv_obj_t *ui_my_device_create() {
 lv_obj_t *ui_my_device_screen() { return screen; }
 
 lv_obj_t *ui_my_device_recreate() {
-    const int32_t saved_scroll_y = content ? lv_obj_get_scroll_y(content) : 0;
     lv_obj_t *old = screen;
     const bool active = old && lv_screen_active() == old;
     screen = nullptr;
     content = nullptr;
     lv_obj_t *replacement = ui_my_device_create();
-    if (content && saved_scroll_y > 0) {
-        lv_obj_scroll_to_y(content, saved_scroll_y, LV_ANIM_OFF);
-    }
     if (active) lv_screen_load(replacement);
     if (old && old != replacement) lv_obj_delete(old);
     return replacement;

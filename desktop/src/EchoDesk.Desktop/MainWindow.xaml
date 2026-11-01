@@ -50,7 +50,7 @@
                     <Image Source="Assets/echodesk-logo.png" Width="34" Height="34" Stretch="Uniform"/>
                     <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
                         <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="17" FontWeight="SemiBold" Text="EchoDesk"/>
-                        <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" Text="DESKTOP 0.2.8"/>
+                        <TextBlock Style="{StaticResource NavText}" Margin="0" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" Text="DESKTOP 0.2.9"/>
                     </StackPanel>
                 </StackPanel>
 
@@ -558,6 +558,20 @@
                         <TextBlock Style="{StaticResource Muted}" Text="Every enabled control writes to the physical EchoDesk and waits for confirmation." Margin="0,0,0,24"/>
 
                         <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <Border Width="48" Height="48" CornerRadius="14" Background="#FF171B24" VerticalAlignment="Center">
+                                    <TextBlock Text="&#xE708;" FontFamily="Segoe Fluent Icons" Foreground="White" FontSize="24" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <StackPanel Grid.Column="1" Margin="16,0,24,0" VerticalAlignment="Center">
+                                    <TextBlock Text="Bedside Mode" FontSize="18" FontWeight="SemiBold"/>
+                                    <TextBlock Style="{StaticResource Muted}" Text="A standalone bedside clock with alarms, widgets and its own display schedule." TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                </StackPanel>
+                                <Button Grid.Column="2" Style="{StaticResource PrimaryButton}" Command="{Binding OpenBedsideModeCommand}" Content="Customise…" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,14">
                             <StackPanel IsEnabled="{Binding SupportsSettings}">
                                 <TextBlock Style="{StaticResource SectionTitle}" Text="General"/>
                                 <TextBlock Text="Device appearance" FontWeight="SemiBold"/>
@@ -642,6 +656,165 @@
                                 <CheckBox Content="Launch EchoDesk Desktop with Windows" IsChecked="{Binding LaunchWithWindows}"/>
                             </StackPanel>
                         </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Bedside Mode is deliberately a dedicated customisation page. -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding IsBedsideMode, Converter={StaticResource BoolVisibility}}">
+                    <StackPanel MaxWidth="1120">
+                        <DockPanel Margin="0,0,0,20">
+                            <Button DockPanel.Dock="Left" Command="{Binding NavigateCommand}" CommandParameter="Customisation" Content="&#xE72B;" FontFamily="Segoe Fluent Icons" Width="40" Height="40" Margin="0,0,14,0" ToolTip="Back to Customisation"/>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Command="{Binding SaveBedsideModeCommand}" Content="Save to EchoDesk" Padding="20,10"/>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource PageTitle}" Text="Bedside Mode"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="A self-contained bedside experience. Once saved, it works from power alone without EchoDesk Desktop." TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="360"/><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+
+                            <StackPanel>
+                                <Border CornerRadius="22" Background="#FF090B10" BorderBrush="#FF343946" BorderThickness="5" Padding="18" Height="270">
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                                <TextBlock Text="{Binding BedsidePreviewTime}" Foreground="White" FontFamily="Segoe UI Variable Display" FontSize="56" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{Binding BedsidePreviewPeriod}" Foreground="#FFB9BECA" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Bottom" Margin="8,0,0,12"/>
+                                            </StackPanel>
+                                            <TextBlock Text="Sunday, 1 November" Foreground="#FF9DA5B5" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <Border Grid.Row="1" CornerRadius="12" Background="#FF171B24" Padding="13,10">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <TextBlock Text="&#xE7ED;" FontFamily="Segoe Fluent Icons" Foreground="#FFFFB84D" FontSize="18" VerticalAlignment="Center"/>
+                                                <StackPanel Grid.Column="1" Margin="10,0">
+                                                    <TextBlock Text="{Binding BedsidePreviewAlarm}" Foreground="White" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="Alarm widget" Foreground="#FF9DA5B5" FontSize="11"/>
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="2" Text="18°" Foreground="#FF8B93A4" FontSize="18" VerticalAlignment="Center" ToolTip="Weather · Coming soon"/>
+                                            </Grid>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                                <TextBlock Text="{Binding BedsideRuntimeSummary}" FontWeight="SemiBold" Margin="4,12,0,2"/>
+                                <TextBlock Style="{StaticResource Muted}" Text="Preview · 320 × 240 landscape" FontSize="12" Margin="4,0,0,0"/>
+
+                                <Border Style="{StaticResource Card}" Margin="0,20,0,0" Padding="10">
+                                    <StackPanel>
+                                        <Button Style="{StaticResource NavButton}" Command="{Binding SelectBedsideSectionCommand}" CommandParameter="Clock">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE823;" FontFamily="Segoe Fluent Icons" FontSize="18"/><TextBlock Text="Clock" Margin="12,0,0,0"/></StackPanel>
+                                        </Button>
+                                        <Button Style="{StaticResource NavButton}" Command="{Binding SelectBedsideSectionCommand}" CommandParameter="Widgets">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xECAA;" FontFamily="Segoe Fluent Icons" FontSize="18"/><TextBlock Text="Widgets" Margin="12,0,0,0"/></StackPanel>
+                                        </Button>
+                                        <Button Style="{StaticResource NavButton}" Command="{Binding SelectBedsideSectionCommand}" CommandParameter="Alarms">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7ED;" FontFamily="Segoe Fluent Icons" FontSize="18"/><TextBlock Text="Manage alarms" Margin="12,0,0,0"/></StackPanel>
+                                        </Button>
+                                        <Button Style="{StaticResource NavButton}" Command="{Binding SelectBedsideSectionCommand}" CommandParameter="Display">
+                                            <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7F8;" FontFamily="Segoe Fluent Icons" FontSize="18"/><TextBlock Text="Auto-brightness &amp; display" Margin="12,0,0,0"/></StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2">
+                                <StackPanel Visibility="{Binding IsBedsideClockSection, Converter={StaticResource BoolVisibility}}">
+                                    <TextBlock Style="{StaticResource SectionTitle}" Text="Clock" FontSize="24"/>
+                                    <TextBlock Style="{StaticResource Muted}" Text="Choose how time appears in the top half of Bedside Mode." Margin="0,0,0,18"/>
+                                    <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                                        <StackPanel>
+                                            <TextBlock Text="Time format" FontWeight="SemiBold"/>
+                                            <ComboBox ItemsSource="{Binding ClockFormatOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding BedsideClockFormat}" Margin="0,10,0,20"/>
+                                            <TextBlock Text="Clock style" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                                            <ComboBox ItemsSource="{Binding BedsideClockStyleOptions}" ItemTemplate="{StaticResource ComboLabelTemplate}" SelectedValuePath="Value" SelectedValue="{Binding BedsideClockStyle}"/>
+                                            <CheckBox Content="Show seconds" IsChecked="{Binding BedsideShowSeconds}" Margin="0,18,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+
+                                <StackPanel Visibility="{Binding IsBedsideWidgetsSection, Converter={StaticResource BoolVisibility}}">
+                                    <TextBlock Style="{StaticResource SectionTitle}" Text="Widgets" FontSize="24"/>
+                                    <TextBlock Style="{StaticResource Muted}" Text="Widgets live in the lower half and stay available when no computer is connected." Margin="0,0,0,18"/>
+                                    <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <StackPanel><TextBlock Text="Next alarm" FontSize="17" FontWeight="SemiBold"/><TextBlock Style="{StaticResource Muted}" Text="Show the next enabled alarm and its day." Margin="0,4,20,0"/></StackPanel>
+                                            <CheckBox Grid.Column="1" IsChecked="{Binding BedsideNextAlarmWidget}" VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </Border>
+                                    <Border Style="{StaticResource Card}" Opacity="0.62">
+                                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <StackPanel><TextBlock Text="Weather" FontSize="17" FontWeight="SemiBold"/><TextBlock Style="{StaticResource Muted}" Text="Forecast and current conditions will arrive in a future release." Margin="0,4,20,0"/></StackPanel>
+                                            <Border Grid.Column="1" Background="{DynamicResource SurfaceAltBrush}" CornerRadius="12" Padding="10,5" VerticalAlignment="Center"><TextBlock Text="COMING SOON" FontSize="10" FontWeight="Bold"/></Border>
+                                        </Grid>
+                                    </Border>
+                                </StackPanel>
+
+                                <StackPanel Visibility="{Binding IsBedsideAlarmsSection, Converter={StaticResource BoolVisibility}}">
+                                    <DockPanel Margin="0,0,0,18">
+                                        <Button DockPanel.Dock="Right" Command="{Binding AddBedsideAlarmCommand}" Content="Add alarm"/>
+                                        <StackPanel><TextBlock Style="{StaticResource SectionTitle}" Text="Manage alarms" FontSize="24"/><TextBlock Style="{StaticResource Muted}" Text="Alarms run on EchoDesk Mini after you unplug the computer."/></StackPanel>
+                                    </DockPanel>
+                                    <ItemsControl ItemsSource="{Binding BedsideAlarms}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type vm:BedsideAlarmEditor}">
+                                                <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                                                    <StackPanel>
+                                                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                            <CheckBox IsChecked="{Binding Enabled}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                                            <TextBox Grid.Column="1" Text="{Binding Time, UpdateSourceTrigger=PropertyChanged}" FontSize="20" FontWeight="SemiBold" ToolTip="24-hour time, HH:mm"/>
+                                                            <TextBox Grid.Column="2" Text="{Binding Label, UpdateSourceTrigger=PropertyChanged}" Margin="12,0" MaxLength="24" ToolTip="Alarm label"/>
+                                                            <Button Grid.Column="3" Content="&#xE74D;" FontFamily="Segoe Fluent Icons" Command="{Binding DataContext.RemoveBedsideAlarmCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" ToolTip="Delete alarm"/>
+                                                        </Grid>
+                                                        <UniformGrid Columns="7" Margin="0,14,0,0">
+                                                            <CheckBox Content="M" IsChecked="{Binding Monday}"/><CheckBox Content="T" IsChecked="{Binding Tuesday}"/><CheckBox Content="W" IsChecked="{Binding Wednesday}"/><CheckBox Content="T" IsChecked="{Binding Thursday}"/><CheckBox Content="F" IsChecked="{Binding Friday}"/><CheckBox Content="S" IsChecked="{Binding Saturday}"/><CheckBox Content="S" IsChecked="{Binding Sunday}"/>
+                                                        </UniformGrid>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+
+                                <StackPanel Visibility="{Binding IsBedsideDisplaySection, Converter={StaticResource BoolVisibility}}">
+                                    <TextBlock Style="{StaticResource SectionTitle}" Text="Auto-brightness &amp; display" FontSize="24"/>
+                                    <TextBlock Style="{StaticResource Muted}" Text="These settings apply only inside Bedside Mode." Margin="0,0,0,18"/>
+                                    <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                                        <StackPanel>
+                                            <CheckBox Content="Use automatic brightness schedule" IsChecked="{Binding BedsideBrightnessScheduleEnabled}" FontWeight="SemiBold"/>
+                                            <Grid Margin="0,14,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/></Grid.ColumnDefinitions><TextBlock Text="Manual brightness"/><TextBlock Grid.Column="1" Text="{Binding BedsideManualBrightness, StringFormat={}{0}%}" HorizontalAlignment="Right"/></Grid>
+                                            <Slider Minimum="1" Maximum="100" Value="{Binding BedsideManualBrightness}"/>
+                                            <DockPanel Margin="0,18,0,8"><Button DockPanel.Dock="Right" Command="{Binding AddBedsideBrightnessSegmentCommand}" Content="Add time"/><TextBlock Text="Schedule" FontWeight="SemiBold" VerticalAlignment="Center"/></DockPanel>
+                                            <ItemsControl ItemsSource="{Binding BedsideBrightnessSegments}">
+                                                <ItemsControl.ItemTemplate><DataTemplate DataType="{x:Type vm:BedsideBrightnessSegmentEditor}">
+                                                    <Grid Margin="0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                        <TextBox Text="{Binding Time, UpdateSourceTrigger=PropertyChanged}" ToolTip="24-hour time, HH:mm"/>
+                                                        <Slider Grid.Column="1" Minimum="1" Maximum="100" Value="{Binding Brightness}" Margin="12,0"/>
+                                                        <TextBlock Grid.Column="2" Text="{Binding Brightness, StringFormat={}{0}%}" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+                                                        <Button Grid.Column="3" Content="&#xE74D;" FontFamily="Segoe Fluent Icons" Margin="10,0,0,0" Command="{Binding DataContext.RemoveBedsideBrightnessSegmentCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" ToolTip="Remove schedule time"/>
+                                                    </Grid>
+                                                </DataTemplate></ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                                        <StackPanel>
+                                            <CheckBox Content="Schedule Night Shift" IsChecked="{Binding BedsideNightShiftScheduleEnabled}" FontWeight="SemiBold"/>
+                                            <CheckBox Content="Use warmer colours now" IsChecked="{Binding BedsideNightShiftManualEnabled}" Margin="0,10,0,12"/>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="From"/><TextBox Text="{Binding BedsideNightShiftStart}" Margin="0,5,0,0"/></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="Until"/><TextBox Text="{Binding BedsideNightShiftEnd}" Margin="0,5,0,0"/></StackPanel></Grid>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
+                                            <CheckBox Content="Schedule dark appearance" IsChecked="{Binding BedsideThemeScheduleEnabled}" FontWeight="SemiBold"/>
+                                            <CheckBox Content="Use dark appearance now" IsChecked="{Binding BedsideThemeManualDark}" Margin="0,10,0,12"/>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="From"/><TextBox Text="{Binding BedsideThemeStart}" Margin="0,5,0,0"/></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="Until"/><TextBox Text="{Binding BedsideThemeEnd}" Margin="0,5,0,0"/></StackPanel></Grid>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                        </Grid>
                     </StackPanel>
                 </ScrollViewer>
             </Grid>

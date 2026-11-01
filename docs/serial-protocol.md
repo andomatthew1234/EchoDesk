@@ -759,6 +759,7 @@ Ist keine Geräteversion bekannt, fällt der Host für die ACK- und Brightness-P
 | 2.30.0 | Versionierte Ersteinrichtung, persistenter Setup-Zustand und sicherer Factory Reset ohne vollständiges Flash-Löschen | `(echodesk_setup.cpp)`, `(config_store.cpp)`, `(serial_receiver.cpp)`, `(ui_echodesk.cpp)` |
 | 2.31.0 | Optionale geschützte WLAN-Einrichtung mit lokal begrenzter Discovery, Pairing-Code und authentifizierter Wiedererkennung; USB bleibt Standard | `(echodesk_wifi_setup.cpp)`, `(echodesk_wifi_protocol.cpp)`, `(wifi_time.cpp)` |
 | 2.32.0 | Clock, Notification Stack, PC Dashboard, My Device und gestufter Update-Fortschritt | `(echodesk_clock.cpp)`, `(echodesk_notifications.cpp)`, `(pc_dashboard.cpp)`, `(my_device_health.cpp)`, `(echodesk_update.cpp)` |
+| 2.33.0 | Eigenständiger Bedside Mode mit Alarmen, Widgets und separaten Display-Zeitplänen | `(bedside_mode.cpp)`, `(bedside_store.cpp)`, `(ui_bedside.cpp)` |
 
 Unbekannte Felder werden von der Firmware ignoriert (ArduinoJson-Zugriff per Schlüssel), unbekannte Provider fallen auf `claude` zurück `(providers.cpp:107)`.
 
@@ -1099,7 +1100,8 @@ Every request requires `version:1` and a nonzero numeric `requestId`.
 ```
 
 Supported app values are `home`, `codex`, `clock`, `performance`,
-`nowPlaying`, `notificationStack`, `pcDashboard`, `myDevice`, and `settings`.
+`nowPlaying`, `notificationStack`, `pcDashboard`, `myDevice`, `bedside`, and
+`settings`.
 Navigation is queued and applied by the normal UI
 tick rather than running LVGL work inside the serial parser.
 
@@ -1108,7 +1110,7 @@ message without a request ID is emitted when touchscreen navigation or a
 supported setting changes:
 
 ```json
-{"type":"echodesk_state","version":1,"requestId":41,"revision":7,"deviceName":"EchoDesk","hardwareModel":"Freenove FNK0114A_2P4","firmwareVersion":"2.32.0","activeApp":"home","supportedApps":["home","codex","clock","performance","nowPlaying","myDevice","settings"],"settings":{"theme":"dark","brightness":80,"nowPlayingLayout":"carPlay","nowPlayingBackground":"audioBars","nowPlayingBackgroundCustomized":true,"defaultApp":"home","clockFormat":"24h","timezone":"Australia/Sydney","codexPercentageMode":"remaining","codexPreferredDisplay":"both","performanceDefaultView":"overview"},"unsupportedSettings":[]}
+{"type":"echodesk_state","version":1,"requestId":41,"revision":7,"deviceName":"EchoDesk","hardwareModel":"Freenove FNK0114A_2P4","firmwareVersion":"2.33.0","activeApp":"home","supportedApps":["home","codex","clock","performance","nowPlaying","notificationStack","pcDashboard","myDevice","bedside","settings"],"settings":{"theme":"dark","brightness":80,"nowPlayingLayout":"carPlay","nowPlayingBackground":"audioBars","nowPlayingBackgroundCustomized":true,"defaultApp":"home","clockFormat":"24h","timezone":"Australia/Sydney","codexPercentageMode":"remaining","codexPreferredDisplay":"both","performanceDefaultView":"overview"},"unsupportedSettings":[]}
 ```
 
 Settings updates are partial but atomic. `baseRevision` must match the current
@@ -1140,6 +1142,9 @@ Firmware 2.32.0 adds `myDevice` to `supportedApps` and to `defaultApp`. The
 screen summarizes recently accepted host traffic, Wi-Fi state, source-data
 freshness and local device diagnostics; it does not add a heartbeat or change
 the version-1 control envelope.
+
+Firmware 2.33.0 adds `bedside` to `supportedApps` and to `defaultApp`. Its
+separately revisioned configuration is described in section 20.
 
 Successful mutating requests return:
 
@@ -1325,3 +1330,59 @@ plus `host` and `performance` objects containing only values that have actually
 been observed. States are `neverReceived`, `live`, `stale`, and `disconnected`.
 Accepted configuration returns the normal `echodesk_ack`, persists the metric
 IDs, and is followed by an unsolicited PC Dashboard state snapshot.
+
+## 20. EchoDesk Bedside Mode v1
+
+Firmware advertising `echoDeskBedsideProtocol:1` exposes the separately
+persisted Bedside Mode configuration through the existing Control v1 serial
+owner. `bedside` is also a supported `echodesk_open_app` and `defaultApp`
+value. The desktop sends the whole configuration atomically; partial Bedside
+patches are deliberately unsupported so alarms and overlapping display
+schedules cannot be saved in an internally inconsistent state.
+
+```json
+{"cmd":"echodesk_bedside_get_state","version":1,"requestId":150}
+{"cmd":"echodesk_bedside_set_config","version":1,"requestId":151,"baseRevision":4,"persist":true,"config":{"clock":{"format":"12h","showSeconds":false,"style":"large"},"widgets":{"nextAlarm":true,"weather":false},"alarms":[{"id":1,"enabled":true,"minuteOfDay":420,"weekdays":127,"label":"Morning"}],"display":{"scheduleEnabled":true,"manualBrightness":40,"segments":[{"startMinute":300,"brightness":40},{"startMinute":420,"brightness":70},{"startMinute":480,"brightness":100},{"startMinute":1080,"brightness":60},{"startMinute":1140,"brightness":40},{"startMinute":1230,"brightness":30},{"startMinute":1290,"brightness":1}],"nightShift":{"scheduleEnabled":true,"manualEnabled":false,"startMinute":1140,"endMinute":420},"theme":{"scheduleEnabled":true,"manualDark":false,"startMinute":1140,"endMinute":420}}}}
+```
+
+The exact configuration rules are:
+
+- `clock.format` is `12h` or `24h`; `clock.style` is `large` or `minimal`.
+- `widgets.nextAlarm` controls the working alarm widget. `widgets.weather`
+  controls only the Weather Coming Soon placeholder; firmware has no weather
+  data source in this protocol version.
+- `alarms` contains at most eight entries. IDs are unique integers 1–8,
+  `minuteOfDay` is 0–1439, and `weekdays` is a nonzero seven-bit mask where
+  bit 0 is Sunday and bit 6 is Saturday. Labels are at most 24 UTF-8 content
+  bytes; firmware stores a separate terminating byte.
+- `display.manualBrightness` is 1–100. `segments` contains one to eight
+  strictly increasing, unique `startMinute` boundaries from 0–1439, each with
+  brightness 1–100. The last selected segment wraps through midnight.
+- `nightShift` and `theme` use local minutes 0–1439. When a schedule is off,
+  `manualEnabled` or `manualDark` is authoritative. Equal start and end times
+  mean the scheduled effect is active all day.
+
+`echodesk_bedside_get_state` returns the authoritative revision, complete
+configuration and runtime state:
+
+```json
+{"type":"echodesk_bedside_state","version":1,"requestId":150,"revision":4,"config":{"clock":{"format":"12h","showSeconds":false,"style":"large"},"widgets":{"nextAlarm":true,"weather":false},"alarms":[],"display":{"scheduleEnabled":true,"manualBrightness":40,"segments":[{"startMinute":300,"brightness":40}],"nightShift":{"scheduleEnabled":true,"manualEnabled":false,"startMinute":1140,"endMinute":420},"theme":{"scheduleEnabled":true,"manualDark":false,"startMinute":1140,"endMinute":420}}},"runtime":{"timeValid":true,"alarmRinging":false,"displaySleeping":false,"nextAlarmEpoch":0,"skippedTomorrow":false}}
+```
+
+`nextAlarmEpoch` is an approximate Unix epoch in seconds and is zero when no
+next alarm is known. It is approximate because a civil day can span 23 or 25
+hours across a daylight-saving transition. `skippedTomorrow` reflects the
+touchscreen's one-day cancel action; it is runtime-only.
+
+An accepted set returns `echodesk_ack` with the new Bedside revision and is
+followed by an unsolicited `echodesk_bedside_state`. A stale base revision
+returns `echodesk_error` with `stale_revision`; malformed, partial or
+out-of-range configurations return `invalid_request`; flash persistence
+failure returns `persist_failed`. Desktop clients must refresh the full state
+after the ACK and treat that response as authoritative.
+
+Alarm evaluation, brightness, Night Shift and appearance schedules run on the
+ESP32 from the saved configuration, so no desktop process is required after
+setup. On a cold boot the FNK0114A_2P4 has no battery-backed RTC: saved Wi-Fi
+and NTP must first make `runtime.timeValid` true. The alarm indication is visual
+only because this hardware integration has no speaker.

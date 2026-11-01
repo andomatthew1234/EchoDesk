@@ -30,6 +30,8 @@
 #include "pc_dashboard.h"
 #include "music_data.h"
 #include "now_playing_layout.h"
+#include "bedside_mode.h"
+#include "bedside_store.h"
 #include "ui_echodesk.h"
 #include "ui_performance.h"
 #endif
@@ -554,7 +556,8 @@ static void handle_get_info() {
         "\"echoDeskControlProtocol\":1,\"echoDeskSetupProtocol\":1,"
         "\"echoDeskWifiSetupProtocol\":1,\"echoDeskUpdateProtocol\":1,"
         "\"echoDeskClockProtocol\":1,\"echoDeskNotificationProtocol\":1,"
-        "\"echoDeskPcDashboardProtocol\":1,";
+        "\"echoDeskPcDashboardProtocol\":1,"
+        "\"echoDeskBedsideProtocol\":1,";
 #else
     const char *echodesk_capabilities = "";
     const char *echodesk_control_capability = "";
@@ -608,7 +611,7 @@ static void print_echodesk_state(uint32_t request_id = 0,
     }
     JsonArray apps = response["supportedApps"].to<JsonArray>();
     for (const char *app : {"home", "codex", "clock", "performance",
-                            "nowPlaying", "notificationStack", "pcDashboard", "myDevice",
+                            "nowPlaying", "notificationStack", "pcDashboard", "myDevice", "bedside",
                             "settings"}) {
         apps.add(app);
     }
@@ -790,6 +793,104 @@ static void print_echodesk_pc_dashboard_state(uint32_t request_id = 0,
             performance["motherboardTemperatureC"] =
                 snapshot.performance.motherboard_temp_c;
     }
+    serializeJson(response, Serial);
+    Serial.println();
+}
+
+static const char *bedside_clock_format_name(BedsideClockFormat format) {
+    return format == BedsideClockFormat::HOUR_24 ? "24h" : "12h";
+}
+
+static const char *bedside_clock_style_name(BedsideClockStyle style) {
+    return style == BedsideClockStyle::MINIMAL ? "minimal" : "large";
+}
+
+static void encode_bedside_config(JsonObject config,
+                                  const BedsideConfig &value) {
+    JsonObject clock = config["clock"].to<JsonObject>();
+    clock["format"] = bedside_clock_format_name(value.clock_format);
+    clock["showSeconds"] = value.show_seconds;
+    clock["style"] = bedside_clock_style_name(value.clock_style);
+
+    JsonObject widgets = config["widgets"].to<JsonObject>();
+    widgets["nextAlarm"] = value.widget_next_alarm;
+    widgets["weather"] = value.widget_weather;
+
+    JsonArray alarms = config["alarms"].to<JsonArray>();
+    for (uint8_t i = 0; i < value.alarm_count; ++i) {
+        const BedsideAlarm &alarm = value.alarms[i];
+        JsonObject encoded = alarms.add<JsonObject>();
+        encoded["id"] = alarm.id;
+        encoded["enabled"] = alarm.enabled;
+        encoded["minuteOfDay"] = alarm.minute_of_day;
+        encoded["weekdays"] = alarm.weekdays;
+        encoded["label"] = alarm.label;
+    }
+
+    JsonObject display = config["display"].to<JsonObject>();
+    display["scheduleEnabled"] = value.display_schedule_enabled;
+    display["manualBrightness"] = value.manual_brightness;
+    JsonArray segments = display["segments"].to<JsonArray>();
+    for (uint8_t i = 0; i < value.segment_count; ++i) {
+        JsonObject encoded = segments.add<JsonObject>();
+        encoded["startMinute"] = value.segments[i].start_minute;
+        encoded["brightness"] = value.segments[i].brightness;
+    }
+    JsonObject night_shift = display["nightShift"].to<JsonObject>();
+    night_shift["scheduleEnabled"] = value.night_shift.schedule_enabled;
+    night_shift["manualEnabled"] = value.night_shift.manual_enabled;
+    night_shift["startMinute"] = value.night_shift.start_minute;
+    night_shift["endMinute"] = value.night_shift.end_minute;
+    JsonObject theme = display["theme"].to<JsonObject>();
+    theme["scheduleEnabled"] = value.dark_theme.schedule_enabled;
+    theme["manualDark"] = value.dark_theme.manual_enabled;
+    theme["startMinute"] = value.dark_theme.start_minute;
+    theme["endMinute"] = value.dark_theme.end_minute;
+}
+
+static void print_echodesk_bedside_state(uint32_t request_id = 0,
+                                         bool include_request_id = false) {
+    JsonDocument response;
+    response["type"] = "echodesk_bedside_state";
+    response["version"] = BEDSIDE_PROTOCOL_VERSION;
+    if (include_request_id) response["requestId"] = request_id;
+    response["revision"] = bedside_revision();
+    encode_bedside_config(response["config"].to<JsonObject>(),
+                          bedside_get_config());
+    const BedsideRuntime &runtime = bedside_runtime();
+    JsonObject encoded_runtime = response["runtime"].to<JsonObject>();
+    encoded_runtime["timeValid"] = time(nullptr) >= 1700000000;
+    encoded_runtime["alarmRinging"] = runtime.alarm_ringing;
+    encoded_runtime["displaySleeping"] = runtime.display_sleeping;
+    encoded_runtime["nextAlarmEpoch"] = runtime.next_alarm.valid
+                                              ? runtime.next_alarm.approximate_epoch
+                                              : 0;
+    encoded_runtime["skippedTomorrow"] = runtime.skipped_tomorrow;
+    serializeJson(response, Serial);
+    Serial.println();
+}
+
+static void print_bedside_ack(uint32_t request_id, const char *command) {
+    my_device_health_note_host_activity(millis());
+    JsonDocument response;
+    response["type"] = "echodesk_ack";
+    response["version"] = BEDSIDE_PROTOCOL_VERSION;
+    response["requestId"] = request_id;
+    response["command"] = command;
+    response["revision"] = bedside_revision();
+    serializeJson(response, Serial);
+    Serial.println();
+}
+
+static void print_bedside_error(uint32_t request_id, const char *code,
+                                const char *message) {
+    JsonDocument response;
+    response["type"] = "echodesk_error";
+    response["version"] = BEDSIDE_PROTOCOL_VERSION;
+    response["requestId"] = request_id;
+    response["code"] = code;
+    response["message"] = message;
+    response["revision"] = bedside_revision();
     serializeJson(response, Serial);
     Serial.println();
 }
@@ -1086,6 +1187,150 @@ static void handle_echodesk_pc_dashboard_set_config(JsonDocument &doc) {
     serial_echodesk_state_changed();
     print_echodesk_ack(request_id, "echodesk_pc_dashboard_set_config");
     print_echodesk_pc_dashboard_state();
+}
+
+static bool parse_bedside_toggle(JsonObject object, bool theme,
+                                 BedsideScheduledToggle &toggle) {
+    if (object.size() != 4 ||
+        !object["scheduleEnabled"].is<bool>() ||
+        !object[theme ? "manualDark" : "manualEnabled"].is<bool>() ||
+        !object["startMinute"].is<uint16_t>() ||
+        !object["endMinute"].is<uint16_t>()) {
+        return false;
+    }
+    toggle.schedule_enabled = object["scheduleEnabled"].as<bool>();
+    toggle.manual_enabled =
+        object[theme ? "manualDark" : "manualEnabled"].as<bool>();
+    toggle.start_minute = object["startMinute"].as<uint16_t>();
+    toggle.end_minute = object["endMinute"].as<uint16_t>();
+    return true;
+}
+
+static bool parse_bedside_config(JsonObject object, BedsideConfig &config) {
+    if (object.size() != 4 || !object["clock"].is<JsonObject>() ||
+        !object["widgets"].is<JsonObject>() ||
+        !object["alarms"].is<JsonArray>() ||
+        !object["display"].is<JsonObject>()) {
+        return false;
+    }
+
+    JsonObject clock = object["clock"].as<JsonObject>();
+    if (clock.size() != 3 || !clock["format"].is<const char *>() ||
+        !clock["showSeconds"].is<bool>() ||
+        !clock["style"].is<const char *>()) return false;
+    const char *format = clock["format"].as<const char *>();
+    if (strcmp(format, "12h") == 0) config.clock_format = BedsideClockFormat::HOUR_12;
+    else if (strcmp(format, "24h") == 0) config.clock_format = BedsideClockFormat::HOUR_24;
+    else return false;
+    config.show_seconds = clock["showSeconds"].as<bool>();
+    const char *style = clock["style"].as<const char *>();
+    if (strcmp(style, "large") == 0) config.clock_style = BedsideClockStyle::LARGE;
+    else if (strcmp(style, "minimal") == 0) config.clock_style = BedsideClockStyle::MINIMAL;
+    else return false;
+
+    JsonObject widgets = object["widgets"].as<JsonObject>();
+    if (widgets.size() != 2 || !widgets["nextAlarm"].is<bool>() ||
+        !widgets["weather"].is<bool>()) return false;
+    config.widget_next_alarm = widgets["nextAlarm"].as<bool>();
+    config.widget_weather = widgets["weather"].as<bool>();
+
+    JsonArray alarms = object["alarms"].as<JsonArray>();
+    if (alarms.size() > BEDSIDE_MAX_ALARMS) return false;
+    config.alarm_count = static_cast<uint8_t>(alarms.size());
+    uint8_t alarm_index = 0;
+    for (JsonVariant value : alarms) {
+        if (!value.is<JsonObject>()) return false;
+        JsonObject alarm = value.as<JsonObject>();
+        if (alarm.size() != 5 || !alarm["id"].is<uint8_t>() ||
+            !alarm["enabled"].is<bool>() ||
+            !alarm["minuteOfDay"].is<uint16_t>() ||
+            !alarm["weekdays"].is<uint8_t>() ||
+            !alarm["label"].is<const char *>()) return false;
+        const char *label = alarm["label"].as<const char *>();
+        if (!label || strlen(label) >= BEDSIDE_ALARM_LABEL_BYTES) return false;
+        BedsideAlarm &decoded = config.alarms[alarm_index++];
+        decoded.id = alarm["id"].as<uint8_t>();
+        decoded.enabled = alarm["enabled"].as<bool>();
+        decoded.minute_of_day = alarm["minuteOfDay"].as<uint16_t>();
+        decoded.weekdays = alarm["weekdays"].as<uint8_t>();
+        strlcpy(decoded.label, label, sizeof(decoded.label));
+    }
+
+    JsonObject display = object["display"].as<JsonObject>();
+    if (display.size() != 5 || !display["scheduleEnabled"].is<bool>() ||
+        !display["manualBrightness"].is<uint8_t>() ||
+        !display["segments"].is<JsonArray>() ||
+        !display["nightShift"].is<JsonObject>() ||
+        !display["theme"].is<JsonObject>()) return false;
+    config.display_schedule_enabled = display["scheduleEnabled"].as<bool>();
+    config.manual_brightness = display["manualBrightness"].as<uint8_t>();
+    JsonArray segments = display["segments"].as<JsonArray>();
+    if (segments.size() == 0 || segments.size() > BEDSIDE_MAX_SEGMENTS) return false;
+    config.segment_count = static_cast<uint8_t>(segments.size());
+    uint8_t segment_index = 0;
+    for (JsonVariant value : segments) {
+        if (!value.is<JsonObject>()) return false;
+        JsonObject segment = value.as<JsonObject>();
+        if (segment.size() != 2 || !segment["startMinute"].is<uint16_t>() ||
+            !segment["brightness"].is<uint8_t>()) return false;
+        config.segments[segment_index++] = {
+            segment["startMinute"].as<uint16_t>(),
+            segment["brightness"].as<uint8_t>()};
+    }
+    if (!parse_bedside_toggle(display["nightShift"].as<JsonObject>(), false,
+                              config.night_shift) ||
+        !parse_bedside_toggle(display["theme"].as<JsonObject>(), true,
+                              config.dark_theme)) return false;
+    return bedside_validate_config(config);
+}
+
+static void handle_echodesk_bedside_get_state(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_request_header(doc, request_id)) return;
+    if (doc.size() != 3) {
+        print_bedside_error(request_id, "invalid_request",
+                            "bedside state accepts only cmd, version and requestId");
+        return;
+    }
+    my_device_health_note_host_activity(millis());
+    print_echodesk_bedside_state(request_id, true);
+}
+
+static void handle_echodesk_bedside_set_config(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_request_header(doc, request_id)) return;
+    if (doc.size() != 6 || !doc["baseRevision"].is<uint32_t>() ||
+        !doc["persist"].is<bool>() || !doc["persist"].as<bool>() ||
+        !doc["config"].is<JsonObject>()) {
+        print_bedside_error(request_id, "invalid_request",
+                            "full config, baseRevision and persist true are required");
+        return;
+    }
+    BedsideConfig config{};
+    if (!parse_bedside_config(doc["config"].as<JsonObject>(), config)) {
+        print_bedside_error(request_id, "invalid_request",
+                            "bedside configuration is malformed or out of range");
+        return;
+    }
+    const BedsideConfig previous_config = bedside_get_config();
+    const uint32_t previous_revision = bedside_revision();
+    const BedsideResult result = bedside_set_config(
+        config, doc["baseRevision"].as<uint32_t>());
+    if (result != BedsideResult::OK) {
+        print_bedside_error(request_id,
+                            result == BedsideResult::STALE_REVISION
+                                ? "stale_revision" : "invalid_request",
+                            bedside_result_message(result));
+        return;
+    }
+    if (!bedside_store_save(bedside_get_config(), bedside_revision())) {
+        bedside_init(previous_config, previous_revision);
+        print_bedside_error(request_id, "persist_failed",
+                            "could not persist Bedside configuration");
+        return;
+    }
+    print_bedside_ack(request_id, "echodesk_bedside_set_config");
+    print_echodesk_bedside_state();
 }
 
 static void handle_echodesk_open_app(JsonDocument &doc) {
@@ -1536,6 +1781,10 @@ static bool parse_command(JsonDocument &doc) {
         handle_echodesk_pc_dashboard_get_state(doc);
     } else if (strcmp(cmd, "echodesk_pc_dashboard_set_config") == 0) {
         handle_echodesk_pc_dashboard_set_config(doc);
+    } else if (strcmp(cmd, "echodesk_bedside_get_state") == 0) {
+        handle_echodesk_bedside_get_state(doc);
+    } else if (strcmp(cmd, "echodesk_bedside_set_config") == 0) {
+        handle_echodesk_bedside_set_config(doc);
     } else if (strcmp(cmd, "echodesk_open_app") == 0) {
         handle_echodesk_open_app(doc);
     } else if (strcmp(cmd, "echodesk_set_settings") == 0) {
@@ -2197,6 +2446,12 @@ void serial_receiver_init() {
     my_device_health_init();
     echodesk_clock_init(millis());
     echodesk_notifications_init();
+    BedsideConfig bedside_config = bedside_default_config();
+    uint32_t bedside_config_revision = 1;
+    if (!bedside_store_load(bedside_config, bedside_config_revision)) {
+        bedside_store_save(bedside_config, bedside_config_revision);
+    }
+    bedside_init(bedside_config, bedside_config_revision);
     EchoDeskClockSnapshot initial_clock{};
     echodesk_clock_capture(millis(), initial_clock);
     echodesk_clock_last_emitted_revision = initial_clock.revision;

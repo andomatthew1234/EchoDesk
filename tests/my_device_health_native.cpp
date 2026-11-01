@@ -17,7 +17,7 @@ static bool check(bool condition, const char *message) {
 }
 
 int main() {
-    strcpy(test_facts.firmware_version, "2.32.0");
+    strcpy(test_facts.firmware_version, "2.33.0");
     test_facts.uptime_seconds = 93784;
     test_facts.free_heap_bytes = 123456;
     test_facts.wifi_configured = true;

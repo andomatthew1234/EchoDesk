@@ -15,6 +15,8 @@ internal static class Program
             MapperPreservesVersionedClockState();
             MapperPreservesNotificationStackPrivacyState();
             MapperPreservesPcDashboardConfiguration();
+            MapperPreservesBedsideConfiguration();
+            BedsideSerializationIsExact();
             AppCatalogIncludesMyDevice();
             FirmwareManagerMappingPreservesSafetyStates();
             MapperAcceptsNullOptionalNumericFields();
@@ -97,6 +99,57 @@ internal static class Program
             "PC Dashboard metric selection was lost");
         Assert(EchoDeskApps.All.Any(app => app.Id == "pcDashboard"),
             "PC Dashboard is missing from the Desktop app catalogue");
+    }
+
+    private static void MapperPreservesBedsideConfiguration()
+    {
+        using var document = JsonDocument.Parse("""
+        {"connection":"connected","bedside":{"available":true,"protocol":1,"state":{
+          "revision":12,
+          "config":{"clock":{"format":"24h","showSeconds":true,"style":"minimal"},
+            "widgets":{"nextAlarm":true,"weather":false},
+            "alarms":[{"id":1,"enabled":true,"minuteOfDay":420,"weekdays":62,"label":"Weekday"}],
+            "display":{"scheduleEnabled":true,"manualBrightness":40,
+              "segments":[{"startMinute":0,"brightness":1},{"startMinute":420,"brightness":70}],
+              "nightShift":{"scheduleEnabled":true,"manualEnabled":false,"startMinute":1140,"endMinute":420},
+              "theme":{"scheduleEnabled":true,"manualDark":false,"startMinute":1140,"endMinute":420}}},
+          "runtime":{"timeValid":true,"alarmRinging":false,"displaySleeping":false,
+            "nextAlarmEpoch":1793559600,"skippedTomorrow":false}}}}
+        """);
+        var state = BrokerStateMapper.FromPayload(document.RootElement);
+        Assert(state.Bedside.Available && state.Bedside.Protocol == 1 && state.Bedside.Revision == 12,
+            "Bedside capability/revision was not mapped");
+        Assert(state.Bedside.Config.Clock.Format == "24h" && state.Bedside.Config.Clock.ShowSeconds,
+            "Bedside clock configuration was lost");
+        Assert(state.Bedside.Config.Alarms.Single().Weekdays == 62,
+            "Bedside Sunday-first weekday mask was lost");
+        Assert(state.Bedside.Config.Display.Segments.Count == 2
+               && state.Bedside.Runtime.NextAlarmEpoch == 1793559600,
+            "Bedside schedule/runtime state was lost");
+        Assert(EchoDeskApps.All.Any(app => app.Id == "bedside"),
+            "Bedside Mode is missing from the Desktop app catalogue");
+    }
+
+    private static void BedsideSerializationIsExact()
+    {
+        var config = new BedsideConfig
+        {
+            Alarms = [new BedsideAlarm { Id = 1, Enabled = true, MinuteOfDay = 420, Weekdays = 62, Label = "Weekday" }],
+            Display = new BedsideDisplayConfig
+            {
+                Segments = [new BedsideBrightnessSegment { StartMinute = 0, Brightness = 1 }],
+            },
+        };
+        var payload = JsonSerializer.SerializeToElement(new { baseRevision = 12UL, config }, BrokerProtocol.Json);
+        Assert(payload.EnumerateObject().Count() == 2 && payload.GetProperty("baseRevision").GetUInt64() == 12,
+            "Bedside broker payload exposed fields outside baseRevision/config");
+        var alarm = payload.GetProperty("config").GetProperty("alarms")[0];
+        Assert(alarm.EnumerateObject().Count() == 5 && alarm.GetProperty("weekdays").GetInt32() == 62,
+            "Bedside alarm serialization did not preserve the firmware contract");
+        var display = payload.GetProperty("config").GetProperty("display");
+        Assert(display.EnumerateObject().Count() == 5
+               && display.GetProperty("segments")[0].GetProperty("brightness").GetInt32() == 1,
+            "Bedside display serialization did not preserve the whole-config contract");
     }
 
     private static void FirstRunOnboardingIsDismissibleAndOneTime()

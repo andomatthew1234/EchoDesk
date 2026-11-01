@@ -72,6 +72,54 @@ foreach ($clockBridge in @(
     'deviceEchoDeskClockProtocol = json["echoDeskClockProtocol"] as? Int'
 )) { Assert-Contains $main $clockBridge }
 
+# Polished desktop contracts: clock configuration is a compact, single-mode
+# native flow; notification setup only persists after the device confirms it
+# and is restored on reconnect; page cards share one content width.
+foreach ($polishContract in @(
+    'private func presentEchoDeskClockModeChooser()',
+    'private func buildEchoDeskClockConfiguration(mode: String) -> NSView',
+    'echoDeskClockSelectedMode = mode',
+    'echoDeskClockFinishConfiguration',
+    'window.styleMask = [.titled, .closable, .fullSizeContentView]',
+    'private func presentEchoDeskNotificationSetup()',
+    'echoDeskNotificationSetupWindow',
+    'echoDeskNotificationSyncedPort',
+    'UserDefaults.standard.set(true, forKey: "EchoDeskNotificationStackEnabled")',
+    'syncEchoDeskNotificationPreferenceIfNeeded',
+    'view.widthAnchor.constraint(equalTo: stack.widthAnchor)',
+    'NSImage.SymbolConfiguration(pointSize: 16, weight: .medium)'
+)) { Assert-Contains $source $polishContract }
+
+if ($source.Contains('let content = echoDeskPageStack([heading, detail, stopwatch, countdown, focus])')) {
+    throw 'The macOS Clock window still renders every mode at once.'
+}
+$notificationSetupStart = $source.IndexOf('@objc private func echoDeskSetupNotifications()')
+$notificationSetupEnd = $source.IndexOf('@objc private func echoDeskDisableNotifications()', $notificationSetupStart)
+if ($notificationSetupStart -lt 0 -or $notificationSetupEnd -le $notificationSetupStart) {
+    throw 'Notification setup implementation could not be isolated.'
+}
+$notificationSetup = $source.Substring($notificationSetupStart, $notificationSetupEnd - $notificationSetupStart)
+if ($notificationSetup.IndexOf('UserDefaults.standard.set(true') -lt $notificationSetup.IndexOf('guard ok else')) {
+    throw 'Notification setup is persisted before EchoDesk confirms the change.'
+}
+$notificationDisableStart = $source.IndexOf('@objc private func echoDeskDisableNotifications()')
+$notificationDisableEnd = $source.IndexOf('private func syncEchoDeskNotificationPreferenceIfNeeded()', $notificationDisableStart)
+$notificationDisable = $source.Substring($notificationDisableStart, $notificationDisableEnd - $notificationDisableStart)
+if ($notificationDisable.IndexOf('UserDefaults.standard.set(false') -lt $notificationDisable.IndexOf('if ok')) {
+    throw 'Notification disable is persisted before EchoDesk confirms the change.'
+}
+
+$dashboardApplyStart = $source.IndexOf('@objc private func echoDeskApplyPcDashboard()')
+$dashboardApplyEnd = $source.IndexOf('private func buildEchoDeskSetupPage()', $dashboardApplyStart)
+if ($dashboardApplyStart -lt 0 -or $dashboardApplyEnd -le $dashboardApplyStart) {
+    throw 'PC Dashboard Apply implementation could not be isolated.'
+}
+$dashboardApply = $source.Substring($dashboardApplyStart, $dashboardApplyEnd - $dashboardApplyStart)
+if (-not $dashboardApply.Contains('requestEchoDeskPcDashboardState { [weak self] ready in') -or
+    -not $dashboardApply.Contains('sendEchoDeskPcDashboardConfig(metrics)')) {
+    throw 'PC Dashboard Apply does not preflight a fresh device revision before sending its configuration.'
+}
+
 $onboardingStart = $source.IndexOf('private func presentEchoDeskFirstRunOnboardingIfNeeded')
 $onboardingEnd = $source.IndexOf('private func buildEchoDeskSidebar', $onboardingStart)
 if ($onboardingStart -lt 0 -or $onboardingEnd -le $onboardingStart) {
@@ -116,16 +164,16 @@ foreach ($brokenInterpolation in @(
 }
 
 if ($source.Contains('Terms & Privacy') -or $source.Contains('IsGuidedTermsStep')) {
-    throw 'The macOS 0.2.8 setup must not contain a Terms step.'
+    throw 'The macOS 0.2.9 setup must not contain a Terms step.'
 }
-Assert-Contains $main 'let kAppVersion = "0.2.8"'
+Assert-Contains $main 'let kAppVersion = "0.2.9"'
 Assert-Contains $main 'removeMenuBarStatusItem()'
 Assert-Contains $main 'var availableUpdateAsset: GitHubAsset?'
 Assert-Contains $main '$0.name.hasPrefix("EchoDesk-Desktop-v")'
 Assert-Contains $main '$0.name.hasSuffix("-macos-universal.zip")'
-Assert-Contains $build 'APP_VERSION="0.2.8"'
+Assert-Contains $build 'APP_VERSION="0.2.9"'
 Assert-Contains $build 'SettingsWindow+EchoDeskDesktop.swift'
-Assert-Contains $workflow 'EchoDesk-Desktop-v0.2.8-macos-universal'
+Assert-Contains $workflow 'EchoDesk-Desktop-v0.2.9-macos-universal'
 
 if (-not (Test-Path -LiteralPath $dmgBackgroundPath)) {
     throw 'EchoDesk DMG background asset is missing.'
@@ -164,8 +212,8 @@ foreach ($dmgContract in @(
 )) { Assert-Contains $build $dmgContract }
 
 $versionNode = $plist.SelectSingleNode("//key[.='CFBundleShortVersionString']/following-sibling::*[1]")
-if ($null -eq $versionNode -or $versionNode.InnerText -ne '0.2.8') {
-    throw 'EchoDesk Info.plist version is not 0.2.8.'
+if ($null -eq $versionNode -or $versionNode.InnerText -ne '0.2.9') {
+    throw 'EchoDesk Info.plist version is not 0.2.9.'
 }
 
-Write-Host 'EchoDesk macOS 0.2.8 parity UI validation passed.'
+Write-Host 'EchoDesk macOS 0.2.9 parity UI validation passed.'
