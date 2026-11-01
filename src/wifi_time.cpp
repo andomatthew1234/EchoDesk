@@ -29,7 +29,9 @@ static const uint8_t WIFI_SCAN_MAX_RESULTS = 16;
 static Preferences prefs;
 static char stored_ssid[33] = "";
 static char stored_password[65] = "";
+static char stored_client_token[65] = "";
 static bool has_credentials = false;
+static bool provisioning_active = false;
 static bool ntp_configured = false;
 static bool time_synced = false;
 static unsigned long last_connect_attempt = 0;
@@ -43,10 +45,12 @@ static void load_credentials() {
     prefs.begin(NVS_NAMESPACE, true);
     String ssid = prefs.getString("wifi_ssid", "");
     String pass = prefs.getString("wifi_pass", "");
+    String token = prefs.getString("wifi_pair", "");
     prefs.end();
 
     strlcpy(stored_ssid, ssid.c_str(), sizeof(stored_ssid));
     strlcpy(stored_password, pass.c_str(), sizeof(stored_password));
+    strlcpy(stored_client_token, token.c_str(), sizeof(stored_client_token));
     has_credentials = stored_ssid[0] != '\0';
 }
 
@@ -117,6 +121,7 @@ void wifi_time_init() {
 }
 
 void wifi_time_tick() {
+    if (provisioning_active) return;
     if (!has_credentials) return;
 
     if (WiFi.status() == WL_CONNECTED) {
@@ -153,18 +158,20 @@ bool wifi_time_is_synced() {
     return time_synced;
 }
 
+bool wifi_time_has_client_token() {
+    return strlen(stored_client_token) == 64;
+}
+
+const char *wifi_time_client_token() {
+    return stored_client_token;
+}
+
+void wifi_time_set_provisioning(bool active) {
+    provisioning_active = active;
+}
+
 void wifi_time_save_credentials(const char *ssid, const char *password) {
-    if (ssid == nullptr) ssid = "";
-    if (password == nullptr) password = "";
-
-    strlcpy(stored_ssid, ssid, sizeof(stored_ssid));
-    strlcpy(stored_password, password, sizeof(stored_password));
-    has_credentials = stored_ssid[0] != '\0';
-
-    prefs.begin(NVS_NAMESPACE, false);
-    prefs.putString("wifi_ssid", stored_ssid);
-    prefs.putString("wifi_pass", stored_password);
-    prefs.end();
+    if (!wifi_time_store_credentials(ssid, password)) return;
 
     ntp_configured = false;
     time_synced = system_time_is_valid();
@@ -173,14 +180,41 @@ void wifi_time_save_credentials(const char *ssid, const char *password) {
     }
 }
 
+bool wifi_time_store_credentials(const char *ssid, const char *password) {
+    if (ssid == nullptr) ssid = "";
+    if (password == nullptr) password = "";
+
+    strlcpy(stored_ssid, ssid, sizeof(stored_ssid));
+    strlcpy(stored_password, password, sizeof(stored_password));
+    has_credentials = stored_ssid[0] != '\0';
+
+    prefs.begin(NVS_NAMESPACE, false);
+    const size_t ssid_written = prefs.putString("wifi_ssid", stored_ssid);
+    const size_t pass_written = prefs.putString("wifi_pass", stored_password);
+    prefs.end();
+    return ssid_written == strlen(stored_ssid) &&
+           pass_written == strlen(stored_password);
+}
+
+bool wifi_time_save_client_token(const char *token) {
+    if (!token || strlen(token) != sizeof(stored_client_token) - 1) return false;
+    strlcpy(stored_client_token, token, sizeof(stored_client_token));
+    prefs.begin(NVS_NAMESPACE, false);
+    const size_t written = prefs.putString("wifi_pair", stored_client_token);
+    prefs.end();
+    return written == strlen(stored_client_token);
+}
+
 void wifi_time_forget_credentials() {
     prefs.begin(NVS_NAMESPACE, false);
     prefs.remove("wifi_ssid");
     prefs.remove("wifi_pass");
+    prefs.remove("wifi_pair");
     prefs.end();
 
     stored_ssid[0] = '\0';
     stored_password[0] = '\0';
+    stored_client_token[0] = '\0';
     has_credentials = false;
     ntp_configured = false;
     WiFi.disconnect(true, true);

@@ -8,6 +8,7 @@ use crate::firmware_manager;
 use crate::poll;
 use crate::serial_service::{self, ConnectionState, Job};
 use crate::state::{current_snapshot, AppState};
+use crate::wifi_setup;
 use aimonitor_core::Status;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -142,6 +143,7 @@ pub fn status(app: &AppHandle) -> Value {
             }
         },
         "firmwareManager": firmware_manager::snapshot(app),
+        "wifiSetup": wifi_setup::snapshot(app),
     })
 }
 
@@ -249,6 +251,34 @@ fn dispatch(app: &AppHandle, request: &BrokerRequest) -> Result<Value, BrokerErr
                 .map_err(|message| firmware_error(&message))?;
             Ok(status(app))
         }
+        "setup_begin" | "setup_complete" | "factory_reset" => {
+            let params: firmware_manager::SetupPortRequest =
+                serde_json::from_value(request.params.clone()).map_err(|_| {
+                    error(
+                        "invalid_request",
+                        format!("{} requires exactly {{port}}", request.method),
+                    )
+                })?;
+            match request.method.as_str() {
+                "setup_begin" => firmware_manager::setup_begin(app, params),
+                "setup_complete" => firmware_manager::setup_complete(app, params),
+                _ => firmware_manager::factory_reset(app, params),
+            }
+            .map_err(|message| firmware_error(&message))?;
+            Ok(status(app))
+        }
+        "firmware_manual_recovery" => {
+            let params: firmware_manager::ManualRecoveryRequest =
+                serde_json::from_value(request.params.clone()).map_err(|_| {
+                    error(
+                        "invalid_request",
+                        "firmware_manual_recovery requires exactly {port}",
+                    )
+                })?;
+            firmware_manager::manual_recovery(app, params)
+                .map_err(|message| firmware_error(&message))?;
+            Ok(status(app))
+        }
         "firmware_install" => {
             let params: firmware_manager::InstallRequest =
                 serde_json::from_value(request.params.clone()).map_err(|_| {
@@ -262,6 +292,33 @@ fn dispatch(app: &AppHandle, request: &BrokerRequest) -> Result<Value, BrokerErr
         }
         "firmware_cancel" => {
             firmware_manager::cancel(app).map_err(|message| firmware_error(&message))?;
+            Ok(status(app))
+        }
+        "wifi_setup_discover" => {
+            let params: wifi_setup::DiscoverRequest =
+                serde_json::from_value(request.params.clone()).map_err(|_| {
+                    error("invalid_request", "wifi_setup_discover takes no parameters")
+                })?;
+            wifi_setup::discover(app, params)
+                .map_err(|failure| error(failure.code, failure.message))?;
+            Ok(status(app))
+        }
+        "wifi_setup_provision" => {
+            let params: wifi_setup::ProvisionRequest =
+                serde_json::from_value(request.params.clone()).map_err(|_| {
+                    error(
+                        "invalid_request",
+                        "wifi_setup_provision requires deviceId, setupCode, ssid and password",
+                    )
+                })?;
+            wifi_setup::provision(app, params)
+                .map_err(|failure| error(failure.code, failure.message))?;
+            Ok(status(app))
+        }
+        "wifi_setup_cancel" => {
+            let _: wifi_setup::DiscoverRequest = serde_json::from_value(request.params.clone())
+                .map_err(|_| error("invalid_request", "wifi_setup_cancel takes no parameters"))?;
+            wifi_setup::cancel(app);
             Ok(status(app))
         }
         "set_update_notifications" => {

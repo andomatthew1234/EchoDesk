@@ -20,17 +20,28 @@ your provider credentials.
 
 ## Install and run
 
-1. Extract `EchoDesk-Desktop-v0.2.2-win-x64.zip` completely.
+1. Extract `EchoDesk-Desktop-v0.2.5-win-x64.zip` completely.
 2. Run `install.ps1` from PowerShell for a current-user Start menu installation,
    or run `EchoDesk Desktop.exe` directly from the extracted folder.
 3. Connect the EchoDesk display by USB. The bundled host starts invisibly and
    reconnects automatically.
+
+USB remains the default connection. During first setup, **Setup with Wi-Fi**
+starts a temporary protected `EchoDesk-XXXX` network on the Mini. Join it in
+Windows with the on-screen 8-digit code, choose **Find Wi-Fi devices** in
+Desktop, and supply the destination network. Firmware flashing and recovery
+remain USB-only.
 
 The self-contained build does not require a separately installed .NET runtime.
 Closing the window minimises to the tray by default. Use **Exit** in the tray to
 stop all bundled EchoDesk background processes and release the COM port.
 
 ## Setup & Updates
+
+The separate **Set up a new device** destination provides the customer-facing
+Terms → Connect → Select → Install → Ready flow. Its production legal gate is
+intentionally disabled until reviewed Terms and Privacy files are supplied;
+see [the guided setup design](../docs/guided-device-setup.md).
 
 The **Setup & Updates** destination provides first-time EchoDesk OS installation,
 updates, reinstall and guided recovery. It only accepts device candidates and
@@ -54,6 +65,13 @@ reports measured progress. It declares success only after the write completes
 and the new firmware restarts and reconnects. A completed write without a
 verified reconnect is reported as a partial installation with recovery steps.
 
+If normal identity detection fails, **Manual Recovery** is available for the
+selected scanned COM port. It intentionally bypasses adapter, model, installed
+version and reported flash-size checks, but still validates the bundled image
+and refuses to write unless the ROM bootloader positively identifies an
+original ESP32. The confirmation defaults to **No** and names the selected-port
+risk before starting.
+
 ## AI Usage Monitor
 
 The Overview page contains an AI Usage Monitor component card. Its Enabled
@@ -68,9 +86,13 @@ Codex CLI if requested; do not paste credentials into EchoDesk.
 - Automatic host, broker and device reconnection
 - Reported connection, COM port, firmware, hardware and active app
 - AI Usage Monitor enable/disable, status and last successful update
-- Open advertised touchscreen apps and restart the device with confirmation
-- Device light/dark theme, brightness, and Now Playing layout/background
-- Guided first installation, firmware updates and repair for EchoDesk Mini
+- Open advertised touchscreen apps, restart the device, and factory-reset
+  onboarding with confirmation
+- Device light/dark theme, brightness, startup app, 12/24-hour clock,
+  DST-aware timezone, Codex display mode, Performance default view, and Now
+  Playing layout/background
+- Guided first installation, firmware updates, repair and ESP32-only manual
+  recovery for EchoDesk Mini
 - Touchscreen-originated active-app and settings updates
 - System tray, minimise-to-tray, current-user autostart and desktop appearance
 

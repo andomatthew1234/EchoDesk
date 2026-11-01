@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
 using System.IO;
@@ -14,6 +15,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly BrokerClient broker;
     private readonly PreferencesService preferencesService;
     private readonly SynchronizationContext uiContext;
+    private readonly GuidedSetupLegalDocuments guidedSetupLegalDocuments;
+    private readonly GuidedSetupFlow guidedSetup;
     private DesktopPreferences preferences;
     private BrokerState state = BrokerState.Offline();
     private string selectedPage = "Overview";
@@ -22,18 +25,37 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private string deviceTheme = "light";
     private string nowPlayingLayout = "albumCover";
     private string nowPlayingBackground = "blurredAlbumCover";
+    private string defaultApp = "home";
+    private string clockFormat = "24h";
+    private string timezone = "Australia/Melbourne";
+    private string codexPercentageMode = "used";
+    private string codexPreferredDisplay = "both";
+    private string performanceDefaultView = "overview";
     private bool applyingState;
     private bool isCompact;
     private string? selectedFirmwarePort;
-    private string selectedFirmwareHardwareModel = "echodesk-mini-fnk0114a-2p4";
+    private string selectedFirmwareHardwareModel = BrokerProtocol.EchoDeskMiniHardwareModel;
     private bool firmwareBoardConfirmed;
     private CancellationTokenSource? brightnessDebounce;
+    private CancellationTokenSource? guidedDiscovery;
+    private bool guidedSetupFinalizing;
+    private string? guidedSetupError;
+    private string? guidedWifiDeviceId;
+    private string guidedWifiSetupCode = "";
+    private string guidedWifiSsid = "";
+    private string guidedWifiPassword = "";
 
-    public MainViewModel(BrokerClient broker, PreferencesService preferencesService)
+    public MainViewModel(
+        BrokerClient broker,
+        PreferencesService preferencesService,
+        GuidedSetupLegalDocuments? setupLegalDocuments = null)
     {
         this.broker = broker;
         this.preferencesService = preferencesService;
         uiContext = SynchronizationContext.Current ?? new SynchronizationContext();
+        guidedSetupLegalDocuments = setupLegalDocuments
+            ?? GuidedSetupLegalDocuments.Discover(AppContext.BaseDirectory);
+        guidedSetup = new GuidedSetupFlow(guidedSetupLegalDocuments);
         preferences = preferencesService.Load();
         broker.StateChanged += OnStateChanged;
         NavigateCommand = new RelayCommand(page => SelectedPage = page as string ?? "Overview");
@@ -42,6 +64,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         OpenAppCommand = new AsyncRelayCommand(OpenAppAsync, app => IsConnected && app is string value && SupportsApp(value));
         SetThemeCommand = new AsyncRelayCommand(SetThemeAsync, _ => IsConnected && SupportsSettings);
         SetNowPlayingCommand = new AsyncRelayCommand(_ => SetNowPlayingAsync(), _ => IsConnected && SupportsSettings);
+        SetAdvancedSettingCommand = new AsyncRelayCommand(
+            SetAdvancedSettingAsync,
+            setting => setting is string key && SupportsDeviceSetting(key));
         ToggleAiUsageCommand = new AsyncRelayCommand(
             _ => SetAiUsageEnabledAsync(!AiUsageEnabled),
             _ => IsBrokerAvailable && AiUsageAvailable);
@@ -65,6 +90,25 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 () => broker.SetFirmwareUpdateNotificationsAsync(!FirmwareManager.UpdateNotificationsEnabled),
                 FirmwareManager.UpdateNotificationsEnabled ? "Update notifications disabled." : "Update notifications enabled."),
             _ => IsBrokerAvailable && FirmwareManager.Available && !FirmwareOperationActive);
+        GuidedSetupContinueCommand = new AsyncRelayCommand(
+            _ => ContinueGuidedSetupAsync(), _ => CanContinueGuidedSetup);
+        GuidedSetupBackCommand = new RelayCommand(
+            _ => MoveGuidedSetupBack(), _ => CanGoBackInGuidedSetup);
+        GuidedSetupRefreshCommand = new AsyncRelayCommand(
+            _ => RefreshGuidedDevicesAsync(), _ => IsBrokerAvailable && !FirmwareOperationActive);
+        GuidedSetupRetryCommand = new AsyncRelayCommand(
+            _ => RetryGuidedSetupAsync(), _ => CanRetryGuidedSetup);
+        GuidedSetupCancelCommand = new AsyncRelayCommand(
+            _ => CancelGuidedSetupAsync(), _ => CanCancelGuidedSetup);
+        GuidedSetupChooseTransportCommand = new RelayCommand(
+            ChooseGuidedSetupTransport,
+            _ => guidedSetup.Step == GuidedSetupStep.Connect && !guidedSetupFinalizing);
+        GuidedWifiProvisionCommand = new AsyncRelayCommand(
+            _ => ProvisionGuidedWifiAsync(), _ => CanProvisionGuidedWifi);
+        OpenWindowsWifiSettingsCommand = new RelayCommand(_ =>
+            Process.Start(new ProcessStartInfo("ms-settings:network-wifi") { UseShellExecute = true }));
+        FinishGuidedSetupCommand = new RelayCommand(_ => FinishGuidedSetup());
+        OpenSetupDocumentCommand = new RelayCommand(OpenSetupDocument, CanOpenSetupDocument);
         AppearanceOptions = ["system", "light", "dark"];
         LayoutOptions =
         [
@@ -78,9 +122,28 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             new Choice("echoDesk", "EchoDesk"),
             new Choice("audioBars", "Audio Bars"),
         ];
+        DefaultAppOptions =
+        [
+            new Choice("home", "Home"), new Choice("codex", "Codex Usage"),
+            new Choice("clock", "Clock"), new Choice("performance", "Performance"),
+            new Choice("nowPlaying", "Now Playing"), new Choice("settings", "Settings"),
+        ];
+        ClockFormatOptions = [new Choice("12h", "12-hour"), new Choice("24h", "24-hour")];
+        TimezoneOptions =
+        [
+            new Choice("Australia/Melbourne", "Melbourne"),
+            new Choice("Australia/Sydney", "Sydney"),
+            new Choice("UTC", "UTC"),
+        ];
+        CodexPercentageModeOptions =
+        [new Choice("used", "Percentage used"), new Choice("remaining", "Percentage remaining")];
+        CodexPreferredDisplayOptions =
+        [new Choice("both", "Session and weekly"), new Choice("session", "5-hour session"), new Choice("weekly", "Weekly")];
+        PerformanceDefaultViewOptions =
+        [new Choice("overview", "All Performance"), new Choice("cpu", "CPU Usage"), new Choice("gpu", "GPU Usage"), new Choice("memory", "RAM Usage")];
         FirmwareHardwareOptions =
         [
-            new Choice("echodesk-mini-fnk0114a-2p4", "EchoDesk Mini · Freenove FNK0114A_2P4"),
+            new Choice(BrokerProtocol.EchoDeskMiniHardwareModel, "EchoDesk Mini · Freenove FNK0114A_2P4"),
         ];
         AppTiles = new ObservableCollection<AppTile>(EchoDeskApps.All.Select(app => new AppTile(app.Id, app.Label, app.Glyph)));
         ThemeService.Apply(preferences.Appearance);
@@ -92,6 +155,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public AsyncRelayCommand OpenAppCommand { get; }
     public AsyncRelayCommand SetThemeCommand { get; }
     public AsyncRelayCommand SetNowPlayingCommand { get; }
+    public AsyncRelayCommand SetAdvancedSettingCommand { get; }
     public AsyncRelayCommand ToggleAiUsageCommand { get; }
     public AsyncRelayCommand ScanFirmwareDevicesCommand { get; }
     public AsyncRelayCommand SelectFirmwareDeviceCommand { get; }
@@ -99,10 +163,26 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public AsyncRelayCommand InstallFirmwareCommand { get; }
     public AsyncRelayCommand CancelFirmwareOperationCommand { get; }
     public AsyncRelayCommand ToggleUpdateNotificationsCommand { get; }
+    public AsyncRelayCommand GuidedSetupContinueCommand { get; }
+    public RelayCommand GuidedSetupBackCommand { get; }
+    public AsyncRelayCommand GuidedSetupRefreshCommand { get; }
+    public AsyncRelayCommand GuidedSetupRetryCommand { get; }
+    public AsyncRelayCommand GuidedSetupCancelCommand { get; }
+    public RelayCommand GuidedSetupChooseTransportCommand { get; }
+    public AsyncRelayCommand GuidedWifiProvisionCommand { get; }
+    public RelayCommand OpenWindowsWifiSettingsCommand { get; }
+    public RelayCommand FinishGuidedSetupCommand { get; }
+    public RelayCommand OpenSetupDocumentCommand { get; }
     public ObservableCollection<AppTile> AppTiles { get; }
     public IReadOnlyList<string> AppearanceOptions { get; }
     public IReadOnlyList<Choice> LayoutOptions { get; }
     public IReadOnlyList<Choice> BackgroundOptions { get; }
+    public IReadOnlyList<Choice> DefaultAppOptions { get; }
+    public IReadOnlyList<Choice> ClockFormatOptions { get; }
+    public IReadOnlyList<Choice> TimezoneOptions { get; }
+    public IReadOnlyList<Choice> CodexPercentageModeOptions { get; }
+    public IReadOnlyList<Choice> CodexPreferredDisplayOptions { get; }
+    public IReadOnlyList<Choice> PerformanceDefaultViewOptions { get; }
     public IReadOnlyList<Choice> FirmwareHardwareOptions { get; }
 
     public string SelectedPage
@@ -112,9 +192,18 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             if (!Set(ref selectedPage, value)) return;
             Raise(nameof(IsOverview)); Raise(nameof(IsDeviceControl)); Raise(nameof(IsCustomisation)); Raise(nameof(IsSetupUpdates));
+            Raise(nameof(IsGuidedSetup));
             if (IsSetupUpdates && IsBrokerAvailable && !FirmwareOperationActive)
             {
                 ScanFirmwareDevicesCommand.Execute(null);
+            }
+            if (IsGuidedSetup && guidedSetup.Step == GuidedSetupStep.SelectDevice)
+                StartGuidedDiscovery();
+            else if (!IsGuidedSetup)
+            {
+                StopGuidedDiscovery();
+                guidedWifiPassword = "";
+                guidedWifiSetupCode = "";
             }
         }
     }
@@ -123,6 +212,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsDeviceControl => SelectedPage == "Device Control";
     public bool IsCustomisation => SelectedPage == "Customisation";
     public bool IsSetupUpdates => SelectedPage == "Setup & Updates";
+    public bool IsGuidedSetup => SelectedPage == "Set up a new device";
     public bool IsCompact { get => isCompact; set => Set(ref isCompact, value); }
     public BrokerState State => state;
     public EchoDeskDevice? Device => state.Device;
@@ -140,6 +230,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public string Appearance => Device?.Theme ?? Device?.Settings.Theme ?? "Not reported";
     public string Feedback { get => feedback; private set => Set(ref feedback, value); }
     public bool SupportsSettings => Device?.Capabilities.ControlProtocol == 1;
+    public bool SupportsDefaultApp => SupportsDeviceSetting("defaultApp");
+    public bool SupportsClockFormat => SupportsDeviceSetting("clockFormat");
+    public bool SupportsTimezone => SupportsDeviceSetting("timezone");
+    public bool SupportsCodexPercentageMode => SupportsDeviceSetting("codexPercentageMode");
+    public bool SupportsCodexPreferredDisplay => SupportsDeviceSetting("codexPreferredDisplay");
+    public bool SupportsPerformanceDefaultView => SupportsDeviceSetting("performanceDefaultView");
     public bool AiUsageAvailable => state.AiUsage.Available;
     public bool AiUsageEnabled => state.AiUsage.Enabled;
     public bool AiUsageFetching => state.AiUsage.Fetching;
@@ -206,6 +302,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public bool CanSelectFirmwareDevice => SelectedFirmwareDevice is { Compatible: true } device
         && !FirmwareOperationActive
         && (!device.RequiresBoardConfirmation || FirmwareBoardConfirmed);
+    public bool CanStartManualRecovery => IsBrokerAvailable && FirmwareManager.Available
+        && !FirmwareOperationActive && FirmwareManager.Status != "checking"
+        && SelectedFirmwareDevice is not null && !string.IsNullOrWhiteSpace(SelectedFirmwarePort);
     public string FirmwareConnectionHeading => FirmwareManager.Status == "noDevice"
         ? "Connect EchoDesk"
         : FirmwareManager.Status == "selectionRequired" ? "Choose your EchoDesk" : "Connect EchoDesk";
@@ -233,6 +332,181 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public bool FirmwareUpdateAvailable => FirmwareManager.Status == "updateAvailable" && FirmwareManager.AvailableVersion is not null;
     public bool FirmwareIsUpToDate => FirmwareManager.Status == "upToDate";
     public bool UpdateNotificationsEnabled => FirmwareManager.UpdateNotificationsEnabled;
+    public bool CanCancelFirmwareOperation => FirmwareManager.Stage is not "writing" and not "verifying_installation";
+
+    public GuidedSetupStep CurrentGuidedSetupStep => guidedSetup.Step;
+    public GuidedSetupTransport CurrentGuidedSetupTransport => guidedSetup.Transport;
+    public bool GuidedSetupUsesUsb => guidedSetup.Transport == GuidedSetupTransport.Usb;
+    public bool GuidedSetupUsesWifi => guidedSetup.Transport == GuidedSetupTransport.Wifi;
+    public bool IsGuidedTermsStep => guidedSetup.Step == GuidedSetupStep.Terms;
+    public bool IsGuidedConnectStep => guidedSetup.Step == GuidedSetupStep.Connect;
+    public bool IsGuidedSelectStep => guidedSetup.Step == GuidedSetupStep.SelectDevice;
+    public bool IsGuidedInstallStep => guidedSetup.Step == GuidedSetupStep.Install;
+    public bool IsGuidedUsbSelectStep => IsGuidedSelectStep && GuidedSetupUsesUsb;
+    public bool IsGuidedWifiSelectStep => IsGuidedSelectStep && GuidedSetupUsesWifi;
+    public bool IsGuidedUsbInstallStep => IsGuidedInstallStep && GuidedSetupUsesUsb;
+    public bool IsGuidedWifiInstallStep => IsGuidedInstallStep && GuidedSetupUsesWifi;
+    public bool IsGuidedCompleteStep => guidedSetup.Step == GuidedSetupStep.Complete;
+    public bool GuidedSetupHasLegalDocuments => guidedSetupLegalDocuments.HasRequiredDocuments;
+    public bool GuidedSetupTermsAvailable => guidedSetupLegalDocuments.HasTerms;
+    public bool GuidedSetupPrivacyAvailable => guidedSetupLegalDocuments.HasPrivacy;
+    public bool GuidedSetupNoticesAvailable => !string.IsNullOrWhiteSpace(guidedSetupLegalDocuments.ThirdPartyNoticesPath)
+                                               && File.Exists(guidedSetupLegalDocuments.ThirdPartyNoticesPath);
+    public string GuidedSetupLegalStatus => GuidedSetupHasLegalDocuments
+        ? "Review both documents before accepting."
+        : "Setup is unavailable in this build because official EchoDesk Terms and Privacy documents have not been supplied.";
+    public bool GuidedSetupTermsAccepted
+    {
+        get => guidedSetup.TermsAccepted;
+        set
+        {
+            guidedSetup.SetTermsAccepted(value);
+            Raise();
+            Raise(nameof(CanContinueGuidedSetup));
+            GuidedSetupContinueCommand.Refresh();
+        }
+    }
+    public IReadOnlyList<FirmwareDeviceCandidate> GuidedSetupDevices =>
+        FirmwareDevices.Where(GuidedSetupFlow.IsDiscoverable).ToArray();
+    public bool GuidedSetupHasDevices => GuidedSetupDevices.Count > 0;
+    public WifiSetupState WifiSetup => state.WifiSetup;
+    public IReadOnlyList<WifiSetupDevice> GuidedWifiDevices =>
+        WifiSetup.Devices.Where(GuidedSetupFlow.IsDiscoverable).ToArray();
+    public bool GuidedWifiHasDevices => GuidedWifiDevices.Count > 0;
+    public IReadOnlyList<WifiSetupDevice> GuidedPairedWifiDevices =>
+        WifiSetup.Devices.Where(device => device.Paired).ToArray();
+    public bool GuidedWifiHasPairedDevice => GuidedPairedWifiDevices.Any(device =>
+        string.Equals(device.DeviceId, guidedSetup.PinnedWifiDeviceId, StringComparison.Ordinal));
+    public string? GuidedWifiSelectedDeviceId
+    {
+        get => guidedWifiDeviceId;
+        set
+        {
+            guidedSetup.SelectWifi(value, WifiSetup.Devices);
+            if (!Set(ref guidedWifiDeviceId, guidedSetup.SelectedWifiDeviceId)) return;
+            Raise(nameof(GuidedWifiSelectedDevice));
+            Raise(nameof(CanProvisionGuidedWifi));
+            GuidedWifiProvisionCommand.Refresh();
+        }
+    }
+    public WifiSetupDevice? GuidedWifiSelectedDevice => GuidedWifiDevices.FirstOrDefault(device =>
+        string.Equals(device.DeviceId, guidedWifiDeviceId, StringComparison.Ordinal));
+    public string GuidedWifiSetupCode
+    {
+        get => guidedWifiSetupCode;
+        set
+        {
+            var filtered = new string((value ?? "").Where(char.IsAsciiDigit).Take(8).ToArray());
+            if (!Set(ref guidedWifiSetupCode, filtered)) return;
+            Raise(nameof(CanProvisionGuidedWifi));
+            GuidedWifiProvisionCommand.Refresh();
+        }
+    }
+    public string GuidedWifiSsid
+    {
+        get => guidedWifiSsid;
+        set
+        {
+            var bounded = (value ?? "").Length <= 32 ? value ?? "" : (value ?? "")[..32];
+            if (!Set(ref guidedWifiSsid, bounded)) return;
+            Raise(nameof(CanProvisionGuidedWifi));
+            GuidedWifiProvisionCommand.Refresh();
+        }
+    }
+    public void SetGuidedWifiPassword(string password)
+    {
+        guidedWifiPassword = password.Length <= 63 ? password : password[..63];
+        Raise(nameof(CanProvisionGuidedWifi));
+        GuidedWifiProvisionCommand.Refresh();
+    }
+    public bool CanProvisionGuidedWifi => IsBrokerAvailable && IsGuidedWifiSelectStep
+        && GuidedWifiSelectedDevice is not null
+        && GuidedWifiSetupCode.Length == 8
+        && GuidedWifiSetupCode.All(char.IsAsciiDigit)
+        && !string.IsNullOrWhiteSpace(GuidedWifiSsid)
+        && (guidedWifiPassword.Length == 0 || guidedWifiPassword.Length is >= 8 and <= 63)
+        && WifiSetup.Status is not "scanning" and not "provisioning";
+    public bool WifiSetupBusy => WifiSetup.Status is "scanning" or "provisioning";
+    public string GuidedWifiStatus => WifiSetup.Message ?? WifiSetup.Status switch
+    {
+        "scanning" => "Looking for EchoDesk on the temporary setup network…",
+        "found" => "EchoDesk found. Enter the code shown on its screen and your home Wi-Fi details.",
+        "provisioning" => "Sending Wi-Fi details securely. Keep this computer joined to the temporary EchoDesk network.",
+        "provisioned" => "EchoDesk joined your Wi-Fi network.",
+        "error" => "Wi-Fi setup did not complete.",
+        _ => "Join the temporary EchoDesk network in Windows, then select Find Wi-Fi devices.",
+    };
+    public string? GuidedSetupSelectedPort
+    {
+        get => guidedSetup.SelectedPort;
+        set
+        {
+            guidedSetup.Select(value, FirmwareDevices);
+            Raise();
+            Raise(nameof(GuidedSetupSelectedDevice));
+            Raise(nameof(GuidedSetupRequiresBoardConfirmation));
+            Raise(nameof(GuidedSetupBoardConfirmed));
+            Raise(nameof(CanContinueGuidedSetup));
+            GuidedSetupContinueCommand.Refresh();
+        }
+    }
+    public FirmwareDeviceCandidate? GuidedSetupSelectedDevice => GuidedSetupDevices.FirstOrDefault(device =>
+        string.Equals(device.Port, guidedSetup.SelectedPort, StringComparison.OrdinalIgnoreCase));
+    public bool GuidedSetupRequiresBoardConfirmation => guidedSetup.SelectedDeviceRequiresConfirmation;
+    public bool GuidedSetupBoardConfirmed
+    {
+        get => guidedSetup.BoardConfirmed;
+        set
+        {
+            guidedSetup.SetBoardConfirmed(value);
+            Raise();
+            Raise(nameof(CanContinueGuidedSetup));
+            GuidedSetupContinueCommand.Refresh();
+        }
+    }
+    public bool CanContinueGuidedSetup => guidedSetup.CanContinue
+        && !FirmwareOperationActive && !guidedSetupFinalizing;
+    public bool CanGoBackInGuidedSetup => guidedSetup.Step is GuidedSetupStep.Connect or GuidedSetupStep.SelectDevice
+        && !FirmwareOperationActive && !guidedSetupFinalizing;
+    public bool CanRetryGuidedSetup => guidedSetup.Step == GuidedSetupStep.Install
+        && (GuidedSetupUsesUsb
+            ? IsFirmwareFailureScreen && guidedSetup.PinnedPort is not null && !FirmwareOperationActive
+            : guidedSetup.PinnedWifiDeviceId is not null && WifiSetup.Status == "error" && !WifiSetupBusy);
+    public bool CanCancelGuidedSetup => guidedSetup.Step == GuidedSetupStep.Install
+        && (GuidedSetupUsesUsb
+            ? FirmwareOperationActive && CanCancelFirmwareOperation
+            : WifiSetup.Status == "provisioning");
+    public string? GuidedSetupError
+    {
+        get => guidedSetupError;
+        private set
+        {
+            if (!Set(ref guidedSetupError, value)) return;
+            Raise(nameof(GuidedSetupHasError));
+        }
+    }
+    public bool GuidedSetupHasError => !string.IsNullOrWhiteSpace(GuidedSetupError);
+    public string GuidedSetupDeviceHeading => GuidedSetupSelectedDevice?.DisplayName ?? "EchoDesk Mini";
+    public string GuidedSetupDeviceDetails => GuidedSetupSelectedDevice is { } device
+        ? string.Join(" · ", new[]
+        {
+            device.HardwareModel ?? "EchoDesk Mini",
+            device.SetupState is "completed" ? "Already configured" : "Ready for setup",
+            device.FirmwareVersion is { Length: > 0 } version ? $"EchoDesk OS {version}" : "Firmware not reported",
+            device.Port,
+        })
+        : "Select a compatible EchoDesk to continue.";
+    public string GuidedSetupProgressLabel => FirmwareManager.ProgressPercent is { } progress
+        ? $"{FirmwareStageLabel} · {progress}%" : FirmwareStageLabel;
+    public string GuidedSetupCompleteHeading => GuidedSetupUsesWifi
+        ? "EchoDesk is on Wi-Fi"
+        : "Your EchoDesk is ready";
+    public string GuidedSetupCompleteMessage => GuidedSetupUsesWifi
+        ? $"EchoDesk accepted the details for {WifiSetup.ConnectedSsid ?? "your Wi-Fi network"}. Reconnect this computer to that network, then find EchoDesk again to confirm it is reachable. USB remains available."
+        : "EchoDesk OS is installed, verified and connected. You can now customise the display and use the desktop companion.";
+    public string GuidedWifiConfirmationStatus => GuidedWifiHasPairedDevice
+        ? $"EchoDesk found on your network{(string.IsNullOrWhiteSpace(WifiSetup.Address) ? "." : $" at {WifiSetup.Address}.")}"
+        : "After reconnecting Windows to your home network, select Find Wi-Fi devices to confirm EchoDesk is reachable.";
 
     public int Brightness
     {
@@ -267,6 +541,42 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             if (Set(ref nowPlayingBackground, value) && !applyingState) SetNowPlayingCommand.Execute(null);
         }
+    }
+
+    public string DefaultApp
+    {
+        get => defaultApp;
+        set { if (Set(ref defaultApp, value) && !applyingState) SetAdvancedSettingCommand.Execute("defaultApp"); }
+    }
+
+    public string ClockFormat
+    {
+        get => clockFormat;
+        set { if (Set(ref clockFormat, value) && !applyingState) SetAdvancedSettingCommand.Execute("clockFormat"); }
+    }
+
+    public string Timezone
+    {
+        get => timezone;
+        set { if (Set(ref timezone, value) && !applyingState) SetAdvancedSettingCommand.Execute("timezone"); }
+    }
+
+    public string CodexPercentageMode
+    {
+        get => codexPercentageMode;
+        set { if (Set(ref codexPercentageMode, value) && !applyingState) SetAdvancedSettingCommand.Execute("codexPercentageMode"); }
+    }
+
+    public string CodexPreferredDisplay
+    {
+        get => codexPreferredDisplay;
+        set { if (Set(ref codexPreferredDisplay, value) && !applyingState) SetAdvancedSettingCommand.Execute("codexPreferredDisplay"); }
+    }
+
+    public string PerformanceDefaultView
+    {
+        get => performanceDefaultView;
+        set { if (Set(ref performanceDefaultView, value) && !applyingState) SetAdvancedSettingCommand.Execute("performanceDefaultView"); }
     }
 
     public string DesktopAppearance
@@ -313,6 +623,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     public Task RestartAsync() => ExecuteAsync(() => broker.RestartAsync(), "EchoDesk is restarting. Reconnection is automatic.");
 
+    public Task FactoryResetAsync() => string.IsNullOrWhiteSpace(Port)
+        ? Task.CompletedTask
+        : ExecuteAsync(
+            () => broker.FactoryResetAsync(Port),
+            "Factory reset accepted. EchoDesk is returning to the Hello screen.");
+
     private Task SetAiUsageEnabledAsync(bool enabled) => ExecuteAsync(
         () => broker.SetAiUsageEnabledAsync(enabled),
         enabled ? "AI Usage Monitor enabled." : "AI Usage Monitor disabled. Background polling has stopped.");
@@ -334,6 +650,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 DeviceTheme = settings.Theme ?? next.Device.Theme ?? DeviceTheme;
                 NowPlayingLayout = settings.NowPlayingLayout ?? NowPlayingLayout;
                 NowPlayingBackground = settings.NowPlayingBackground ?? NowPlayingBackground;
+                DefaultApp = settings.DefaultApp ?? DefaultApp;
+                ClockFormat = settings.ClockFormat ?? ClockFormat;
+                Timezone = settings.Timezone ?? Timezone;
+                CodexPercentageMode = settings.CodexPercentageMode ?? CodexPercentageMode;
+                CodexPreferredDisplay = settings.CodexPreferredDisplay ?? CodexPreferredDisplay;
+                PerformanceDefaultView = settings.PerformanceDefaultView ?? PerformanceDefaultView;
             }
         }
         finally { applyingState = false; }
@@ -353,19 +675,307 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             firmwareBoardConfirmed = false;
         }
 
+        if (IsGuidedWifiSelectStep && guidedWifiDeviceId is null)
+        {
+            var availableWifiDevices = next.WifiSetup.Devices.Where(GuidedSetupFlow.IsDiscoverable).ToArray();
+            if (availableWifiDevices.Length == 1)
+            {
+                guidedSetup.SelectWifi(availableWifiDevices[0].DeviceId, next.WifiSetup.Devices);
+                guidedWifiDeviceId = guidedSetup.SelectedWifiDeviceId;
+            }
+        }
+
+        if (IsGuidedWifiInstallStep)
+        {
+            if (next.WifiSetup.Status == "provisioned"
+                && guidedSetup.CompleteWifi(next.WifiSetup.Provisioned, next.WifiSetup.SelectedDeviceId))
+            {
+                guidedWifiPassword = "";
+                guidedWifiSetupCode = "";
+                GuidedSetupError = null;
+                Feedback = "EchoDesk joined the Wi-Fi network.";
+            }
+            else if (next.WifiSetup.Status == "error")
+            {
+                GuidedSetupError = next.WifiSetup.Message
+                    ?? "Wi-Fi setup did not complete. Check the code and network password, then try again.";
+            }
+        }
+
         foreach (var name in new[]
                  {
                      nameof(State), nameof(Device), nameof(IsConnected), nameof(IsBrokerAvailable),
                      nameof(ConnectionLabel), nameof(ConnectionDetail), nameof(DeviceName), nameof(Port),
                      nameof(Firmware), nameof(Hardware), nameof(ActiveApp), nameof(Appearance), nameof(SupportsSettings),
+                     nameof(SupportsDefaultApp), nameof(SupportsClockFormat), nameof(SupportsTimezone),
+                     nameof(SupportsCodexPercentageMode), nameof(SupportsCodexPreferredDisplay),
+                     nameof(SupportsPerformanceDefaultView),
                      nameof(AiUsageAvailable), nameof(AiUsageEnabled), nameof(AiUsageFetching), nameof(AiUsageStatus),
                      nameof(AiUsageProvider), nameof(AiUsageLastUpdated), nameof(AiUsageGuidance), nameof(AiUsageNeedsAttention),
                      nameof(FirmwareManager), nameof(FirmwareDevices), nameof(SelectedFirmwarePort), nameof(SelectedFirmwareDevice),
+                     nameof(WifiSetup), nameof(GuidedWifiDevices), nameof(GuidedWifiHasDevices),
+                     nameof(GuidedPairedWifiDevices), nameof(GuidedWifiHasPairedDevice),
+                     nameof(GuidedWifiSelectedDeviceId), nameof(GuidedWifiSelectedDevice),
+                     nameof(GuidedWifiStatus), nameof(GuidedWifiConfirmationStatus),
+                     nameof(WifiSetupBusy), nameof(CanProvisionGuidedWifi),
                  }) Raise(name);
         RaiseFirmwareComputed();
+        RaiseGuidedSetupComputed();
         RefreshCommands();
         if (IsConnected) Feedback = "Device state is synchronised.";
+
+        if (IsGuidedSetup && guidedSetup.Step == GuidedSetupStep.Install
+            && IsFirmwareSuccessScreen && !guidedSetupFinalizing)
+        {
+            _ = FinalizeGuidedSetupAsync();
+        }
     }
+
+    private async Task ContinueGuidedSetupAsync()
+    {
+        GuidedSetupError = null;
+        if (guidedSetup.Step is GuidedSetupStep.Terms or GuidedSetupStep.Connect)
+        {
+            if (!guidedSetup.MoveNext()) return;
+            if (guidedSetup.Step == GuidedSetupStep.SelectDevice) StartGuidedDiscovery();
+            RaiseGuidedSetupComputed();
+            return;
+        }
+        if (guidedSetup.Transport != GuidedSetupTransport.Usb
+            || guidedSetup.Step != GuidedSetupStep.SelectDevice || guidedSetup.SelectedPort is not { } port)
+            return;
+
+        // Stop background scans before the existing updater takes exclusive
+        // ownership of the selected serial port for its hardware probe.
+        StopGuidedDiscovery();
+        try
+        {
+            var selected = await broker.SelectFirmwareDeviceAsync(
+                port, "EchoDesk Mini", guidedSetup.BoardConfirmed);
+            ApplyState(selected);
+            if (!string.Equals(selected.FirmwareManager.SelectedPort, port, StringComparison.OrdinalIgnoreCase)
+                || !selected.FirmwareManager.BoardConfirmed)
+            {
+                throw new InvalidDataException("EchoDesk Host did not verify and retain the selected device identity.");
+            }
+            var begun = await broker.BeginGuidedSetupAsync(port);
+            ApplyState(begun);
+            if (!string.Equals(begun.FirmwareManager.SelectedPort, port, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("EchoDesk Host did not retain the selected device identity.");
+            if (!guidedSetup.MoveNext()) return;
+            StopGuidedDiscovery();
+            RaiseGuidedSetupComputed();
+            var installing = await broker.StartFirmwareOperationAsync("install");
+            ApplyState(installing);
+            Feedback = "Guided setup started. Keep this EchoDesk connected.";
+        }
+        catch (Exception error)
+        {
+            GuidedSetupError = FriendlyFirmwareError(error);
+            Feedback = GuidedSetupError;
+            if (guidedSetup.Step == GuidedSetupStep.SelectDevice) StartGuidedDiscovery();
+            RaiseGuidedSetupComputed();
+        }
+    }
+
+    private void MoveGuidedSetupBack()
+    {
+        if (!guidedSetup.MoveBack()) return;
+        if (guidedSetup.Step != GuidedSetupStep.SelectDevice) StopGuidedDiscovery();
+        if (guidedSetup.Step == GuidedSetupStep.Connect)
+        {
+            guidedWifiPassword = "";
+            GuidedWifiSetupCode = "";
+            guidedWifiDeviceId = null;
+        }
+        RaiseGuidedSetupComputed();
+    }
+
+    private void ChooseGuidedSetupTransport(object? parameter)
+    {
+        if (guidedSetup.Step != GuidedSetupStep.Connect) return;
+        var transport = string.Equals(parameter as string, "wifi", StringComparison.OrdinalIgnoreCase)
+            ? GuidedSetupTransport.Wifi
+            : GuidedSetupTransport.Usb;
+        guidedSetup.SelectTransport(transport);
+        guidedWifiDeviceId = null;
+        GuidedSetupError = null;
+        if (!guidedSetup.MoveNext()) return;
+        StartGuidedDiscovery();
+        RaiseGuidedSetupComputed();
+    }
+
+    private async Task RefreshGuidedDevicesAsync()
+    {
+        try
+        {
+            var next = guidedSetup.Transport == GuidedSetupTransport.Wifi
+                ? await broker.DiscoverWifiSetupDevicesAsync()
+                : await broker.ScanFirmwareDevicesAsync();
+            ApplyState(next);
+            GuidedSetupError = null;
+        }
+        catch (Exception error)
+        {
+            GuidedSetupError = guidedSetup.Transport == GuidedSetupTransport.Wifi
+                ? Friendly(error)
+                : FriendlyFirmwareError(error);
+        }
+        RaiseGuidedSetupComputed();
+    }
+
+    private void StartGuidedDiscovery()
+    {
+        if (guidedDiscovery is not null) return;
+        guidedDiscovery = new CancellationTokenSource();
+        _ = GuidedDiscoveryLoopAsync(guidedDiscovery.Token);
+    }
+
+    private void StopGuidedDiscovery()
+    {
+        guidedDiscovery?.Cancel();
+        guidedDiscovery?.Dispose();
+        guidedDiscovery = null;
+    }
+
+    private async Task GuidedDiscoveryLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested
+               && IsGuidedSetup && guidedSetup.Step == GuidedSetupStep.SelectDevice)
+        {
+            await RefreshGuidedDevicesAsync();
+            try
+            {
+                var delay = guidedSetup.Transport == GuidedSetupTransport.Wifi ? 4 : 2;
+                await Task.Delay(TimeSpan.FromSeconds(delay), cancellationToken);
+            }
+            catch (OperationCanceledException) { break; }
+        }
+    }
+
+    private async Task ProvisionGuidedWifiAsync()
+    {
+        if (!CanProvisionGuidedWifi || GuidedWifiSelectedDeviceId is not { } deviceId) return;
+        var setupCode = GuidedWifiSetupCode;
+        var ssid = GuidedWifiSsid.Trim();
+        var password = guidedWifiPassword;
+        GuidedSetupError = null;
+        StopGuidedDiscovery();
+        if (!guidedSetup.MoveNext()) return;
+        RaiseGuidedSetupComputed();
+        try
+        {
+            var next = await broker.ProvisionWifiSetupDeviceAsync(deviceId, setupCode, ssid, password);
+            ApplyState(next);
+            Feedback = "Wi-Fi details sent. Waiting for EchoDesk to join the network…";
+        }
+        catch (Exception error)
+        {
+            GuidedSetupError = Friendly(error);
+            Feedback = GuidedSetupError;
+            RaiseGuidedSetupComputed();
+        }
+    }
+
+    private async Task RetryGuidedSetupAsync()
+    {
+        if (!CanRetryGuidedSetup) return;
+        GuidedSetupError = null;
+        try
+        {
+            var next = GuidedSetupUsesWifi
+                ? await broker.ProvisionWifiSetupDeviceAsync(
+                    guidedSetup.PinnedWifiDeviceId!, GuidedWifiSetupCode, GuidedWifiSsid.Trim(), guidedWifiPassword)
+                : await broker.StartFirmwareOperationAsync("install");
+            ApplyState(next);
+        }
+        catch (Exception error)
+        {
+            GuidedSetupError = FriendlyFirmwareError(error);
+        }
+    }
+
+    private async Task CancelGuidedSetupAsync()
+    {
+        if (!CanCancelGuidedSetup) return;
+        try
+        {
+            var next = GuidedSetupUsesWifi
+                ? await broker.CancelWifiSetupAsync()
+                : await broker.CancelFirmwareOperationAsync();
+            ApplyState(next);
+            GuidedSetupError = "Setup was cancelled safely. Nothing is reported as complete.";
+        }
+        catch (Exception error)
+        {
+            GuidedSetupError = FriendlyFirmwareError(error);
+        }
+    }
+
+    private async Task FinalizeGuidedSetupAsync()
+    {
+        var port = guidedSetup.PinnedPort;
+        if (port is null || guidedSetupFinalizing) return;
+        guidedSetupFinalizing = true;
+        RaiseGuidedSetupComputed();
+        try
+        {
+            if (!string.Equals(state.Port, port, StringComparison.OrdinalIgnoreCase) || !state.IsConnected)
+                throw new IOException("The selected EchoDesk has not reconnected yet.");
+            var completed = await broker.CompleteGuidedSetupAsync(port);
+            ApplyState(completed);
+            var acknowledged = string.Equals(
+                completed.Device?.SetupState, "completed", StringComparison.OrdinalIgnoreCase);
+            if (!guidedSetup.Complete(
+                    completed.FirmwareManager.WriteCompleted,
+                    completed.FirmwareManager.Reconnected && completed.IsConnected,
+                    acknowledged))
+            {
+                throw new InvalidDataException("EchoDesk did not confirm setup completion.");
+            }
+            GuidedSetupError = null;
+            Feedback = "Your EchoDesk is ready.";
+        }
+        catch (Exception error)
+        {
+            GuidedSetupError = FriendlyFirmwareError(error);
+        }
+        finally
+        {
+            guidedSetupFinalizing = false;
+            RaiseGuidedSetupComputed();
+        }
+    }
+
+    private void FinishGuidedSetup()
+    {
+        SelectedPage = "Overview";
+        guidedSetup.Reset();
+        guidedWifiDeviceId = null;
+        guidedWifiSetupCode = "";
+        guidedWifiSsid = "";
+        guidedWifiPassword = "";
+        GuidedSetupError = null;
+        RaiseGuidedSetupComputed();
+    }
+
+    private bool CanOpenSetupDocument(object? parameter) => SetupDocumentPath(parameter as string) is { } path
+        && File.Exists(path);
+
+    private void OpenSetupDocument(object? parameter)
+    {
+        var path = SetupDocumentPath(parameter as string);
+        if (path is null || !File.Exists(path)) return;
+        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+    }
+
+    private string? SetupDocumentPath(string? name) => name switch
+    {
+        "terms" => guidedSetupLegalDocuments.TermsPath,
+        "privacy" => guidedSetupLegalDocuments.PrivacyPath,
+        "notices" => guidedSetupLegalDocuments.ThirdPartyNoticesPath,
+        _ => null,
+    };
 
     private async Task OpenAppAsync(object? parameter)
     {
@@ -392,14 +1002,19 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (!CanStartFirmwareOperation(mode)) return;
         await ExecuteFirmwareAsync(
-            () => broker.StartFirmwareOperationAsync(mode),
-            "Firmware installation started. Keep EchoDesk connected.");
+            () => mode == "manualRecovery"
+                ? broker.StartManualRecoveryAsync(SelectedFirmwarePort!)
+                : broker.StartFirmwareOperationAsync(mode),
+            mode == "manualRecovery"
+                ? "Manual recovery started. Keep the selected ESP32 connected."
+                : "Firmware installation started. Keep EchoDesk connected.");
     }
 
     private bool CanStartFirmwareOperation(string? mode)
     {
         if (!IsBrokerAvailable || !FirmwareManager.Available || FirmwareOperationActive
             || FirmwareManager.Status == "checking") return false;
+        if (mode == "manualRecovery") return CanStartManualRecovery;
         if (mode == "update") return FirmwareUpdateAvailable;
         return IsFirmwareReadyScreen && FirmwareManager.SelectedPort is not null;
     }
@@ -424,6 +1039,24 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             NowPlayingBackground = NowPlayingBackground,
             NowPlayingBackgroundCustomized = true,
         }, true, "Now Playing customisation updated.");
+
+    private Task SetAdvancedSettingAsync(object? parameter)
+    {
+        if (parameter is not string setting || !SupportsDeviceSetting(setting)) return Task.CompletedTask;
+        var patch = setting switch
+        {
+            "defaultApp" => new SettingsPatch { DefaultApp = DefaultApp },
+            "clockFormat" => new SettingsPatch { ClockFormat = ClockFormat },
+            "timezone" => new SettingsPatch { Timezone = Timezone },
+            "codexPercentageMode" => new SettingsPatch { CodexPercentageMode = CodexPercentageMode },
+            "codexPreferredDisplay" => new SettingsPatch { CodexPreferredDisplay = CodexPreferredDisplay },
+            "performanceDefaultView" => new SettingsPatch { PerformanceDefaultView = PerformanceDefaultView },
+            _ => null,
+        };
+        return patch is null
+            ? Task.CompletedTask
+            : SetSettingsAsync(patch, true, "Device customisation updated.");
+    }
 
     private void ScheduleBrightnessUpdate()
     {
@@ -494,14 +1127,21 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private bool SupportsApp(string app) => Device?.SupportedApps.Contains(app, StringComparer.OrdinalIgnoreCase) == true;
 
+    private bool SupportsDeviceSetting(string setting) => IsConnected && SupportsSettings
+        && Device?.UnsupportedSettings.Contains(setting, StringComparer.OrdinalIgnoreCase) != true;
+
     private void RefreshCommands()
     {
         RefreshCommand.Refresh(); ReconnectCommand.Refresh(); OpenAppCommand.Refresh();
-        SetThemeCommand.Refresh(); SetNowPlayingCommand.Refresh();
+        SetThemeCommand.Refresh(); SetNowPlayingCommand.Refresh(); SetAdvancedSettingCommand.Refresh();
         ToggleAiUsageCommand.Refresh();
         ScanFirmwareDevicesCommand.Refresh(); SelectFirmwareDeviceCommand.Refresh();
         CheckFirmwareUpdatesCommand.Refresh(); InstallFirmwareCommand.Refresh();
         CancelFirmwareOperationCommand.Refresh(); ToggleUpdateNotificationsCommand.Refresh();
+        GuidedSetupContinueCommand.Refresh(); GuidedSetupBackCommand.Refresh();
+        GuidedSetupRefreshCommand.Refresh(); GuidedSetupRetryCommand.Refresh();
+        GuidedSetupCancelCommand.Refresh(); GuidedSetupChooseTransportCommand.Refresh();
+        GuidedWifiProvisionCommand.Refresh(); OpenSetupDocumentCommand.Refresh();
     }
 
     private void RaiseFirmwareComputed()
@@ -511,7 +1151,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                      nameof(SelectedFirmwareDevice), nameof(FirmwareOperationActive), nameof(IsFirmwareConnectScreen),
                      nameof(IsFirmwareReadyScreen), nameof(IsFirmwareInstallingScreen), nameof(IsFirmwareSuccessScreen),
                      nameof(IsFirmwarePartialScreen), nameof(IsFirmwareFailureScreen), nameof(ShowBoardConfirmation),
-                     nameof(CanSelectFirmwareDevice), nameof(FirmwareConnectionHeading), nameof(FirmwareConnectionMessage),
+                     nameof(CanSelectFirmwareDevice), nameof(CanStartManualRecovery), nameof(FirmwareConnectionHeading), nameof(FirmwareConnectionMessage),
                      nameof(FirmwareDeviceDetails), nameof(FirmwareCurrentVersion), nameof(FirmwareAvailableVersion),
                      nameof(FirmwareReleaseNotes), nameof(FirmwareStageLabel), nameof(FirmwareProgressLabel),
                      nameof(FirmwareOperationMessage), nameof(FirmwareErrorMessage), nameof(FirmwareHasMeasuredProgress),
@@ -521,15 +1161,44 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         RefreshCommands();
     }
 
+    private void RaiseGuidedSetupComputed()
+    {
+        foreach (var name in new[]
+                 {
+                     nameof(CurrentGuidedSetupStep), nameof(IsGuidedTermsStep), nameof(IsGuidedConnectStep),
+                     nameof(CurrentGuidedSetupTransport), nameof(GuidedSetupUsesUsb), nameof(GuidedSetupUsesWifi),
+                     nameof(IsGuidedSelectStep), nameof(IsGuidedInstallStep), nameof(IsGuidedCompleteStep),
+                     nameof(IsGuidedUsbSelectStep), nameof(IsGuidedWifiSelectStep),
+                     nameof(IsGuidedUsbInstallStep), nameof(IsGuidedWifiInstallStep),
+                     nameof(GuidedSetupTermsAccepted), nameof(GuidedSetupDevices), nameof(GuidedSetupHasDevices),
+                     nameof(GuidedSetupSelectedPort), nameof(GuidedSetupSelectedDevice),
+                     nameof(WifiSetup), nameof(GuidedWifiDevices), nameof(GuidedWifiHasDevices),
+                     nameof(GuidedPairedWifiDevices), nameof(GuidedWifiHasPairedDevice),
+                     nameof(GuidedWifiSelectedDeviceId), nameof(GuidedWifiSelectedDevice),
+                     nameof(GuidedWifiSetupCode), nameof(GuidedWifiSsid), nameof(CanProvisionGuidedWifi),
+                     nameof(GuidedWifiStatus), nameof(GuidedWifiConfirmationStatus), nameof(WifiSetupBusy),
+                     nameof(GuidedSetupRequiresBoardConfirmation), nameof(GuidedSetupBoardConfirmed),
+                     nameof(CanContinueGuidedSetup), nameof(CanGoBackInGuidedSetup), nameof(CanRetryGuidedSetup),
+                     nameof(CanCancelGuidedSetup),
+                     nameof(GuidedSetupDeviceHeading), nameof(GuidedSetupDeviceDetails),
+                     nameof(GuidedSetupProgressLabel), nameof(GuidedSetupCompleteHeading),
+                     nameof(GuidedSetupCompleteMessage), nameof(GuidedSetupHasError),
+                 }) Raise(name);
+        RefreshCommands();
+    }
+
     private static string FriendlyFirmwareStage(string? stage) => stage switch
     {
         "preparing" => "Preparing device",
+        "checking_latest" => "Checking for latest EchoDesk OS",
+        "downloading" => "Downloading firmware",
         "verifying_firmware" => "Verifying firmware",
         "entering_bootloader" => "Entering bootloader",
         "writing" => "Writing firmware",
         "verifying_installation" => "Verifying installation",
         "restarting" => "Restarting",
         "reconnecting" => "Connecting to EchoDesk",
+        "finishing_setup" => "Finishing setup",
         _ => "Preparing installation",
     };
 
@@ -601,6 +1270,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         broker.StateChanged -= OnStateChanged;
         brightnessDebounce?.Cancel();
         brightnessDebounce?.Dispose();
+        StopGuidedDiscovery();
         await broker.DisposeAsync();
     }
 }

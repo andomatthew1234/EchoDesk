@@ -18,23 +18,38 @@ pub struct UsageSignal {
 pub fn usage_signals(entry: &Entry) -> Vec<UsageSignal> {
     let mut values = Vec::new();
     if !entry.provider.uses_model_rows() || entry.extra_windows.is_empty() {
-        values.extend([
-            ("primary", &entry.primary), ("secondary", &entry.secondary), ("tertiary", &entry.tertiary),
-        ].into_iter().filter_map(|(id, window)| window.as_ref().map(|window| UsageSignal {
-            id: id.into(), used: window.used_percent,
-            reset: window.resets_at.map(|date| date.to_rfc3339()),
-        })));
+        values.extend(
+            [
+                ("primary", &entry.primary),
+                ("secondary", &entry.secondary),
+                ("tertiary", &entry.tertiary),
+            ]
+            .into_iter()
+            .filter_map(|(id, window)| {
+                window.as_ref().map(|window| UsageSignal {
+                    id: id.into(),
+                    used: window.used_percent,
+                    reset: window.resets_at.map(|date| date.to_rfc3339()),
+                })
+            }),
+        );
     }
     let extra_slots = if entry.provider.uses_model_rows() && !entry.extra_windows.is_empty() {
         3
     } else {
         3usize.saturating_sub(values.len())
     };
-    values.extend(entry.extra_windows.iter().take(extra_slots).map(|row| UsageSignal {
-        id: format!("extra:{}", row.id),
-        used: row.window.used_percent,
-        reset: row.window.resets_at.map(|date| date.to_rfc3339()),
-    }));
+    values.extend(
+        entry
+            .extra_windows
+            .iter()
+            .take(extra_slots)
+            .map(|row| UsageSignal {
+                id: format!("extra:{}", row.id),
+                used: row.window.used_percent,
+                reset: row.window.resets_at.map(|date| date.to_rfc3339()),
+            }),
+    );
     values
 }
 
@@ -64,7 +79,9 @@ impl SmartSwitch {
         if self.revision != revision {
             self.revision = revision;
             self.reset(now);
-            if manual { self.touch(now); }
+            if manual {
+                self.touch(now);
+            }
         }
     }
 
@@ -81,7 +98,13 @@ impl SmartSwitch {
         self.pending.clear();
     }
 
-    pub fn observe_usage(&mut self, provider: Provider, current: Vec<UsageSignal>, views: &[Option<Provider>], now: Instant) {
+    pub fn observe_usage(
+        &mut self,
+        provider: Provider,
+        current: Vec<UsageSignal>,
+        views: &[Option<Provider>],
+        now: Instant,
+    ) {
         let Some(previous) = self.usage.get_mut(&provider) else {
             self.usage.insert(provider, current);
             return;
@@ -92,12 +115,17 @@ impl SmartSwitch {
                 previous.push(row.clone());
                 continue;
             };
-            if !row.used.is_finite() || !(0.0..=100.0).contains(&row.used) { continue; }
+            if !row.used.is_finite() || !(0.0..=100.0).contains(&row.used) {
+                continue;
+            }
             let mut row_priority = 0;
             if old.reset != row.reset && row.used + 5.0 < old.used {
                 row_priority = 2;
             } else if row.used > old.used {
-                if [80.0, 90.0, 100.0].iter().any(|&limit| old.used < limit && row.used >= limit) {
+                if [80.0, 90.0, 100.0]
+                    .iter()
+                    .any(|&limit| old.used < limit && row.used >= limit)
+                {
                     row_priority = 3;
                 } else if row.used - old.used >= 5.0 {
                     row_priority = 1;
@@ -118,28 +146,59 @@ impl SmartSwitch {
         }
     }
 
-    pub fn observe_plugin(&mut self, id: &str, current: BTreeMap<String, bool>, views: &[Option<&str>], now: Instant, max_age: Duration) {
+    pub fn observe_plugin(
+        &mut self,
+        id: &str,
+        current: BTreeMap<String, bool>,
+        views: &[Option<&str>],
+        now: Instant,
+        max_age: Duration,
+    ) {
         let previous = self.plugins.insert(id.to_owned(), (current.clone(), now));
-        let Some((previous, observed_at)) = previous else { return };
-        if !now.checked_duration_since(observed_at).is_some_and(|age| age <= max_age) { return; }
-        if current.iter().any(|(key, value)| *value && !previous.get(key).copied().unwrap_or(false)) {
+        let Some((previous, observed_at)) = previous else {
+            return;
+        };
+        if !now
+            .checked_duration_since(observed_at)
+            .is_some_and(|age| age <= max_age)
+        {
+            return;
+        }
+        if current
+            .iter()
+            .any(|(key, value)| *value && !previous.get(key).copied().unwrap_or(false))
+        {
             for (index, assigned) in views.iter().enumerate() {
-                if *assigned == Some(id) { self.enqueue(index, 2, now); }
+                if *assigned == Some(id) {
+                    self.enqueue(index, 2, now);
+                }
             }
         }
     }
 
-    pub fn observe_claude_code(&mut self, waiting: Vec<(String, Waiting, i64)>, views: &[Option<&str>], now: Instant) {
+    pub fn observe_claude_code(
+        &mut self,
+        waiting: Vec<(String, Waiting, i64)>,
+        views: &[Option<&str>],
+        now: Instant,
+    ) {
         let current: BTreeSet<_> = waiting.into_iter().collect();
         let previous = self.claude_code_waiting.replace(current.clone());
-        self.pending.retain(|candidate| candidate.claude_wait.as_ref()
-            .is_none_or(|key| current.contains(key)));
+        self.pending.retain(|candidate| {
+            candidate
+                .claude_wait
+                .as_ref()
+                .is_none_or(|key| current.contains(key))
+        });
         if let Some(previous) = previous {
             for key in current.difference(&previous) {
                 for (index, assigned) in views.iter().enumerate() {
                     if *assigned == Some(aimonitor_core::claude_code::VIEW_ID) {
                         self.pending.push(Candidate {
-                            view: index, priority: 2, at: now, claude_wait: Some(key.clone()),
+                            view: index,
+                            priority: 2,
+                            at: now,
+                            claude_wait: Some(key.clone()),
                         });
                     }
                 }
@@ -149,21 +208,39 @@ impl SmartSwitch {
 
     pub fn reset_plugin(&mut self, id: &str, views: &[Option<&str>]) {
         self.plugins.remove(id);
-        self.pending.retain(|candidate| views.get(candidate.view).copied().flatten() != Some(id));
+        self.pending
+            .retain(|candidate| views.get(candidate.view).copied().flatten() != Some(id));
     }
 
     fn enqueue(&mut self, view: usize, priority: u8, now: Instant) {
-        self.pending.push(Candidate { view, priority, at: now, claude_wait: None });
+        self.pending.push(Candidate {
+            view,
+            priority,
+            at: now,
+            claude_wait: None,
+        });
     }
 
     pub fn choose(&mut self, active: usize, now: Instant) -> Option<usize> {
-        self.pending.retain(|c| now.duration_since(c.at) <= EVENT_LIFETIME);
+        self.pending
+            .retain(|c| now.duration_since(c.at) <= EVENT_LIFETIME);
         if self.manual_until.is_some_and(|until| now < until)
-            || self.last_change.is_some_and(|at| now.duration_since(at) < MIN_DWELL) {
+            || self
+                .last_change
+                .is_some_and(|at| now.duration_since(at) < MIN_DWELL)
+        {
             return None;
         }
-        let next = self.pending.iter()
-            .filter(|c| c.view != active && self.shown_at.get(&c.view).is_none_or(|at| now.duration_since(*at) >= VIEW_COOLDOWN))
+        let next = self
+            .pending
+            .iter()
+            .filter(|c| {
+                c.view != active
+                    && self
+                        .shown_at
+                        .get(&c.view)
+                        .is_none_or(|at| now.duration_since(*at) >= VIEW_COOLDOWN)
+            })
             .min_by_key(|c| (std::cmp::Reverse(c.priority), c.at, c.view))
             .map(|c| c.view)?;
         // Events for other windows remain eligible until their original expiry.
@@ -225,7 +302,10 @@ mod tests {
         smart.enqueue(1, 3, start);
         smart.enqueue(2, 2, start);
         assert_eq!(smart.choose(0, start + MIN_DWELL), Some(1));
-        assert_eq!(smart.choose(1, start + MIN_DWELL + Duration::from_secs(1)), None);
+        assert_eq!(
+            smart.choose(1, start + MIN_DWELL + Duration::from_secs(1)),
+            None
+        );
         assert_eq!(smart.choose(1, start + MIN_DWELL * 2), Some(2));
     }
 
@@ -236,13 +316,43 @@ mod tests {
         smart.reset(start);
         let views = [None, Some("weather")];
         let state = |rain| BTreeMap::from([("rain".into(), rain)]);
-        smart.observe_plugin("weather", state(false), &views, start, Duration::from_secs(900));
-        smart.observe_plugin("weather", state(true), &views, start, Duration::from_secs(900));
+        smart.observe_plugin(
+            "weather",
+            state(false),
+            &views,
+            start,
+            Duration::from_secs(900),
+        );
+        smart.observe_plugin(
+            "weather",
+            state(true),
+            &views,
+            start,
+            Duration::from_secs(900),
+        );
         assert_eq!(smart.choose(0, start + MIN_DWELL), Some(1));
-        smart.observe_plugin("weather", state(true), &views, start + MIN_DWELL, Duration::from_secs(900));
+        smart.observe_plugin(
+            "weather",
+            state(true),
+            &views,
+            start + MIN_DWELL,
+            Duration::from_secs(900),
+        );
         assert_eq!(smart.choose(0, start + MIN_DWELL + MIN_DWELL), None);
-        smart.observe_plugin("weather", state(false), &views, start + MIN_DWELL + MIN_DWELL, Duration::from_secs(900));
-        smart.observe_plugin("weather", state(true), &views, start + MIN_DWELL + MIN_DWELL, Duration::from_secs(900));
+        smart.observe_plugin(
+            "weather",
+            state(false),
+            &views,
+            start + MIN_DWELL + MIN_DWELL,
+            Duration::from_secs(900),
+        );
+        smart.observe_plugin(
+            "weather",
+            state(true),
+            &views,
+            start + MIN_DWELL + MIN_DWELL,
+            Duration::from_secs(900),
+        );
         assert_eq!(smart.choose(0, start + MIN_DWELL + MIN_DWELL), None);
     }
 
@@ -253,13 +363,43 @@ mod tests {
         smart.reset(start);
         let views = [None, Some("weather")];
         let state = |rain| BTreeMap::from([("rain".into(), rain)]);
-        smart.observe_plugin("weather", state(false), &views, start, Duration::from_secs(900));
-        smart.observe_plugin("weather", state(true), &views, start, Duration::from_secs(900));
+        smart.observe_plugin(
+            "weather",
+            state(false),
+            &views,
+            start,
+            Duration::from_secs(900),
+        );
+        smart.observe_plugin(
+            "weather",
+            state(true),
+            &views,
+            start,
+            Duration::from_secs(900),
+        );
         smart.reset_plugin("weather", &views);
-        smart.observe_plugin("weather", state(true), &views, start, Duration::from_secs(900));
+        smart.observe_plugin(
+            "weather",
+            state(true),
+            &views,
+            start,
+            Duration::from_secs(900),
+        );
         assert_eq!(smart.choose(0, start + MIN_DWELL), None);
-        smart.observe_plugin("weather", state(false), &views, start + MIN_DWELL, Duration::from_secs(900));
-        smart.observe_plugin("weather", state(true), &views, start + MIN_DWELL, Duration::from_secs(900));
+        smart.observe_plugin(
+            "weather",
+            state(false),
+            &views,
+            start + MIN_DWELL,
+            Duration::from_secs(900),
+        );
+        smart.observe_plugin(
+            "weather",
+            state(true),
+            &views,
+            start + MIN_DWELL,
+            Duration::from_secs(900),
+        );
         assert_eq!(smart.choose(0, start + MIN_DWELL), Some(1));
     }
 
@@ -292,7 +432,11 @@ mod tests {
         let done = ("a".to_owned(), Waiting::Done, 1);
         let permission = ("b".to_owned(), Waiting::Permission, 2);
         smart.observe_claude_code(vec![done.clone()], &views, start);
-        smart.observe_claude_code(vec![done.clone(), permission], &views, start + Duration::from_secs(1));
+        smart.observe_claude_code(
+            vec![done.clone(), permission],
+            &views,
+            start + Duration::from_secs(1),
+        );
         smart.observe_claude_code(vec![done], &views, start + Duration::from_secs(2));
         assert_eq!(smart.choose(0, start + MIN_DWELL), None);
     }
@@ -307,7 +451,11 @@ mod tests {
         let permission = ("b".to_owned(), Waiting::Permission, 2);
         smart.observe_claude_code(vec![], &views, start);
         smart.observe_claude_code(vec![done.clone()], &views, start + Duration::from_secs(1));
-        smart.observe_claude_code(vec![done.clone(), permission], &views, start + Duration::from_secs(4 * 60));
+        smart.observe_claude_code(
+            vec![done.clone(), permission],
+            &views,
+            start + Duration::from_secs(4 * 60),
+        );
         smart.observe_claude_code(vec![done], &views, start + Duration::from_secs(4 * 60 + 30));
         assert_eq!(smart.pending.len(), 1);
         assert_eq!(smart.choose(0, start + Duration::from_secs(8 * 60)), None);
@@ -322,31 +470,67 @@ mod tests {
         let state = |rain| BTreeMap::from([("rain".into(), rain)]);
         let max_age = Duration::from_secs(900);
         smart.observe_plugin("weather", state(false), &views, start, max_age);
-        smart.observe_plugin("weather", state(true), &views, start + max_age + Duration::from_secs(1), max_age);
-        assert_eq!(smart.choose(0, start + max_age + Duration::from_secs(1)), None);
-        smart.observe_plugin("weather", state(false), &views, start + max_age + Duration::from_secs(2), max_age);
-        smart.observe_plugin("weather", state(true), &views, start + max_age + Duration::from_secs(3), max_age);
-        assert_eq!(smart.choose(0, start + max_age + Duration::from_secs(3)), Some(1));
+        smart.observe_plugin(
+            "weather",
+            state(true),
+            &views,
+            start + max_age + Duration::from_secs(1),
+            max_age,
+        );
+        assert_eq!(
+            smart.choose(0, start + max_age + Duration::from_secs(1)),
+            None
+        );
+        smart.observe_plugin(
+            "weather",
+            state(false),
+            &views,
+            start + max_age + Duration::from_secs(2),
+            max_age,
+        );
+        smart.observe_plugin(
+            "weather",
+            state(true),
+            &views,
+            start + max_age + Duration::from_secs(3),
+            max_age,
+        );
+        assert_eq!(
+            smart.choose(0, start + max_age + Duration::from_secs(3)),
+            Some(1)
+        );
     }
 
     #[test]
     fn antigravity_uses_fixed_windows_only_without_model_extras() {
         use aimonitor_core::{ExtraWindow, Window};
-        let window = Window { used_percent: 25.0, resets_at: None,
-            window_minutes: Some(300), reset_description: None };
+        let window = Window {
+            used_percent: 25.0,
+            resets_at: None,
+            window_minutes: Some(300),
+            reset_description: None,
+        };
         let mut entry = Entry {
-            provider: Provider::Antigravity, updated_at: None,
-            primary: Some(window.clone()), secondary: None, tertiary: None,
-            extra_windows: Vec::new(), login_method: None,
-            credits: None, reset_credits: None,
+            provider: Provider::Antigravity,
+            updated_at: None,
+            primary: Some(window.clone()),
+            secondary: None,
+            tertiary: None,
+            extra_windows: Vec::new(),
+            login_method: None,
+            credits: None,
+            reset_credits: None,
         };
         assert_eq!(usage_signals(&entry)[0].id, "primary");
         entry.extra_windows.push(ExtraWindow {
-            id: "model".into(), title: "Model".into(), window,
+            id: "model".into(),
+            title: "Model".into(),
+            window,
         });
         for index in 0..4 {
             entry.extra_windows.push(ExtraWindow {
-                id: format!("model{index}"), title: "Model".into(),
+                id: format!("model{index}"),
+                title: "Model".into(),
                 window: entry.primary.as_ref().unwrap().clone(),
             });
         }
@@ -364,7 +548,13 @@ mod tests {
         let mut smart = SmartSwitch::default();
         smart.reset(start);
         let views = [None, Some(Provider::Claude)];
-        let sample = |value| vec![UsageSignal { id: "primary".into(), used: value, reset: None }];
+        let sample = |value| {
+            vec![UsageSignal {
+                id: "primary".into(),
+                used: value,
+                reset: None,
+            }]
+        };
         smart.observe_usage(Provider::Claude, sample(10.0), &views, start);
         smart.observe_usage(Provider::Claude, sample(12.0), &views, start);
         smart.observe_usage(Provider::Claude, sample(14.0), &views, start);
@@ -379,13 +569,22 @@ mod tests {
         let mut smart = SmartSwitch::default();
         smart.reset(start);
         let views = [None, Some(Provider::DEFAULT)];
-        let sample = |value| vec![UsageSignal { id: "primary".into(), used: value, reset: None }];
+        let sample = |value| {
+            vec![UsageSignal {
+                id: "primary".into(),
+                used: value,
+                reset: None,
+            }]
+        };
         smart.observe_usage(Provider::DEFAULT, sample(20.0), &views, start);
         smart.observe_usage(Provider::DEFAULT, sample(26.0), &views, start);
         assert_eq!(smart.choose(0, start + Duration::from_secs(30)), None);
         assert_eq!(smart.choose(0, start + MIN_DWELL), Some(1));
         smart.touch(start + MIN_DWELL);
         smart.observe_usage(Provider::DEFAULT, sample(90.0), &views, start + MIN_DWELL);
-        assert_eq!(smart.choose(0, start + MIN_DWELL + Duration::from_secs(300)), None);
+        assert_eq!(
+            smart.choose(0, start + MIN_DWELL + Duration::from_secs(300)),
+            None
+        );
     }
 }

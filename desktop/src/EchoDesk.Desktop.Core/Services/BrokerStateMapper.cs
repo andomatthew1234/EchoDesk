@@ -60,6 +60,8 @@ public static class BrokerStateMapper
                 SettingsRevision = revision,
                 Settings = settings,
                 UnsupportedSettings = unsupportedSettings,
+                SetupState = Text(state, "setupState"),
+                SetupVersion = Int(state, "setupVersion"),
                 Capabilities = new DeviceCapabilities
                 {
                     ControlProtocol = controlProtocol,
@@ -81,6 +83,60 @@ public static class BrokerStateMapper
             LastError = lastError,
             AiUsage = ParseAiUsage(payload),
             FirmwareManager = ParseFirmwareManager(payload),
+            WifiSetup = ParseWifiSetup(payload),
+        };
+    }
+
+    private static WifiSetupState ParseWifiSetup(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("wifiSetup", out var setup)
+            || setup.ValueKind != JsonValueKind.Object)
+        {
+            return WifiSetupState.Unavailable;
+        }
+
+        var devices = new List<WifiSetupDevice>();
+        if (setup.TryGetProperty("devices", out var deviceNodes)
+            && deviceNodes.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var device in deviceNodes.EnumerateArray())
+            {
+                if (device.ValueKind != JsonValueKind.Object) continue;
+                var deviceId = BoundedText(device, "deviceId", 128);
+                var address = BoundedText(device, "address", 45);
+                var port = Int(device, "port") ?? 0;
+                if (string.IsNullOrWhiteSpace(deviceId) || string.IsNullOrWhiteSpace(address)
+                    || port is < 1 or > 65535)
+                {
+                    continue;
+                }
+                devices.Add(new WifiSetupDevice
+                {
+                    DeviceId = deviceId,
+                    DisplayName = BoundedText(device, "displayName", 80) ?? "EchoDesk Mini",
+                    Model = BoundedText(device, "model", 80) ?? "",
+                    SetupSsid = BoundedText(device, "setupSsid", 32),
+                    Address = address,
+                    Port = port,
+                    SetupMode = Bool(device, "setupMode") ?? false,
+                    Paired = Bool(device, "paired") ?? false,
+                    FirmwareVersion = BoundedText(device, "firmwareVersion", 40),
+                    SetupState = BoundedText(device, "setupState", 40),
+                });
+            }
+        }
+
+        return new WifiSetupState
+        {
+            Available = Bool(setup, "available") ?? true,
+            Status = BoundedText(setup, "status", 32) ?? "idle",
+            Message = SafeText(setup, "message"),
+            ErrorCode = BoundedText(setup, "errorCode", 80),
+            Devices = devices,
+            SelectedDeviceId = BoundedText(setup, "selectedDeviceId", 128),
+            Provisioned = Bool(setup, "provisioned") ?? false,
+            ConnectedSsid = BoundedText(setup, "connectedSsid", 32),
+            Address = BoundedText(setup, "address", 45),
         };
     }
 
@@ -113,6 +169,9 @@ public static class BrokerStateMapper
                     HardwareModel = Text(device, "hardwareModel"),
                     Compatible = Bool(device, "compatible") ?? false,
                     RequiresBoardConfirmation = Bool(device, "requiresBoardConfirmation") ?? false,
+                    SetupState = Text(device, "setupState"),
+                    SetupVersion = Int(device, "setupVersion"),
+                    InBootloader = Bool(device, "inBootloader") ?? false,
                 });
             }
         }
@@ -178,6 +237,12 @@ public static class BrokerStateMapper
         NowPlayingLayout = Text(node, "nowPlayingLayout"),
         NowPlayingBackground = Text(node, "nowPlayingBackground"),
         NowPlayingBackgroundCustomized = Bool(node, "nowPlayingBackgroundCustomized"),
+        DefaultApp = Text(node, "defaultApp"),
+        ClockFormat = Text(node, "clockFormat"),
+        Timezone = Text(node, "timezone"),
+        CodexPercentageMode = Text(node, "codexPercentageMode"),
+        CodexPreferredDisplay = Text(node, "codexPreferredDisplay"),
+        PerformanceDefaultView = Text(node, "performanceDefaultView"),
     };
 
     private static string? Text(JsonElement node, string name) =>
@@ -217,6 +282,17 @@ public static class BrokerStateMapper
         if (string.IsNullOrWhiteSpace(value)) return null;
         value = value.Replace("\0", string.Empty, StringComparison.Ordinal);
         return value.Length <= maximumLength ? value : value[..(maximumLength - 1)] + "…";
+    }
+
+    private static string? BoundedText(JsonElement node, string name, int maximumLength)
+    {
+        var value = Text(node, name)?.Trim();
+        if (string.IsNullOrWhiteSpace(value) || value.Length > maximumLength
+            || value.IndexOfAny(['\r', '\n', '\0']) >= 0)
+        {
+            return null;
+        }
+        return value;
     }
 
     private static IReadOnlyList<string> Strings(JsonElement node, string name)

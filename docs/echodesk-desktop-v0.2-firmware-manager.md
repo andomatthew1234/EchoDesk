@@ -15,7 +15,7 @@ needed for an offline installation:
   pinned espflash 4.6.0 library.
 - `firmware/firmware-manifest.json` describes the supported release.
 - `firmware/firmware-manifest.json.sha256` pins the exact bundled manifest.
-- `firmware/echodesk-mini/2.28.0/echodesk-os.bin` is the merged ESP32 image for
+- `firmware/echodesk-mini/2.31.0/echodesk-os.bin` is the merged ESP32 image for
   address `0x0`.
 
 Customers do not install Python, PlatformIO or a separate esptool program.
@@ -72,7 +72,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_echodesk_firm
 The packager copies firmware only after every check passes, then hashes the
 copy again. `desktop/build.ps1` places the manifest digest, firmware digest and
 in-process flash-engine version into `component-manifest.json` before creating
-`EchoDesk-Desktop-v0.2.0-win-x64.zip`.
+`EchoDesk-Desktop-v0.2.5-win-x64.zip`.
 
 `desktop/installer/EchoDesk-Desktop.nsi` creates a current-user setup executable
 that installs to `%LOCALAPPDATA%\Programs\EchoDesk Desktop`, adds Start menu
@@ -93,6 +93,13 @@ settings where the existing partition layout permits it. A repair warns that
 settings may be reset and does not loop indefinitely after a failure. Success
 is reported only after the write verifies, the device restarts, the port is
 rediscovered, and the EchoDesk handshake reports the installed version.
+
+Manual Recovery is a separate explicit escape hatch for a selected scanned COM
+port. It bypasses USB-adapter identity, EchoDesk handshake, board model,
+reported flash capacity and installed-version gates. It does not accept a file
+path, flash offset or arbitrary image over IPC. The bundled manifest and image
+remain pinned and validated, and the host must positively identify the ROM
+bootloader as an original ESP32 before the first write.
 
 ## Release procedure
 

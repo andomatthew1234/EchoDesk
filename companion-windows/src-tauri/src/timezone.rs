@@ -8,12 +8,13 @@ use serde::Serialize;
 pub const AUTO: &str = "auto";
 
 /// Kurzliste wie `kTimeZonePopupIdentifiers` der Mac-App, ohne `auto`.
-pub const POPULAR: [&str; 6] = [
+pub const POPULAR: [&str; 7] = [
     "Europe/Berlin",
     "Europe/London",
     "America/New_York",
     "America/Los_Angeles",
     "Asia/Tokyo",
+    "Australia/Melbourne",
     "Australia/Sydney",
 ];
 
@@ -36,10 +37,18 @@ pub fn is_valid(id: &str) -> bool {
 pub fn offset_minutes(id: &str, now: DateTime<Utc>) -> i32 {
     if id != AUTO {
         if let Ok(tz) = id.parse::<Tz>() {
-            return tz.offset_from_utc_datetime(&now.naive_utc()).fix().local_minus_utc() / 60;
+            return tz
+                .offset_from_utc_datetime(&now.naive_utc())
+                .fix()
+                .local_minus_utc()
+                / 60;
         }
     }
-    Local.offset_from_utc_datetime(&now.naive_utc()).fix().local_minus_utc() / 60
+    Local
+        .offset_from_utc_datetime(&now.naive_utc())
+        .fix()
+        .local_minus_utc()
+        / 60
 }
 
 pub fn format_offset(minutes: i32) -> String {
@@ -66,7 +75,11 @@ pub fn options(current: &str) -> Vec<TimeZoneOption> {
             } else {
                 format!("{id} ({})", format_offset(offset))
             };
-            TimeZoneOption { id, label, offset_minutes: offset }
+            TimeZoneOption {
+                id,
+                label,
+                offset_minutes: offset,
+            }
         })
         .collect()
 }

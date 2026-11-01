@@ -29,7 +29,8 @@ memory bounded on the ESP32.
   minute row is solid white. The ESP32 system clock is set by companion UTC
   frames and continues running between updates. Optional NTP can resynchronise
   it. Unsynchronised time uses an animated loading spinner.
-- **Performance** — opens the last persisted Performance view. Usage and
+- **Performance** — opens the configured default view (Overview, CPU, GPU or
+  Memory). Usage and
   temperature selectors each provide five large targets. The aggregate
   dashboards show four 60-sample mini-graphs; individual views show full-width
   graphs. Missing sensors are `N/A`, data becomes stale after 3 seconds and is
@@ -56,25 +57,46 @@ memory bounded on the ESP32.
   palette to white surfaces with black type while retaining grey hierarchy.
   Slider movement changes GPIO21 PWM immediately; release commits the value to
   NVS. Restart uses a confirmation overlay and defers `ESP.restart()` until
-  after the LVGL event callback.
+  after the LVGL event callback. Factory Reset has its own confirmation overlay;
+  it clears onboarding completion and language, retains firmware and unrelated
+  preferences, then returns to the Hello screen.
+
+## Guided first boot
+
+Firmware 2.31.0 includes the persisted first-boot flow and adds optional,
+protected Wi-Fi provisioning. USB remains selected by default. The Wi-Fi path
+uses an expiring `EchoDesk-XXXX` access point and the version-1 protocol in
+[`wifi-setup-protocol.md`](wifi-setup-protocol.md).
+
+Firmware 2.30.0 introduced the version-1 setup
+handshake documented in [`guided-device-setup.md`](guided-device-setup.md).
+Blank devices show the animated Hello screen, English selection and the
+configurable Desktop download prompt. Existing configured devices migrate to
+`completed` so a firmware update cannot unexpectedly force onboarding.
 
 All app screens have a Home control; Now Playing uses a 68x36 target for the
 resistive touchscreen. Navigation uses 140 ms fades and a
 350 ms input guard to reject accidental double taps. Serial parsing and NTP
 ticks remain in the main loop regardless of the visible app.
 
-## Timezone
+## Desktop-controlled preferences
 
-EchoDesk uses the POSIX timezone rule:
+Firmware 2.29.0 and later persist and advertise all EchoDesk Desktop settings through
+Desktop Control v1: startup app, 12/24-hour clock, named timezone, Codex
+used/remaining presentation, preferred Codex card layout and Performance
+default view. Partial settings patches remain revision-checked and atomic.
+
+Timezone values are the IANA names `Australia/Melbourne`, `Australia/Sydney`
+and `UTC`. The two Australian zones currently use the equivalent POSIX rule:
 
 ```text
 AEST-10AEDT,M10.1.0,M4.1.0/3
 ```
 
-This represents Australia/Melbourne under the current daylight-saving rules.
 The companion still supplies UTC time and the existing `tzOffsetMinutes`
-field remains accepted; EchoDesk deliberately retains the full Melbourne DST
-rule instead of reducing it to a fixed offset.
+field remains accepted for backwards compatibility; EchoDesk deliberately
+retains the configured named timezone and its daylight-saving rule instead of
+reducing it to a transient fixed offset. UTC uses `UTC0`.
 
 ## Build
 

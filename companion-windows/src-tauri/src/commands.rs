@@ -133,7 +133,9 @@ pub fn set_settings(app: AppHandle, patch: Map<String, Value>) -> Result<Setting
         let mut current = state.settings.lock().unwrap();
         let autostart = next.autostart;
         next = current.apply_patch(&patch)?;
-        if patch.contains_key("autostart") { next.autostart = autostart; }
+        if patch.contains_key("autostart") {
+            next.autostart = autostart;
+        }
         previous = current.clone();
         *current = next.clone();
         current.save(&app);
@@ -327,21 +329,33 @@ pub fn get_connection(state: State<'_, AppState>) -> ConnectionSnapshot {
 }
 
 #[tauri::command]
-pub async fn wifi_command(app: AppHandle, action: String, ssid: Option<String>, password: Option<String>) -> Result<Value, String> {
+pub async fn wifi_command(
+    app: AppHandle,
+    action: String,
+    ssid: Option<String>,
+    password: Option<String>,
+) -> Result<Value, String> {
     let action = match action.as_str() {
         "status" => WifiAction::Status,
         "scan" => WifiAction::Scan,
-        "set" => WifiAction::Set { ssid: ssid.unwrap_or_default(), password: password.unwrap_or_default() },
+        "set" => WifiAction::Set {
+            ssid: ssid.unwrap_or_default(),
+            password: password.unwrap_or_default(),
+        },
         "forget" => WifiAction::Forget,
         _ => return Err("Unbekanntes WLAN-Kommando".into()),
     };
     tauri::async_runtime::spawn_blocking(move || {
         let (tx, rx) = mpsc::channel();
-        app.state::<AppState>().serial.send(Job::Wifi { action, reply: tx })
+        app.state::<AppState>()
+            .serial
+            .send(Job::Wifi { action, reply: tx })
             .map_err(|_| "Serielle Verbindung nicht verfügbar".to_string())?;
         rx.recv_timeout(Duration::from_secs(20))
             .map_err(|_| "WLAN-Anfrage abgelaufen".to_string())?
-    }).await.map_err(|e| e.to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -522,7 +536,11 @@ pub async fn flash_firmware(
 ) -> Result<FlashOutcome, String> {
     // `autoPicked`: die App hat die Standard-Variante selbst gewählt, weil sie
     // nur den Chip kannte. Nur diese Wahl darf sie auf Verdacht korrigieren.
-    let origin = if auto_picked.unwrap_or(false) { flash::FlashOrigin::AutoPicked } else { flash::FlashOrigin::User };
+    let origin = if auto_picked.unwrap_or(false) {
+        flash::FlashOrigin::AutoPicked
+    } else {
+        flash::FlashOrigin::User
+    };
     tauri::async_runtime::spawn_blocking(move || flash::run_origin(&app, variant, origin))
         .await
         .map_err(|e| e.to_string())?

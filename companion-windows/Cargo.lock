@@ -30,6 +30,7 @@ dependencies = [
  "chrono-tz",
  "ctrlc",
  "dark-light",
+ "getrandom 0.3.4",
  "image",
  "open",
  "rustfft",

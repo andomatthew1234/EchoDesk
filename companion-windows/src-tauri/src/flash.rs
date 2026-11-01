@@ -12,7 +12,9 @@ use crate::state::AppState;
 use crate::updates;
 use aimonitor_core::protocol::{DisplayVariant, PANEL_NO_REPLY};
 use aimonitor_core::DeviceInfo;
-use aimonitor_flash::{flash_image, validate_merged_image, FlashError, FlashEvent, TargetChip, FLASH_BAUD};
+use aimonitor_flash::{
+    flash_image, validate_merged_image, FlashError, FlashEvent, TargetChip, FLASH_BAUD,
+};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -84,13 +86,45 @@ fn emit(app: &AppHandle, progress: FlashProgress) {
     }
 }
 
-fn emit_phase(app: &AppHandle, variant: DisplayVariant, phase: &'static str, percent: Option<u32>, message: Option<String>) {
-    emit(app, FlashProgress { phase, variant, percent, message, summary: None, detail: None });
+fn emit_phase(
+    app: &AppHandle,
+    variant: DisplayVariant,
+    phase: &'static str,
+    percent: Option<u32>,
+    message: Option<String>,
+) {
+    emit(
+        app,
+        FlashProgress {
+            phase,
+            variant,
+            percent,
+            message,
+            summary: None,
+            detail: None,
+        },
+    );
 }
 
-fn emit_failed(app: &AppHandle, variant: DisplayVariant, summary: &'static str, detail: &'static str, message: String) {
+fn emit_failed(
+    app: &AppHandle,
+    variant: DisplayVariant,
+    summary: &'static str,
+    detail: &'static str,
+    message: String,
+) {
     note(app, format!("Fehlgeschlagen: {summary} ({message})"));
-    emit(app, FlashProgress { phase: "failed", variant, percent: None, message: (!message.is_empty()).then_some(message), summary: Some(summary), detail: Some(detail) });
+    emit(
+        app,
+        FlashProgress {
+            phase: "failed",
+            variant,
+            percent: None,
+            message: (!message.is_empty()).then_some(message),
+            summary: Some(summary),
+            detail: Some(detail),
+        },
+    );
 }
 
 /// Woher ein Flash kam. Entscheidet, ob die App ihn nach dem Neustart anhand
@@ -128,7 +162,12 @@ pub enum PanelAction {
 /// nur kurz nach einem eigenen Release-Flash und nie zweimal hintereinander.
 /// `noreply` (keine Rückleitung, Verdacht auf ST7789) korrigiert allein die
 /// Standard-Wahl der App, nie eine Wahl des Nutzers, und bleibt sonst still.
-pub fn panel_action(panel: Option<&str>, firmware: Option<DisplayVariant>, last: Option<&FlashRecord>, now: Instant) -> PanelAction {
+pub fn panel_action(
+    panel: Option<&str>,
+    firmware: Option<DisplayVariant>,
+    last: Option<&FlashRecord>,
+    now: Instant,
+) -> PanelAction {
     let (Some(panel), Some(firmware)) = (panel, firmware) else {
         return PanelAction::None;
     };
@@ -143,7 +182,11 @@ pub fn panel_action(panel: Option<&str>, firmware: Option<DisplayVariant>, last:
     });
     if panel == PANEL_NO_REPLY {
         return match recent {
-            Some(r) if r.origin == FlashOrigin::AutoPicked && firmware == DisplayVariant::Ili9341 => PanelAction::Correct(DisplayVariant::St7789),
+            Some(r)
+                if r.origin == FlashOrigin::AutoPicked && firmware == DisplayVariant::Ili9341 =>
+            {
+                PanelAction::Correct(DisplayVariant::St7789)
+            }
             _ => PanelAction::None,
         };
     }
@@ -167,7 +210,10 @@ pub fn after_connect(app: &AppHandle, info: &DeviceInfo) {
     let reported = info.panel.is_some() && info.display.is_some();
     if state.flashing.load(Ordering::SeqCst) {
         if reported {
-            note(app, "Panel-Abgleich übersprungen, ein Flash läuft noch".into());
+            note(
+                app,
+                "Panel-Abgleich übersprungen, ein Flash läuft noch".into(),
+            );
         }
         return;
     }
@@ -175,23 +221,43 @@ pub fn after_connect(app: &AppHandle, info: &DeviceInfo) {
     let now = Instant::now();
     let action = panel_action(info.panel.as_deref(), info.display, last.as_ref(), now);
     if reported {
-        note(app, format!("Panel-Abgleich: {}; letzter Flash {} -> {}", info.panel.as_deref().unwrap_or("-"), describe_flash(last.as_ref(), now), describe_action(action)));
+        note(
+            app,
+            format!(
+                "Panel-Abgleich: {}; letzter Flash {} -> {}",
+                info.panel.as_deref().unwrap_or("-"),
+                describe_flash(last.as_ref(), now),
+                describe_action(action)
+            ),
+        );
     }
     let (PanelAction::Correct(variant), Some(from)) = (action, info.display) else {
         return;
     };
-    if let Err(e) = app.emit(PANEL_CORRECTION_EVENT, PanelCorrection { from, to: variant }) {
+    if let Err(e) = app.emit(
+        PANEL_CORRECTION_EVENT,
+        PanelCorrection { from, to: variant },
+    ) {
         eprintln!("[flash] Event nicht gesendet: {e}");
     }
     let fix_app = app.clone();
-    let spawned = std::thread::Builder::new().name("aimonitor-panel-fix".into()).spawn(move || {
-        // Erst die Verbindung fertig einrichten lassen.
-        std::thread::sleep(Duration::from_secs(1));
-        match run_origin(&fix_app, variant, FlashOrigin::PanelCorrection) {
-            Ok(_) => note(&fix_app, format!("Nachflashen abgeschlossen: {} statt {}", variant.wire(), from.wire())),
-            Err(e) => note(&fix_app, format!("Nachflashen fehlgeschlagen: {e}")),
-        }
-    });
+    let spawned = std::thread::Builder::new()
+        .name("aimonitor-panel-fix".into())
+        .spawn(move || {
+            // Erst die Verbindung fertig einrichten lassen.
+            std::thread::sleep(Duration::from_secs(1));
+            match run_origin(&fix_app, variant, FlashOrigin::PanelCorrection) {
+                Ok(_) => note(
+                    &fix_app,
+                    format!(
+                        "Nachflashen abgeschlossen: {} statt {}",
+                        variant.wire(),
+                        from.wire()
+                    ),
+                ),
+                Err(e) => note(&fix_app, format!("Nachflashen fehlgeschlagen: {e}")),
+            }
+        });
     if let Err(e) = spawned {
         note(app, format!("Nachflash-Thread nicht gestartet: {e}"));
     }
@@ -223,7 +289,12 @@ fn pause_serial(app: &AppHandle) -> bool {
     let (tx, rx) = mpsc::channel();
     serial_service::send(app, Job::Pause(tx));
     if rx.recv_timeout(PAUSE_TIMEOUT).is_err() {
-        serial_service::send(app, Job::Resume { diagnostic_after_connect: false });
+        serial_service::send(
+            app,
+            Job::Resume {
+                diagnostic_after_connect: false,
+            },
+        );
         return false;
     }
     std::thread::sleep(SETTLE_DELAY);
@@ -238,22 +309,39 @@ pub fn detect_chip(app: &AppHandle) -> Result<Option<&'static str>, String> {
         return Err("flash.err.running".into());
     }
     let _guard = FlashGuard(&state);
-    let port = state.connection.lock().unwrap().port.clone().ok_or_else(|| "esp32.none.info".to_string())?;
+    let port = state
+        .connection
+        .lock()
+        .unwrap()
+        .port
+        .clone()
+        .ok_or_else(|| "esp32.none.info".to_string())?;
     if !pause_serial(app) {
         return Err("flash.err.busy".into());
     }
     let result = aimonitor_flash::detect_chip(&port);
-    serial_service::send(app, Job::Resume { diagnostic_after_connect: false });
+    serial_service::send(
+        app,
+        Job::Resume {
+            diagnostic_after_connect: false,
+        },
+    );
     let chip = match result {
         Ok(Some(TargetChip::Esp32)) => Some("esp32"),
         Ok(Some(TargetChip::Esp32S3)) => Some("esp32s3"),
         Ok(None) => None,
         Err(e) => {
-            note(app, format!("Chip-Erkennung auf {port} fehlgeschlagen: {e}"));
+            note(
+                app,
+                format!("Chip-Erkennung auf {port} fehlgeschlagen: {e}"),
+            );
             None
         }
     };
-    note(app, format!("Chip-Erkennung auf {port}: {}", chip.unwrap_or("unbekannt")));
+    note(
+        app,
+        format!("Chip-Erkennung auf {port}: {}", chip.unwrap_or("unbekannt")),
+    );
     Ok(chip)
 }
 
@@ -268,52 +356,124 @@ impl Drop for FlashGuard<'_> {
 
 /// Kompletter Ablauf: Download (falls nötig), Pause, Flash, Resume.
 /// Fehler kommen als i18n-Schlüssel zurück; das Detail steht im Event.
-pub fn run_origin(app: &AppHandle, variant: DisplayVariant, origin: FlashOrigin) -> Result<FlashOutcome, String> {
+pub fn run_origin(
+    app: &AppHandle,
+    variant: DisplayVariant,
+    origin: FlashOrigin,
+) -> Result<FlashOutcome, String> {
     run_with_image(app, variant, None, origin)
 }
 
-pub fn run_with_image(app: &AppHandle, variant: DisplayVariant, local_path: Option<PathBuf>, origin: FlashOrigin) -> Result<FlashOutcome, String> {
+pub fn run_with_image(
+    app: &AppHandle,
+    variant: DisplayVariant,
+    local_path: Option<PathBuf>,
+    origin: FlashOrigin,
+) -> Result<FlashOutcome, String> {
     let state = app.state::<AppState>();
     if state.flashing.swap(true, Ordering::SeqCst) {
         return Err("flash.err.running".into());
     }
     let _guard = FlashGuard(&state);
 
-    let port = state.connection.lock().unwrap().port.clone().ok_or_else(|| "esp32.none.info".to_string())?;
-    note(app, format!("Start: Variante {} auf {port} ({origin:?}, {})", variant.wire(), if local_path.is_some() { "Datei" } else { "Release" }));
-    *state.last_flash.lock().unwrap() = Some(FlashRecord { at: Instant::now(), variant, local: local_path.is_some(), origin });
-    let chip = if variant.is_esp32s3() { TargetChip::Esp32S3 } else { TargetChip::Esp32 };
+    let port = state
+        .connection
+        .lock()
+        .unwrap()
+        .port
+        .clone()
+        .ok_or_else(|| "esp32.none.info".to_string())?;
+    note(
+        app,
+        format!(
+            "Start: Variante {} auf {port} ({origin:?}, {})",
+            variant.wire(),
+            if local_path.is_some() {
+                "Datei"
+            } else {
+                "Release"
+            }
+        ),
+    );
+    *state.last_flash.lock().unwrap() = Some(FlashRecord {
+        at: Instant::now(),
+        variant,
+        local: local_path.is_some(),
+        origin,
+    });
+    let chip = if variant.is_esp32s3() {
+        TargetChip::Esp32S3
+    } else {
+        TargetChip::Esp32
+    };
 
     // Firmware-Datei sicherstellen; der Download meldet sich über firmware-download.
     let (image, release) = if let Some(path) = local_path {
-        let valid_extension = path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("bin"));
+        let valid_extension = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("bin"));
         let metadata = std::fs::metadata(&path).map_err(|e| {
             let msg = e.to_string();
-            emit_failed(app, variant, "flash.err.nofile.title", "flash.err.nofile.detail", msg.clone());
+            emit_failed(
+                app,
+                variant,
+                "flash.err.nofile.title",
+                "flash.err.nofile.detail",
+                msg.clone(),
+            );
             msg
         })?;
         if !valid_extension || !metadata.is_file() || metadata.len() > chip.max_image_bytes() {
-            emit_failed(app, variant, "flash.err.invalid.title", "flash.local.format.required", String::new());
+            emit_failed(
+                app,
+                variant,
+                "flash.err.invalid.title",
+                "flash.local.format.required",
+                String::new(),
+            );
             return Err("flash.local.format.required".into());
         }
         let image = std::fs::read(&path).map_err(|e| {
             let msg = e.to_string();
-            emit_failed(app, variant, "flash.err.nofile.title", "flash.err.nofile.detail", msg.clone());
+            emit_failed(
+                app,
+                variant,
+                "flash.err.nofile.title",
+                "flash.err.nofile.detail",
+                msg.clone(),
+            );
             msg
         })?;
         (image, None)
     } else {
         emit_phase(app, variant, "downloading", None, None);
         let file = updates::download_firmware(app, variant).map_err(|e| {
-            emit_failed(app, variant, "flash.err.nofile.title", "flash.err.nofile.detail", e.clone());
+            emit_failed(
+                app,
+                variant,
+                "flash.err.nofile.title",
+                "flash.err.nofile.detail",
+                e.clone(),
+            );
             e
         })?;
         if file.fallback {
-            println!("[flash] Hinweis: kein Asset für {}, Standard-Image {} wird verwendet", variant.wire(), file.asset);
+            println!(
+                "[flash] Hinweis: kein Asset für {}, Standard-Image {} wird verwendet",
+                variant.wire(),
+                file.asset
+            );
         }
         let image = std::fs::read(&file.path).map_err(|e| {
             let msg = format!("{}: {e}", file.path.display());
-            emit_failed(app, variant, "flash.err.nofile.title", "flash.err.nofile.detail", msg.clone());
+            emit_failed(
+                app,
+                variant,
+                "flash.err.nofile.title",
+                "flash.err.nofile.detail",
+                msg.clone(),
+            );
             msg
         })?;
         (image, Some(file))
@@ -328,16 +488,31 @@ pub fn run_with_image(app: &AppHandle, variant: DisplayVariant, local_path: Opti
         } else {
             "flash.local.format.required"
         };
-        emit_failed(app, variant, "flash.err.invalid.title", detail, String::new());
+        emit_failed(
+            app,
+            variant,
+            "flash.err.invalid.title",
+            detail,
+            String::new(),
+        );
         return Err(detail.into());
     }
 
     if !pause_serial(app) {
         let msg = "Serial-Service hat die Pause nicht bestätigt".to_string();
-        emit_failed(app, variant, "flash.err.busy", "flash.err.busy.fix", msg.clone());
+        emit_failed(
+            app,
+            variant,
+            "flash.err.busy",
+            "flash.err.busy.fix",
+            msg.clone(),
+        );
         return Err(msg);
     }
-    println!("[flash] Pause bestätigt, Port {port} frei; {} B ab 0x0 mit {FLASH_BAUD} Baud", image.len());
+    println!(
+        "[flash] Pause bestätigt, Port {port} frei; {} B ab 0x0 mit {FLASH_BAUD} Baud",
+        image.len()
+    );
 
     let started = Instant::now();
     let app_events = app.clone();
@@ -358,11 +533,22 @@ pub fn run_with_image(app: &AppHandle, variant: DisplayVariant, local_path: Opti
                 return;
             }
             if percent.map(|p| p % 10 == 0).unwrap_or(false) {
-                println!("[flash] {:>6.1?} writing {}%", started.elapsed(), percent.unwrap_or(0));
+                println!(
+                    "[flash] {:>6.1?} writing {}%",
+                    started.elapsed(),
+                    percent.unwrap_or(0)
+                );
             }
             last_percent = percent;
         } else {
-            println!("[flash] {:>6.1?} {phase}{}", started.elapsed(), message.as_deref().map(|m| format!(" ({m})")).unwrap_or_default());
+            println!(
+                "[flash] {:>6.1?} {phase}{}",
+                started.elapsed(),
+                message
+                    .as_deref()
+                    .map(|m| format!(" ({m})"))
+                    .unwrap_or_default()
+            );
         }
         emit_phase(&app_events, variant, phase, percent, message);
     });
@@ -370,10 +556,14 @@ pub fn run_with_image(app: &AppHandle, variant: DisplayVariant, local_path: Opti
     let outcome = match result {
         Ok(()) => {
             let seconds = started.elapsed().as_secs_f64();
-            note(app, format!("Fertig nach {seconds:.1} s: {}", variant.wire()));
+            note(
+                app,
+                format!("Fertig nach {seconds:.1} s: {}", variant.wire()),
+            );
             {
                 let mut settings = state.settings.lock().unwrap();
-                settings.installed_firmware_version = release.as_ref().map(|file| file.version.clone());
+                settings.installed_firmware_version =
+                    release.as_ref().map(|file| file.version.clone());
                 settings.save(app);
             }
             {
@@ -383,7 +573,17 @@ pub fn run_with_image(app: &AppHandle, variant: DisplayVariant, local_path: Opti
                     registry::save(app, &reg);
                 }
             }
-            Ok(FlashOutcome { variant, version: release.as_ref().map_or("local".to_string(), |file| file.version.clone()), tag: release.as_ref().map_or("local".to_string(), |file| file.tag.clone()), port: port.clone(), seconds })
+            Ok(FlashOutcome {
+                variant,
+                version: release
+                    .as_ref()
+                    .map_or("local".to_string(), |file| file.version.clone()),
+                tag: release
+                    .as_ref()
+                    .map_or("local".to_string(), |file| file.tag.clone()),
+                port: port.clone(),
+                seconds,
+            })
         }
         Err(e) => {
             let (summary, detail) = classify(&e);
@@ -393,7 +593,12 @@ pub fn run_with_image(app: &AppHandle, variant: DisplayVariant, local_path: Opti
     };
 
     // Service in jedem Fall fortsetzen; Diagnose-Frame nur nach Erfolg.
-    serial_service::send(app, Job::Resume { diagnostic_after_connect: outcome.is_ok() });
+    serial_service::send(
+        app,
+        Job::Resume {
+            diagnostic_after_connect: outcome.is_ok(),
+        },
+    );
     updates::emit_status(app);
     outcome
 }
@@ -403,43 +608,132 @@ mod tests {
     use super::*;
 
     fn record(variant: DisplayVariant, origin: FlashOrigin, ago: u64, now: Instant) -> FlashRecord {
-        FlashRecord { at: now - Duration::from_secs(ago), variant, local: false, origin }
+        FlashRecord {
+            at: now - Duration::from_secs(ago),
+            variant,
+            local: false,
+            origin,
+        }
     }
 
     #[test]
     fn detected_panel_is_corrected_right_after_own_flash() {
         let now = Instant::now() + Duration::from_secs(3600);
         let fresh = record(DisplayVariant::Ili9341, FlashOrigin::User, 60, now);
-        assert_eq!(panel_action(Some("st7789"), Some(DisplayVariant::Ili9341), Some(&fresh), now), PanelAction::Correct(DisplayVariant::St7789));
+        assert_eq!(
+            panel_action(
+                Some("st7789"),
+                Some(DisplayVariant::Ili9341),
+                Some(&fresh),
+                now
+            ),
+            PanelAction::Correct(DisplayVariant::St7789)
+        );
         // Ohne frischen Flash nur ein Hinweis.
         let old = record(DisplayVariant::Ili9341, FlashOrigin::User, 600, now);
-        assert_eq!(panel_action(Some("st7789"), Some(DisplayVariant::Ili9341), Some(&old), now), PanelAction::Notify(DisplayVariant::St7789));
-        assert_eq!(panel_action(Some("st7789"), Some(DisplayVariant::Ili9341), None, now), PanelAction::Notify(DisplayVariant::St7789));
+        assert_eq!(
+            panel_action(
+                Some("st7789"),
+                Some(DisplayVariant::Ili9341),
+                Some(&old),
+                now
+            ),
+            PanelAction::Notify(DisplayVariant::St7789)
+        );
+        assert_eq!(
+            panel_action(Some("st7789"), Some(DisplayVariant::Ili9341), None, now),
+            PanelAction::Notify(DisplayVariant::St7789)
+        );
         // Nach einer Korrektur nie ein zweites Mal automatisch.
-        let fixed = record(DisplayVariant::Ili9341, FlashOrigin::PanelCorrection, 60, now);
-        assert_eq!(panel_action(Some("st7789"), Some(DisplayVariant::Ili9341), Some(&fixed), now), PanelAction::Notify(DisplayVariant::St7789));
+        let fixed = record(
+            DisplayVariant::Ili9341,
+            FlashOrigin::PanelCorrection,
+            60,
+            now,
+        );
+        assert_eq!(
+            panel_action(
+                Some("st7789"),
+                Some(DisplayVariant::Ili9341),
+                Some(&fixed),
+                now
+            ),
+            PanelAction::Notify(DisplayVariant::St7789)
+        );
         // Lokale Datei: keine Korrektur.
-        let local = FlashRecord { local: true, ..fresh };
-        assert_eq!(panel_action(Some("st7789"), Some(DisplayVariant::Ili9341), Some(&local), now), PanelAction::Notify(DisplayVariant::St7789));
+        let local = FlashRecord {
+            local: true,
+            ..fresh
+        };
+        assert_eq!(
+            panel_action(
+                Some("st7789"),
+                Some(DisplayVariant::Ili9341),
+                Some(&local),
+                now
+            ),
+            PanelAction::Notify(DisplayVariant::St7789)
+        );
         // Passt: nichts zu tun.
-        assert_eq!(panel_action(Some("ili9341"), Some(DisplayVariant::Ili9341), Some(&fresh), now), PanelAction::None);
+        assert_eq!(
+            panel_action(
+                Some("ili9341"),
+                Some(DisplayVariant::Ili9341),
+                Some(&fresh),
+                now
+            ),
+            PanelAction::None
+        );
     }
 
     #[test]
     fn no_reply_only_corrects_the_apps_own_pick() {
         let now = Instant::now() + Duration::from_secs(3600);
         let picked = record(DisplayVariant::Ili9341, FlashOrigin::AutoPicked, 60, now);
-        assert_eq!(panel_action(Some(PANEL_NO_REPLY), Some(DisplayVariant::Ili9341), Some(&picked), now), PanelAction::Correct(DisplayVariant::St7789));
+        assert_eq!(
+            panel_action(
+                Some(PANEL_NO_REPLY),
+                Some(DisplayVariant::Ili9341),
+                Some(&picked),
+                now
+            ),
+            PanelAction::Correct(DisplayVariant::St7789)
+        );
         let chosen = record(DisplayVariant::Ili9341, FlashOrigin::User, 60, now);
-        assert_eq!(panel_action(Some(PANEL_NO_REPLY), Some(DisplayVariant::Ili9341), Some(&chosen), now), PanelAction::None);
-        assert_eq!(panel_action(Some(PANEL_NO_REPLY), Some(DisplayVariant::St7789), None, now), PanelAction::None);
+        assert_eq!(
+            panel_action(
+                Some(PANEL_NO_REPLY),
+                Some(DisplayVariant::Ili9341),
+                Some(&chosen),
+                now
+            ),
+            PanelAction::None
+        );
+        assert_eq!(
+            panel_action(
+                Some(PANEL_NO_REPLY),
+                Some(DisplayVariant::St7789),
+                None,
+                now
+            ),
+            PanelAction::None
+        );
     }
 
     #[test]
     fn s3_and_unknown_panels_are_left_alone() {
         let now = Instant::now();
-        assert_eq!(panel_action(Some("st7701"), Some(DisplayVariant::St7701), None, now), PanelAction::None);
-        assert_eq!(panel_action(Some("ili9342"), Some(DisplayVariant::Ili9341), None, now), PanelAction::None);
-        assert_eq!(panel_action(None, Some(DisplayVariant::Ili9341), None, now), PanelAction::None);
+        assert_eq!(
+            panel_action(Some("st7701"), Some(DisplayVariant::St7701), None, now),
+            PanelAction::None
+        );
+        assert_eq!(
+            panel_action(Some("ili9342"), Some(DisplayVariant::Ili9341), None, now),
+            PanelAction::None
+        );
+        assert_eq!(
+            panel_action(None, Some(DisplayVariant::Ili9341), None, now),
+            PanelAction::None
+        );
     }
 }

@@ -12,6 +12,10 @@ void config_load(AppConfig &cfg);
 // Save config to NVS
 void config_save(const AppConfig &cfg);
 
+// Reset only the guided setup marker/language selection. Other device
+// preferences and unrelated NVS partitions are deliberately preserved.
+void config_factory_reset_setup(AppConfig &cfg);
+
 // Backlight control — implemented in main.cpp (LEDC PWM)
 void backlight_apply_percent(uint8_t pct);
 

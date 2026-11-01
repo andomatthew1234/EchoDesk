@@ -41,11 +41,17 @@ fn now() -> i64 {
 }
 
 fn token_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_config_dir().ok().map(|d| d.join("claude-code-token"))
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|d| d.join("claude-code-token"))
 }
 
 fn settings_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().home_dir().ok().map(|home| core::settings_path(&home))
+    app.path()
+        .home_dir()
+        .ok()
+        .map(|home| core::settings_path(&home))
 }
 
 /// 128 Bit aus zwei `RandomState`-Schlüsseln, die die Standardbibliothek aus
@@ -101,15 +107,25 @@ fn report_waiting(app: &AppHandle) {
     // newer listener observation after reading an older waiting state.
     let state = app.state::<AppState>();
     let cc = state.claude_code.lock().unwrap();
-    let waiting = cc.sessions.waiting(now()).iter()
-        .filter_map(|s| s.waiting.map(|kind| (s.id.clone(), kind, s.since))).collect();
+    let waiting = cc
+        .sessions
+        .waiting(now())
+        .iter()
+        .filter_map(|s| s.waiting.map(|kind| (s.id.clone(), kind, s.since)))
+        .collect();
     let _ = state.serial.send(Job::SmartClaudeCode(waiting));
 }
 
 fn refresh_hook_status(app: &AppHandle) -> Option<HookStatus> {
-    let token = app.state::<AppState>().claude_code.lock().unwrap().token.clone();
-    let status = settings_path(app)
-        .and_then(|path| core::file_hook_status(&path, core::PORT, &token).ok());
+    let token = app
+        .state::<AppState>()
+        .claude_code
+        .lock()
+        .unwrap()
+        .token
+        .clone();
+    let status =
+        settings_path(app).and_then(|path| core::file_hook_status(&path, core::PORT, &token).ok());
     let state = app.state::<AppState>();
     let mut cc = state.claude_code.lock().unwrap();
     let changed = cc.hooks != status;
@@ -143,7 +159,13 @@ pub fn start(app: AppHandle) {
         .spawn(move || loop {
             std::thread::sleep(Duration::from_secs(60));
             refresh_hook_status(&app);
-            let resend = app.state::<AppState>().claude_code.lock().unwrap().sessions.tick(now());
+            let resend = app
+                .state::<AppState>()
+                .claude_code
+                .lock()
+                .unwrap()
+                .sessions
+                .tick(now());
             if resend {
                 resend_if_assigned(&app);
             }
@@ -182,8 +204,19 @@ fn handle(app: &AppHandle, mut stream: TcpStream) {
     let mut chunk = [0u8; 4096];
     let status = loop {
         match parse_request(&buffer) {
-            Request::Complete { method, path, token, body } => {
-                let expected = app.state::<AppState>().claude_code.lock().unwrap().token.clone();
+            Request::Complete {
+                method,
+                path,
+                token,
+                body,
+            } => {
+                let expected = app
+                    .state::<AppState>()
+                    .claude_code
+                    .lock()
+                    .unwrap()
+                    .token
+                    .clone();
                 let status = check_request(&method, &path, token.as_deref(), &expected);
                 if status != 200 {
                     break status;
@@ -225,7 +258,14 @@ pub fn scene(app: &AppHandle, language: Language, theme: Theme, layout: SceneLay
         matches!(cc.hooks, Some(HookStatus::Installed)),
         cc.sessions.receiving(now),
     );
-    core::scene(&cc.sessions.waiting(now), setup, now, language, theme, layout)
+    core::scene(
+        &cc.sessions.waiting(now),
+        setup,
+        now,
+        language,
+        theme,
+        layout,
+    )
 }
 
 #[derive(Debug, Serialize)]
@@ -291,10 +331,19 @@ pub fn claude_code_status(app: AppHandle) -> ClaudeCodeStatus {
 /// Hooks eintragen (`install = true`) oder entfernen. Die Oberfläche fragt
 /// vorher nach; hier wird nur noch geschrieben.
 #[tauri::command]
-pub async fn claude_code_set_hooks(app: AppHandle, install: bool) -> Result<ClaudeCodeStatus, String> {
+pub async fn claude_code_set_hooks(
+    app: AppHandle,
+    install: bool,
+) -> Result<ClaudeCodeStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let path = settings_path(&app).ok_or("Benutzerordner nicht gefunden")?;
-        let token = app.state::<AppState>().claude_code.lock().unwrap().token.clone();
+        let token = app
+            .state::<AppState>()
+            .claude_code
+            .lock()
+            .unwrap()
+            .token
+            .clone();
         core::write_hooks_file(&path, install, core::PORT, &token)?;
         refresh_hook_status(&app);
         Ok(status(&app))

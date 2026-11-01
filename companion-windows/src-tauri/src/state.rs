@@ -12,6 +12,7 @@ use crate::music::MusicFeed;
 use crate::serial_service::{ConnectionSnapshot, Job};
 use crate::settings::Settings;
 use crate::updates::ReleaseCache;
+use crate::wifi_setup::WifiSetupState;
 use aimonitor_core::Provider;
 use aimonitor_core::{DeviceRegistry, Snapshot, Source};
 use std::collections::HashMap;
@@ -66,6 +67,9 @@ pub struct AppState {
     /// Consumer-facing install/update/recovery workflow. It contains no raw
     /// flash command or caller-controlled file path.
     pub firmware_manager: Mutex<FirmwareManagerState>,
+    /// Optional Wi-Fi onboarding. It never replaces or owns the USB serial
+    /// transport and only targets devices returned by bounded discovery.
+    pub wifi_setup: Mutex<WifiSetupState>,
 }
 
 impl AppState {
@@ -101,6 +105,7 @@ impl AppState {
             last_flash: Mutex::new(None),
             installing: AtomicBool::new(false),
             firmware_manager: Mutex::new(FirmwareManagerState::default()),
+            wifi_setup: Mutex::new(WifiSetupState::default()),
         }
     }
 }

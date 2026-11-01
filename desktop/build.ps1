@@ -14,7 +14,7 @@ $companionRoot = Join-Path $repositoryRoot 'companion-windows'
 $localDotnet = Join-Path $env:USERPROFILE '.dotnet-sdk\dotnet.exe'
 $dotnet = if (Test-Path -LiteralPath $localDotnet) { $localDotnet } else { (Get-Command dotnet -ErrorAction Stop).Source }
 $configuration = 'Release'
-$packageVersion = '0.2.2'
+$packageVersion = '0.2.5'
 $expectedCliVersion = '0.70.0'
 $expectedCliSha256 = 'F81570B0CD7593ABB9822EB2362F9B9EDA3A382A571457718EE37E664E9A62FC'
 $expectedFlashEngineVersion = '4.6.0'
@@ -78,7 +78,7 @@ if ($cliHash -ne $expectedCliSha256) {
     throw "Refusing to package unpinned codexbar-cli.exe. Expected $expectedCliSha256, got $cliHash."
 }
 $cliVersion = (& $CodexBarCli --version | Select-Object -First 1) -join ''
-if ($LASTEXITCODE -ne 0 -or $cliVersion -notmatch [regex]::Escape($expectedCliVersion)) {
+if ($cliVersion.IndexOf($expectedCliVersion, [StringComparison]::Ordinal) -lt 0) {
     throw "Pinned provider did not report expected version $expectedCliVersion (reported '$cliVersion')."
 }
 

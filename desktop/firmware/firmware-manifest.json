@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-10-31T00:00:00+11:00",
+  "generatedAt": "2026-11-01T12:38:34+11:00",
   "releases": [
     {
-      "firmwareVersion": "2.28.0",
+      "firmwareVersion": "2.31.0",
       "hardwareModel": "EchoDesk Mini",
       "hardwareId": "freenove-fnk0114a-2p4",
       "supportedChip": "esp32",
@@ -12,12 +12,12 @@
       "flashMode": "dio",
       "flashFrequency": "40m",
       "flashSize": "4MB",
-      "imageFile": "echodesk-mini/2.28.0/echodesk-os.bin",
+      "imageFile": "echodesk-mini/2.31.0/echodesk-os.bin",
       "downloadUrl": null,
-      "sha256": "7A924F81DF43C6D4E8FFD411217FD0E3B91D60E31F0AEC7EDDAB19144123E71C",
-      "size": 1471136,
-      "releaseNotes": "First bundled EchoDesk OS release for EchoDesk Mini, with the Codex usage dashboard, landscape touch navigation, clock, Now Playing, Performance Centre, light and dark appearance, and EchoDesk Desktop remote control.",
-      "minimumDesktopVersion": "0.2.0"
+      "sha256": "77DD25B6BB32CD059807135A9DB9577B7F7D39748F50BC7256C528BD45577175",
+      "size": 1516400,
+      "releaseNotes": "Adds optional Wi-Fi setup with a protected temporary network, on-screen pairing code, strict local discovery and provisioning, and authenticated LAN rediscovery. USB remains the default connection and recovery path.",
+      "minimumDesktopVersion": "0.2.5"
     }
   ]
 }

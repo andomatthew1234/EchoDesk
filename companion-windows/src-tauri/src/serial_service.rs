@@ -7,8 +7,8 @@
 //! Quelle werden nur kurz gehalten, nie über einen blockierenden seriellen
 //! Zugriff hinweg.
 
-use crate::flash;
 use crate::audio_visualizer::VisualizerSnapshot;
+use crate::flash;
 use crate::music::{
     art_chunk_payload, background_chunk_payload, Artwork, MusicAction, MusicBackground,
     MusicCommand, MusicSnapshot, MUSIC_ART_CHUNK_BYTES, MUSIC_BACKGROUND_CHUNK_BYTES,
@@ -52,7 +52,9 @@ const IDLE_SLICE: Duration = Duration::from_millis(250);
 
 fn recent_sample(fetched_at: Option<&DateTime<Utc>>, max_age: Duration) -> bool {
     fetched_at.is_some_and(|fetched| {
-        let age = Utc::now().signed_duration_since(fetched.to_owned()).num_seconds();
+        let age = Utc::now()
+            .signed_duration_since(fetched.to_owned())
+            .num_seconds();
         age >= 0 && age <= max_age.as_secs() as i64
     })
 }
@@ -92,7 +94,10 @@ pub enum Job {
     /// Close and immediately rescan without changing the saved port choice.
     EchoDeskReconnect,
     SendDiagnostic,
-    Wifi { action: WifiAction, reply: Sender<Result<Value, String>> },
+    Wifi {
+        action: WifiAction,
+        reply: Sender<Result<Value, String>>,
+    },
     /// Nur die geänderten Werte sind `Some`; das Profil selbst liegt in der Registry.
     ApplyProfile {
         theme: Option<ThemeSetting>,
@@ -535,16 +540,34 @@ impl Service {
     fn apply_smart_switch(&mut self) {
         let state = self.app.state::<AppState>();
         let mut settings = state.settings.lock().unwrap();
-        self.smart.sync_revision(settings.smart_revision, settings.smart_manual, Instant::now());
+        self.smart.sync_revision(
+            settings.smart_revision,
+            settings.smart_manual,
+            Instant::now(),
+        );
         let (mode, active) = (settings.view_mode, settings.active_view);
         if mode != ViewMode::Intelligent
-            || !matches!(&self.state, LinkState::Connected(info) if info.supports_views()) { return; }
-        let lacks_plugin_scenes = matches!(&self.state, LinkState::Connected(info) if !info.supports_plugin_scenes());
-        if lacks_plugin_scenes && settings.views.iter()
-            .any(|view| matches!(view, ViewContent::Plugin(_))) { return; }
-        let Some(next) = self.smart.choose(active, Instant::now()) else { return };
+            || !matches!(&self.state, LinkState::Connected(info) if info.supports_views())
+        {
+            return;
+        }
+        let lacks_plugin_scenes =
+            matches!(&self.state, LinkState::Connected(info) if !info.supports_plugin_scenes());
+        if lacks_plugin_scenes
+            && settings
+                .views
+                .iter()
+                .any(|view| matches!(view, ViewContent::Plugin(_)))
+        {
+            return;
+        }
+        let Some(next) = self.smart.choose(active, Instant::now()) else {
+            return;
+        };
         let (updated, provider) = {
-            if settings.view_mode != ViewMode::Intelligent || next >= settings.views.len() { return; }
+            if settings.view_mode != ViewMode::Intelligent || next >= settings.views.len() {
+                return;
+            }
             settings.active_view = next;
             let provider = match &settings.views[next] {
                 ViewContent::Provider(provider) => Some(*provider),
@@ -560,7 +583,11 @@ impl Service {
         drop(settings);
         let _ = self.app.emit(SETTINGS_EVENT, updated);
         if let Some(provider) = provider {
-            state.source.lock().unwrap().set_provider(provider, Utc::now());
+            state
+                .source
+                .lock()
+                .unwrap()
+                .set_provider(provider, Utc::now());
             poll::start_fetch(&self.app);
             poll::refresh_views(&self.app);
         }
@@ -949,14 +976,19 @@ impl Service {
         }
         for message in music_controls {
             match message {
-                DeviceMessage::MusicControl { generation, action, .. } => {
+                DeviceMessage::MusicControl {
+                    generation, action, ..
+                } => {
                     let action = match action.as_str() {
                         "toggle" => MusicAction::Toggle,
                         "previous" => MusicAction::Previous,
                         "next" => MusicAction::Next,
                         _ => continue,
                     };
-                    self.app.state::<AppState>().music.command(MusicCommand { generation, action });
+                    self.app
+                        .state::<AppState>()
+                        .music
+                        .command(MusicCommand { generation, action });
                 }
                 DeviceMessage::MusicVisualizer { enabled, .. } => {
                     let supported = matches!(
@@ -1040,7 +1072,8 @@ impl Service {
                 .collect();
             let mode = match settings.view_mode {
                 ViewMode::Manual => "manual",
-                ViewMode::Automatic => "automatic", ViewMode::Intelligent => "manual",
+                ViewMode::Automatic => "automatic",
+                ViewMode::Intelligent => "manual",
             };
             if view.views != expected
                 || view.mode != mode
@@ -1063,7 +1096,15 @@ impl Service {
             (true, provider)
         };
         if changed {
-            if self.app.state::<AppState>().settings.lock().unwrap().view_mode == ViewMode::Intelligent {
+            if self
+                .app
+                .state::<AppState>()
+                .settings
+                .lock()
+                .unwrap()
+                .view_mode
+                == ViewMode::Intelligent
+            {
                 self.smart.touch(Instant::now());
             }
             if let Some(provider) = provider {
@@ -1099,34 +1140,67 @@ impl Service {
 
     fn validate_echo_desk_settings(settings: &Value, partial: bool) -> Result<(), Value> {
         let Some(object) = settings.as_object() else {
-            return Err(Self::desktop_error("invalid_request", "settings must be an object"));
+            return Err(Self::desktop_error(
+                "invalid_request",
+                "settings must be an object",
+            ));
         };
-        const ALLOWED: [&str; 5] = [
+        const REQUIRED: [&str; 5] = [
             "theme",
             "brightness",
             "nowPlayingLayout",
             "nowPlayingBackground",
             "nowPlayingBackgroundCustomized",
         ];
-        if object.keys().any(|key| !ALLOWED.contains(&key.as_str())) {
-            return Err(Self::desktop_error("unsupported", "settings contains an unsupported field"));
+        const OPTIONAL: [&str; 6] = [
+            "defaultApp",
+            "clockFormat",
+            "timezone",
+            "codexPercentageMode",
+            "codexPreferredDisplay",
+            "performanceDefaultView",
+        ];
+        let supported = |key: &str| REQUIRED.contains(&key) || OPTIONAL.contains(&key);
+        if object.keys().any(|key| !supported(key)) {
+            return Err(Self::desktop_error(
+                "unsupported",
+                "settings contains an unsupported field",
+            ));
         }
-        if !partial && object.len() != ALLOWED.len() {
-            return Err(Self::desktop_error("invalid_state", "firmware settings are incomplete"));
+        // The five original fields remain mandatory so Desktop can continue to
+        // manage older EchoDesk OS releases. Newer firmware advertises the six
+        // optional controls and may return all eleven fields.
+        if !partial && REQUIRED.iter().any(|key| !object.contains_key(*key)) {
+            return Err(Self::desktop_error(
+                "invalid_state",
+                "firmware settings are incomplete",
+            ));
         }
         if let Some(value) = object.get("theme") {
             if !matches!(value.as_str(), Some("light" | "dark")) {
-                return Err(Self::desktop_error("invalid_request", "theme must be light or dark"));
+                return Err(Self::desktop_error(
+                    "invalid_request",
+                    "theme must be light or dark",
+                ));
             }
         }
         if let Some(value) = object.get("brightness") {
-            if !value.as_u64().is_some_and(|value| (10..=100).contains(&value)) {
-                return Err(Self::desktop_error("invalid_request", "brightness must be 10..100"));
+            if !value
+                .as_u64()
+                .is_some_and(|value| (10..=100).contains(&value))
+            {
+                return Err(Self::desktop_error(
+                    "invalid_request",
+                    "brightness must be 10..100",
+                ));
             }
         }
         if let Some(value) = object.get("nowPlayingLayout") {
             if !matches!(value.as_str(), Some("albumCover" | "carPlay" | "echoDesk")) {
-                return Err(Self::desktop_error("invalid_request", "invalid Now Playing layout"));
+                return Err(Self::desktop_error(
+                    "invalid_request",
+                    "invalid Now Playing layout",
+                ));
             }
         }
         if let Some(value) = object.get("nowPlayingBackground") {
@@ -1134,23 +1208,88 @@ impl Service {
                 value.as_str(),
                 Some("blurredAlbumCover" | "echoDesk" | "audioBars")
             ) {
-                return Err(Self::desktop_error("invalid_request", "invalid Now Playing background"));
+                return Err(Self::desktop_error(
+                    "invalid_request",
+                    "invalid Now Playing background",
+                ));
             }
         }
         if object
             .get("nowPlayingBackgroundCustomized")
             .is_some_and(|value| !value.is_boolean())
         {
-            return Err(Self::desktop_error("invalid_request", "customized must be boolean"));
+            return Err(Self::desktop_error(
+                "invalid_request",
+                "customized must be boolean",
+            ));
+        }
+        if let Some(value) = object.get("defaultApp") {
+            if !matches!(
+                value.as_str(),
+                Some("home" | "codex" | "clock" | "performance" | "nowPlaying" | "settings")
+            ) {
+                return Err(Self::desktop_error(
+                    "invalid_request",
+                    "default app is invalid",
+                ));
+            }
+        }
+        if let Some(value) = object.get("clockFormat") {
+            if !matches!(value.as_str(), Some("12h" | "24h")) {
+                return Err(Self::desktop_error(
+                    "invalid_request",
+                    "clock format is invalid",
+                ));
+            }
+        }
+        if let Some(value) = object.get("timezone") {
+            let Some(identifier) = value.as_str() else {
+                return Err(Self::desktop_error(
+                    "invalid_request",
+                    "timezone must be an IANA identifier",
+                ));
+            };
+            if !timezone::is_valid(identifier) || identifier == timezone::AUTO {
+                return Err(Self::desktop_error(
+                    "invalid_request",
+                    "timezone is invalid",
+                ));
+            }
+        }
+        if let Some(value) = object.get("codexPercentageMode") {
+            if !matches!(value.as_str(), Some("used" | "remaining")) {
+                return Err(Self::desktop_error(
+                    "invalid_request",
+                    "Codex percentage mode is invalid",
+                ));
+            }
+        }
+        if let Some(value) = object.get("codexPreferredDisplay") {
+            if !matches!(value.as_str(), Some("both" | "session" | "weekly")) {
+                return Err(Self::desktop_error(
+                    "invalid_request",
+                    "preferred Codex display is invalid",
+                ));
+            }
+        }
+        if let Some(value) = object.get("performanceDefaultView") {
+            if !matches!(value.as_str(), Some("overview" | "cpu" | "gpu" | "memory")) {
+                return Err(Self::desktop_error(
+                    "invalid_request",
+                    "performance default view is invalid",
+                ));
+            }
         }
         Ok(())
     }
 
     fn store_echo_desk_state(&mut self, mut value: Value) -> Result<Value, Value> {
-        if value.to_string().len() > 8192
-            || value.get("version").and_then(Value::as_u64) != Some(1)
+        if value.to_string().len() > 8192 || value.get("version").and_then(Value::as_u64) != Some(1)
         {
-            return Err(Self::desktop_error("invalid_state", "invalid EchoDesk state version or size"));
+            return Err(Self::desktop_error(
+                "invalid_state",
+                "invalid EchoDesk state version or size",
+            ));
         }
         let revision = value
             .get("revision")
@@ -1160,9 +1299,19 @@ impl Service {
             .get("activeApp")
             .and_then(Value::as_str)
             .ok_or_else(|| Self::desktop_error("invalid_state", "active app is missing"))?;
-        const APPS: [&str; 6] = ["home", "codex", "clock", "performance", "nowPlaying", "settings"];
+        const APPS: [&str; 6] = [
+            "home",
+            "codex",
+            "clock",
+            "performance",
+            "nowPlaying",
+            "settings",
+        ];
         if !APPS.contains(&active) {
-            return Err(Self::desktop_error("invalid_state", "active app is invalid"));
+            return Err(Self::desktop_error(
+                "invalid_state",
+                "active app is invalid",
+            ));
         }
         let supported = value
             .get("supportedApps")
@@ -1182,13 +1331,14 @@ impl Service {
                 .and_then(Value::as_str)
                 .is_some_and(|text| !text.is_empty() && text.len() <= 80)
             {
-                return Err(Self::desktop_error("invalid_state", format!("{field} is invalid")));
+                return Err(Self::desktop_error(
+                    "invalid_state",
+                    format!("{field} is invalid"),
+                ));
             }
         }
-        Self::validate_echo_desk_settings(
-            value.get("settings").unwrap_or(&Value::Null),
-            false,
-        )?;
+        Self::validate_setup_state(&value)?;
+        Self::validate_echo_desk_settings(value.get("settings").unwrap_or(&Value::Null), false)?;
         if !value
             .get("unsupportedSettings")
             .and_then(Value::as_array)
@@ -1200,7 +1350,10 @@ impl Service {
                     })
             })
         {
-            return Err(Self::desktop_error("invalid_state", "unsupported settings list is invalid"));
+            return Err(Self::desktop_error(
+                "invalid_state",
+                "unsupported settings list is invalid",
+            ));
         }
 
         let state = self.app.state::<AppState>();
@@ -1211,7 +1364,10 @@ impl Service {
             .and_then(Value::as_u64)
             .is_some_and(|current| revision < current)
         {
-            return Err(Self::desktop_error("stale_state", "older device state ignored"));
+            return Err(Self::desktop_error(
+                "stale_state",
+                "older device state ignored",
+            ));
         }
         if let Some(object) = value.as_object_mut() {
             object.remove("type");
@@ -1226,6 +1382,45 @@ impl Service {
                 .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         }
         Ok(value)
+    }
+
+    fn validate_setup_state(value: &Value) -> Result<(), Value> {
+        let setup_state = value.get("setupState");
+        let setup_version = value.get("setupVersion");
+        match (setup_state, setup_version) {
+            (None, None) => return Ok(()), // EchoDesk OS before guided setup v1.
+            (Some(state), Some(version)) => {
+                if !matches!(
+                    state.as_str(),
+                    Some("notConfigured" | "waitingForDesktop" | "inProgress" | "completed")
+                ) || version.as_u64() != Some(1)
+                {
+                    return Err(Self::desktop_error(
+                        "invalid_state",
+                        "setup state/version is invalid",
+                    ));
+                }
+            }
+            _ => {
+                return Err(Self::desktop_error(
+                    "invalid_state",
+                    "setup state and version must be reported together",
+                ));
+            }
+        }
+        if let Some(url) = value.get("setupUrl") {
+            if !(url.is_null()
+                || url
+                    .as_str()
+                    .is_some_and(|url| url.len() <= 256 && url.starts_with("https://")))
+            {
+                return Err(Self::desktop_error(
+                    "invalid_state",
+                    "setup URL must be null or HTTPS",
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn sync_profile_from_echo_state(&mut self, persist: bool) {
@@ -1259,6 +1454,21 @@ impl Service {
             profile
         };
         self.profile = Some(profile);
+
+        // The host owns displayTime/tzOffsetMinutes, so keep its IANA zone in
+        // lockstep with the setting confirmed by the device. chrono-tz applies
+        // daylight-saving changes for Australia/Melbourne and other IANA zones.
+        if let Some(identifier) = settings.get("timezone").and_then(Value::as_str) {
+            if timezone::is_valid(identifier) && identifier != timezone::AUTO {
+                let mut host_settings = app_state.settings.lock().unwrap();
+                if host_settings.timezone != identifier {
+                    host_settings.timezone = identifier.to_string();
+                    if persist {
+                        host_settings.save(&self.app);
+                    }
+                }
+            }
+        }
     }
 
     fn exchange_echo_desk(
@@ -1283,7 +1493,10 @@ impl Service {
         fields.insert("requestId".into(), json!(request_id));
         let mut line = Value::Object(fields).to_string();
         if line.len() > 2048 {
-            return Err(Self::desktop_error("invalid_request", "device command is too large"));
+            return Err(Self::desktop_error(
+                "invalid_request",
+                "device command is too large",
+            ));
         }
         line.push('\n');
         self.log_event(format!("-> {command} requestId={request_id}"));
@@ -1300,12 +1513,20 @@ impl Service {
             DeviceMessage::EchoDeskState(value)
             | DeviceMessage::EchoDeskAck(value)
             | DeviceMessage::EchoDeskError(value) => value,
-            _ => return Err(Self::desktop_error("invalid_response", "unexpected device response")),
+            _ => {
+                return Err(Self::desktop_error(
+                    "invalid_response",
+                    "unexpected device response",
+                ))
+            }
         };
         if value.get("version").and_then(Value::as_u64) != Some(1)
             || value.get("requestId").and_then(Value::as_u64) != Some(request_id as u64)
         {
-            return Err(Self::desktop_error("invalid_response", "device response id/version mismatch"));
+            return Err(Self::desktop_error(
+                "invalid_response",
+                "device response id/version mismatch",
+            ));
         }
         Ok(response)
     }
@@ -1319,7 +1540,10 @@ impl Service {
         match response {
             DeviceMessage::EchoDeskState(value) => self.store_echo_desk_state(value),
             DeviceMessage::EchoDeskError(value) => Err(value),
-            _ => Err(Self::desktop_error("invalid_response", "state response expected")),
+            _ => Err(Self::desktop_error(
+                "invalid_response",
+                "state response expected",
+            )),
         }
     }
 
@@ -1329,35 +1553,48 @@ impl Service {
         let command = match method {
             "get_state" => return self.refresh_echo_desk_state(),
             "open_app" => {
-                let object = params
-                    .as_object()
-                    .ok_or_else(|| Self::desktop_error("invalid_request", "params must be an object"))?;
+                let object = params.as_object().ok_or_else(|| {
+                    Self::desktop_error("invalid_request", "params must be an object")
+                })?;
                 if object.len() != 1 {
-                    return Err(Self::desktop_error("invalid_request", "open_app accepts only app"));
+                    return Err(Self::desktop_error(
+                        "invalid_request",
+                        "open_app accepts only app",
+                    ));
                 }
                 let app = object
                     .get("app")
                     .and_then(Value::as_str)
                     .filter(|app| {
-                        matches!(*app, "home" | "codex" | "clock" | "performance" | "nowPlaying" | "settings")
+                        matches!(
+                            *app,
+                            "home" | "codex" | "clock" | "performance" | "nowPlaying" | "settings"
+                        )
                     })
                     .ok_or_else(|| Self::desktop_error("invalid_request", "app is invalid"))?;
                 fields.insert("app".into(), Value::String(app.into()));
                 "echodesk_open_app"
             }
             "set_settings" => {
-                let object = params
-                    .as_object()
-                    .ok_or_else(|| Self::desktop_error("invalid_request", "params must be an object"))?;
-                if object.keys().any(|key| !matches!(key.as_str(), "baseRevision" | "persist" | "settings"))
+                let object = params.as_object().ok_or_else(|| {
+                    Self::desktop_error("invalid_request", "params must be an object")
+                })?;
+                if object
+                    .keys()
+                    .any(|key| !matches!(key.as_str(), "baseRevision" | "persist" | "settings"))
                     || object.len() != 3
                 {
-                    return Err(Self::desktop_error("invalid_request", "set_settings fields are invalid"));
+                    return Err(Self::desktop_error(
+                        "invalid_request",
+                        "set_settings fields are invalid",
+                    ));
                 }
                 let base_revision = object
                     .get("baseRevision")
                     .and_then(Value::as_u64)
-                    .ok_or_else(|| Self::desktop_error("invalid_request", "baseRevision is required"))?;
+                    .ok_or_else(|| {
+                        Self::desktop_error("invalid_request", "baseRevision is required")
+                    })?;
                 let persist = object
                     .get("persist")
                     .and_then(Value::as_bool)
@@ -1365,13 +1602,19 @@ impl Service {
                 persist_profile = persist;
                 let settings = object.get("settings").cloned().unwrap_or(Value::Null);
                 Self::validate_echo_desk_settings(&settings, true)?;
-                if settings.as_object().is_some_and(|settings| settings.is_empty()) {
-                    return Err(Self::desktop_error("invalid_request", "settings cannot be empty"));
+                if settings
+                    .as_object()
+                    .is_some_and(|settings| settings.is_empty())
+                {
+                    return Err(Self::desktop_error(
+                        "invalid_request",
+                        "settings cannot be empty",
+                    ));
                 }
                 if !persist
-                    && settings
-                        .as_object()
-                        .is_some_and(|settings| settings.len() != 1 || !settings.contains_key("brightness"))
+                    && settings.as_object().is_some_and(|settings| {
+                        settings.len() != 1 || !settings.contains_key("brightness")
+                    })
                 {
                     return Err(Self::desktop_error(
                         "invalid_request",
@@ -1384,28 +1627,53 @@ impl Service {
                 "echodesk_set_settings"
             }
             "restart" => {
-                if !(params.is_null() || params.as_object().is_some_and(|params| params.is_empty())) {
-                    return Err(Self::desktop_error("invalid_request", "restart takes no parameters"));
+                if !(params.is_null() || params.as_object().is_some_and(|params| params.is_empty()))
+                {
+                    return Err(Self::desktop_error(
+                        "invalid_request",
+                        "restart takes no parameters",
+                    ));
                 }
                 "echodesk_restart"
             }
-            _ => return Err(Self::desktop_error("unsupported", "desktop method is not allowlisted")),
+            "setup_begin" | "setup_complete" | "factory_reset" => {
+                if !(params.is_null() || params.as_object().is_some_and(|params| params.is_empty()))
+                {
+                    return Err(Self::desktop_error(
+                        "invalid_request",
+                        "setup commands take no device parameters",
+                    ));
+                }
+                match method {
+                    "setup_begin" => "echodesk_setup_begin",
+                    "setup_complete" => "echodesk_setup_complete",
+                    _ => "echodesk_factory_reset",
+                }
+            }
+            _ => {
+                return Err(Self::desktop_error(
+                    "unsupported",
+                    "desktop method is not allowlisted",
+                ))
+            }
         };
 
-        let response = self.exchange_echo_desk(
-            command,
-            fields,
-            &["echodesk_ack", "echodesk_error"],
-        )?;
+        let response =
+            self.exchange_echo_desk(command, fields, &["echodesk_ack", "echodesk_error"])?;
         match response {
             DeviceMessage::EchoDeskError(value) => Err(value),
-            DeviceMessage::EchoDeskAck(value) if method == "restart" => Ok(value),
+            DeviceMessage::EchoDeskAck(value) if matches!(method, "restart" | "factory_reset") => {
+                Ok(value)
+            }
             DeviceMessage::EchoDeskAck(_) => {
                 let state = self.refresh_echo_desk_state()?;
                 self.sync_profile_from_echo_state(persist_profile);
                 Ok(state)
             }
-            _ => Err(Self::desktop_error("invalid_response", "acknowledgement expected")),
+            _ => Err(Self::desktop_error(
+                "invalid_response",
+                "acknowledgement expected",
+            )),
         }
     }
 
@@ -1459,7 +1727,9 @@ impl Service {
                     .as_ref()
                     .map(|p| p.language)
                     .unwrap_or_default();
-                let theme = self.profile.as_ref()
+                let theme = self
+                    .profile
+                    .as_ref()
                     .map(|profile| profile.theme)
                     .unwrap_or_default()
                     .resolve(system_is_dark());
@@ -1553,7 +1823,9 @@ impl Service {
         let info = info.clone();
         let frame_id = self.frame_ids.next();
         match sample.payload(frame_id) {
-            Ok(payload) => self.transmit(&info, payload, frame_id, "performance", "Hardware helper"),
+            Ok(payload) => {
+                self.transmit(&info, payload, frame_id, "performance", "Hardware helper")
+            }
             Err(e) => self.log_event(format!("Performance frame rejected: {e}")),
         }
     }
@@ -1573,7 +1845,10 @@ impl Service {
                 match snapshot.artwork {
                     Some(art)
                         if self.last_music_art_id.as_deref() != Some(art.id.as_str())
-                            && self.pending_music_art.as_ref().is_none_or(|pending| pending.art.id != art.id) =>
+                            && self
+                                .pending_music_art
+                                .as_ref()
+                                .is_none_or(|pending| pending.art.id != art.id) =>
                     {
                         self.pending_music_art = Some(PendingMusicArt { art, next_chunk: 0 });
                     }
@@ -1585,10 +1860,9 @@ impl Service {
                         Some(background)
                             if self.last_music_background_id.as_deref()
                                 != Some(background.id.as_str())
-                                && self
-                                    .pending_music_background
-                                    .as_ref()
-                                    .is_none_or(|pending| pending.background.id != background.id) =>
+                                && self.pending_music_background.as_ref().is_none_or(
+                                    |pending| pending.background.id != background.id,
+                                ) =>
                         {
                             self.pending_music_background = Some(PendingMusicBackground {
                                 background,
@@ -1611,13 +1885,22 @@ impl Service {
             return;
         };
         if !info.supports_music_visualizer() || !info.supports_framed() {
-            self.app.state::<AppState>().audio_visualizer.set_enabled(false);
+            self.app
+                .state::<AppState>()
+                .audio_visualizer
+                .set_enabled(false);
             return;
         }
         let info = info.clone();
         let frame_id = self.frame_ids.next();
         match snapshot.payload(frame_id) {
-            Ok(payload) => self.transmit(&info, payload, frame_id, "music-visualizer", "WASAPI loopback"),
+            Ok(payload) => self.transmit(
+                &info,
+                payload,
+                frame_id,
+                "music-visualizer",
+                "WASAPI loopback",
+            ),
             Err(error) => self.log_event(format!("Audio visualizer frame rejected: {error}")),
         }
     }
@@ -1829,7 +2112,11 @@ impl Service {
         {
             let state = self.app.state::<AppState>();
             let settings = state.settings.lock().unwrap();
-            self.smart.sync_revision(settings.smart_revision, settings.smart_manual, Instant::now());
+            self.smart.sync_revision(
+                settings.smart_revision,
+                settings.smart_manual,
+                Instant::now(),
+            );
         }
         match job {
             Job::Wifi { action, reply } => {
@@ -1867,18 +2154,31 @@ impl Service {
                 self.smart.reset(now);
                 let state = self.app.state::<AppState>();
                 let settings = state.settings.lock().unwrap().clone();
-                let providers: Vec<_> = settings.views.iter().map(|view| match view {
-                    ViewContent::Provider(p) => Some(*p), _ => None,
-                }).collect();
+                let providers: Vec<_> = settings
+                    .views
+                    .iter()
+                    .map(|view| match view {
+                        ViewContent::Provider(p) => Some(*p),
+                        _ => None,
+                    })
+                    .collect();
                 let recent_usage = |snapshot: &Snapshot| {
-                    !snapshot.fetching && recent_sample(snapshot.fetched_at.as_ref(), POLL_INTERVAL * 2)
+                    !snapshot.fetching
+                        && recent_sample(snapshot.fetched_at.as_ref(), POLL_INTERVAL * 2)
                 };
                 let selected = current_snapshot(&self.app);
                 if settings.ai_usage_enabled
                     && providers.contains(&Some(selected.provider))
-                    && selected.status.is_ok() && recent_usage(&selected) {
+                    && selected.status.is_ok()
+                    && recent_usage(&selected)
+                {
                     if let Some(entry) = &selected.entry {
-                        self.smart.observe_usage(selected.provider, usage_signals(entry), &providers, now);
+                        self.smart.observe_usage(
+                            selected.provider,
+                            usage_signals(entry),
+                            &providers,
+                            now,
+                        );
                     }
                 }
                 if settings.ai_usage_enabled {
@@ -1888,85 +2188,197 @@ impl Service {
                         }
                         if snap.status.is_ok() && recent_usage(snap) {
                             if let Some(entry) = &snap.entry {
-                                self.smart.observe_usage(*provider, usage_signals(entry), &providers, now);
+                                self.smart.observe_usage(
+                                    *provider,
+                                    usage_signals(entry),
+                                    &providers,
+                                    now,
+                                );
                             }
                         }
                     }
                 }
-                let plugin_views: Vec<_> = settings.views.iter().map(|view| match view {
-                    ViewContent::Plugin(id) => Some(id.as_str()), _ => None,
-                }).collect();
+                let plugin_views: Vec<_> = settings
+                    .views
+                    .iter()
+                    .map(|view| match view {
+                        ViewContent::Plugin(id) => Some(id.as_str()),
+                        _ => None,
+                    })
+                    .collect();
                 for (id, record) in state.plugins.lock().unwrap().records.iter() {
                     let fresh = recent_sample(
                         record.fetched_at.as_ref(),
                         Duration::from_secs(3 * record.manifest.source.interval_seconds as u64),
                     );
-                    if plugin_views.contains(&Some(id.as_str())) && record.last_error.is_none() && fresh {
+                    if plugin_views.contains(&Some(id.as_str()))
+                        && record.last_error.is_none()
+                        && fresh
+                    {
                         if let Some(data) = &record.data {
-                            let max_age = Duration::from_secs(3 * record.manifest.source.interval_seconds as u64);
-                            let age = record.fetched_at.as_ref().and_then(|fetched| {
-                                Utc::now().signed_duration_since(fetched.to_owned()).to_std().ok()
-                            }).unwrap_or_default();
+                            let max_age = Duration::from_secs(
+                                3 * record.manifest.source.interval_seconds as u64,
+                            );
+                            let age = record
+                                .fetched_at
+                                .as_ref()
+                                .and_then(|fetched| {
+                                    Utc::now()
+                                        .signed_duration_since(fetched.to_owned())
+                                        .to_std()
+                                        .ok()
+                                })
+                                .unwrap_or_default();
                             let sampled_at = now.checked_sub(age).unwrap_or(now);
-                            self.smart.observe_plugin(id, record.manifest.attention_states(data), &plugin_views, sampled_at, max_age);
+                            self.smart.observe_plugin(
+                                id,
+                                record.manifest.attention_states(data),
+                                &plugin_views,
+                                sampled_at,
+                                max_age,
+                            );
                         }
                     }
                 }
-                let waiting = state.claude_code.lock().unwrap().sessions
-                    .waiting(Utc::now().timestamp()).iter()
-                    .filter_map(|s| s.waiting.map(|kind| (s.id.clone(), kind, s.since))).collect();
+                let waiting = state
+                    .claude_code
+                    .lock()
+                    .unwrap()
+                    .sessions
+                    .waiting(Utc::now().timestamp())
+                    .iter()
+                    .filter_map(|s| s.waiting.map(|kind| (s.id.clone(), kind, s.since)))
+                    .collect();
                 self.smart.observe_claude_code(waiting, &plugin_views, now);
-            },
+            }
             Job::ResetSmartPlugin(id) => {
-                let settings = self.app.state::<AppState>().settings.lock().unwrap().clone();
-                let views: Vec<_> = settings.views.iter().map(|view| match view {
-                    ViewContent::Plugin(name) => Some(name.as_str()), _ => None,
-                }).collect();
+                let settings = self
+                    .app
+                    .state::<AppState>()
+                    .settings
+                    .lock()
+                    .unwrap()
+                    .clone();
+                let views: Vec<_> = settings
+                    .views
+                    .iter()
+                    .map(|view| match view {
+                        ViewContent::Plugin(name) => Some(name.as_str()),
+                        _ => None,
+                    })
+                    .collect();
                 self.smart.reset_plugin(&id, &views);
             }
             Job::SmartUsage(provider, sample) => {
-                let settings = self.app.state::<AppState>().settings.lock().unwrap().clone();
+                let settings = self
+                    .app
+                    .state::<AppState>()
+                    .settings
+                    .lock()
+                    .unwrap()
+                    .clone();
                 if settings.ai_usage_enabled && settings.view_mode == ViewMode::Intelligent {
-                    let views: Vec<_> = settings.views.iter().map(|view| match view {
-                        ViewContent::Provider(p) => Some(*p), _ => None,
-                    }).collect();
-                    self.smart.observe_usage(provider, sample, &views, Instant::now());
+                    let views: Vec<_> = settings
+                        .views
+                        .iter()
+                        .map(|view| match view {
+                            ViewContent::Provider(p) => Some(*p),
+                            _ => None,
+                        })
+                        .collect();
+                    self.smart
+                        .observe_usage(provider, sample, &views, Instant::now());
                 }
             }
             Job::SmartPlugin(id, states) => {
-                let settings = self.app.state::<AppState>().settings.lock().unwrap().clone();
+                let settings = self
+                    .app
+                    .state::<AppState>()
+                    .settings
+                    .lock()
+                    .unwrap()
+                    .clone();
                 if settings.view_mode == ViewMode::Intelligent {
-                    let language = self.profile.as_ref()
-                        .map(|profile| profile.language).unwrap_or_default();
-                    let theme = self.profile.as_ref()
-                        .map(|profile| profile.theme).unwrap_or_default()
+                    let language = self
+                        .profile
+                        .as_ref()
+                        .map(|profile| profile.language)
+                        .unwrap_or_default();
+                    let theme = self
+                        .profile
+                        .as_ref()
+                        .map(|profile| profile.theme)
+                        .unwrap_or_default()
                         .resolve(system_is_dark());
-                    let max_age = self.app.state::<AppState>().plugins.lock().unwrap()
-                        .records.get(&id).and_then(|record| {
-                            let renderable = record.last_error.is_none() && record.data.as_ref().is_some_and(|data| {
-                                [SceneLayout::Portrait, SceneLayout::Landscape, SceneLayout::Square]
-                                    .into_iter().all(|layout| record.manifest
-                                        .scene_with_theme_and_locale(
-                                            layout, data, &record.settings, theme, language.wire()
-                                        ).is_ok())
-                            });
-                            renderable.then(|| Duration::from_secs(3 * record.manifest.source.interval_seconds as u64))
+                    let max_age = self
+                        .app
+                        .state::<AppState>()
+                        .plugins
+                        .lock()
+                        .unwrap()
+                        .records
+                        .get(&id)
+                        .and_then(|record| {
+                            let renderable = record.last_error.is_none()
+                                && record.data.as_ref().is_some_and(|data| {
+                                    [
+                                        SceneLayout::Portrait,
+                                        SceneLayout::Landscape,
+                                        SceneLayout::Square,
+                                    ]
+                                    .into_iter()
+                                    .all(|layout| {
+                                        record
+                                            .manifest
+                                            .scene_with_theme_and_locale(
+                                                layout,
+                                                data,
+                                                &record.settings,
+                                                theme,
+                                                language.wire(),
+                                            )
+                                            .is_ok()
+                                    })
+                                });
+                            renderable.then(|| {
+                                Duration::from_secs(
+                                    3 * record.manifest.source.interval_seconds as u64,
+                                )
+                            })
                         });
                     if let Some(max_age) = max_age {
-                        let views: Vec<_> = settings.views.iter().map(|view| match view {
-                            ViewContent::Plugin(name) => Some(name.as_str()), _ => None,
-                        }).collect();
-                        self.smart.observe_plugin(&id, states, &views, Instant::now(), max_age);
+                        let views: Vec<_> = settings
+                            .views
+                            .iter()
+                            .map(|view| match view {
+                                ViewContent::Plugin(name) => Some(name.as_str()),
+                                _ => None,
+                            })
+                            .collect();
+                        self.smart
+                            .observe_plugin(&id, states, &views, Instant::now(), max_age);
                     }
                 }
             }
             Job::SmartClaudeCode(waiting) => {
-                let settings = self.app.state::<AppState>().settings.lock().unwrap().clone();
+                let settings = self
+                    .app
+                    .state::<AppState>()
+                    .settings
+                    .lock()
+                    .unwrap()
+                    .clone();
                 if settings.view_mode == ViewMode::Intelligent {
-                    let views: Vec<_> = settings.views.iter().map(|view| match view {
-                        ViewContent::Plugin(id) => Some(id.as_str()), _ => None,
-                    }).collect();
-                    self.smart.observe_claude_code(waiting, &views, Instant::now());
+                    let views: Vec<_> = settings
+                        .views
+                        .iter()
+                        .map(|view| match view {
+                            ViewContent::Plugin(id) => Some(id.as_str()),
+                            _ => None,
+                        })
+                        .collect();
+                    self.smart
+                        .observe_claude_code(waiting, &views, Instant::now());
                 }
             }
             Job::PerformanceReady => {
@@ -2097,25 +2509,53 @@ impl Service {
             return Err("Kein Display verbunden".into());
         }
         let (line, expected, timeout, label) = match action {
-            WifiAction::Status => (Command::wifi_status(), "wifi_status", Duration::from_secs(4), "WLAN-Status"),
-            WifiAction::Scan => (Command::wifi_scan(), "wifi_scan", Duration::from_secs(18), "WLAN-Scan"),
+            WifiAction::Status => (
+                Command::wifi_status(),
+                "wifi_status",
+                Duration::from_secs(4),
+                "WLAN-Status",
+            ),
+            WifiAction::Scan => (
+                Command::wifi_scan(),
+                "wifi_scan",
+                Duration::from_secs(18),
+                "WLAN-Scan",
+            ),
             WifiAction::Set { ssid, password } => {
-                if ssid.is_empty() { return Err("SSID fehlt".into()); }
-                (Command::wifi_set(&ssid, &password), "wifi_status", Duration::from_secs(15), "WLAN verbinden")
+                if ssid.is_empty() {
+                    return Err("SSID fehlt".into());
+                }
+                (
+                    Command::wifi_set(&ssid, &password),
+                    "wifi_status",
+                    Duration::from_secs(15),
+                    "WLAN verbinden",
+                )
             }
-            WifiAction::Forget => (Command::wifi_forget(), "wifi_status", Duration::from_secs(5), "WLAN vergessen"),
+            WifiAction::Forget => (
+                Command::wifi_forget(),
+                "wifi_status",
+                Duration::from_secs(5),
+                "WLAN vergessen",
+            ),
         };
         self.log_event(format!("-> {label}"));
-        let result = self.link.as_mut().ok_or("Kein Port offen")?
+        let result = self
+            .link
+            .as_mut()
+            .ok_or("Kein Port offen")?
             .command_with_response(&line, expected, timeout);
         self.absorb_link_log();
         match result {
-            Ok(Some(aimonitor_core::protocol::DeviceMessage::WifiStatus(value))) |
-            Ok(Some(aimonitor_core::protocol::DeviceMessage::WifiScan(value))) => {
+            Ok(Some(aimonitor_core::protocol::DeviceMessage::WifiStatus(value)))
+            | Ok(Some(aimonitor_core::protocol::DeviceMessage::WifiScan(value))) => {
                 self.publish();
                 Ok(value)
             }
-            Ok(_) => { self.publish(); Err(format!("Keine Antwort auf {label}")) }
+            Ok(_) => {
+                self.publish();
+                Err(format!("Keine Antwort auf {label}"))
+            }
             Err(e) => {
                 let message = e.to_string();
                 self.disconnect("WLAN-Kommando: Portfehler");
@@ -2134,13 +2574,16 @@ mod tests {
         let now = Utc::now();
         assert!(!recent_sample(None, POLL_INTERVAL * 2));
         assert!(recent_sample(
-            Some(&(now - chrono::Duration::seconds(30))), POLL_INTERVAL * 2,
+            Some(&(now - chrono::Duration::seconds(30))),
+            POLL_INTERVAL * 2,
         ));
         assert!(!recent_sample(
-            Some(&(now - chrono::Duration::hours(2))), POLL_INTERVAL * 2,
+            Some(&(now - chrono::Duration::hours(2))),
+            POLL_INTERVAL * 2,
         ));
         assert!(!recent_sample(
-            Some(&(now + chrono::Duration::hours(2))), POLL_INTERVAL * 2,
+            Some(&(now + chrono::Duration::hours(2))),
+            POLL_INTERVAL * 2,
         ));
     }
 
@@ -2167,31 +2610,85 @@ mod tests {
 
     #[test]
     fn desktop_setting_validation_is_allowlisted() {
-        assert!(Service::validate_echo_desk_settings(
-            &json!({"brightness": 55}),
-            true
-        )
-        .is_ok());
+        assert!(Service::validate_echo_desk_settings(&json!({"brightness": 55}), true).is_ok());
         assert!(Service::validate_echo_desk_settings(
             &json!({
                 "theme": "dark",
                 "brightness": 80,
                 "nowPlayingLayout": "carPlay",
                 "nowPlayingBackground": "audioBars",
-                "nowPlayingBackgroundCustomized": true
+                "nowPlayingBackgroundCustomized": true,
+                "defaultApp": "codex",
+                "clockFormat": "24h",
+                "timezone": "Australia/Melbourne",
+                "codexPercentageMode": "remaining",
+                "codexPreferredDisplay": "weekly",
+                "performanceDefaultView": "memory"
             }),
             false
         )
         .is_ok());
+        assert!(Service::validate_echo_desk_settings(&json!({"brightness": 101}), true).is_err());
+        assert!(
+            Service::validate_echo_desk_settings(&json!({"rawSerial": "restart"}), true).is_err()
+        );
         assert!(Service::validate_echo_desk_settings(
-            &json!({"brightness": 101}),
+            &json!({"timezone": "Australia/Melbourne", "performanceDefaultView": "cpu"}),
             true
+        )
+        .is_ok());
+        assert!(
+            Service::validate_echo_desk_settings(&json!({"timezone": "Mars/Olympus"}), true)
+                .is_err()
+        );
+        assert!(Service::validate_echo_desk_settings(
+            &json!({"theme": "dark", "brightness": 80}),
+            false
         )
         .is_err());
-        assert!(Service::validate_echo_desk_settings(
-            &json!({"rawSerial": "restart"}),
-            true
-        )
+    }
+
+    #[test]
+    fn guided_setup_state_is_versioned_and_old_firmware_remains_compatible() {
+        assert!(Service::validate_setup_state(&json!({})).is_ok());
+        for state in [
+            "notConfigured",
+            "waitingForDesktop",
+            "inProgress",
+            "completed",
+        ] {
+            assert!(Service::validate_setup_state(&json!({
+                "setupState": state,
+                "setupVersion": 1,
+                "setupUrl": null
+            }))
+            .is_ok());
+        }
+        assert!(Service::validate_setup_state(&json!({
+            "setupState": "inProgress",
+            "setupVersion": 1,
+            "setupUrl": "https://example.invalid/echodesk"
+        }))
+        .is_ok());
+        assert!(Service::validate_setup_state(&json!({
+            "setupState": "completed"
+        }))
+        .is_err());
+        assert!(Service::validate_setup_state(&json!({
+            "setupState": "completed",
+            "setupVersion": 2
+        }))
+        .is_err());
+        assert!(Service::validate_setup_state(&json!({
+            "setupState": "unknown",
+            "setupVersion": 1
+        }))
+        .is_err());
+        assert!(Service::validate_setup_state(&json!({
+            "setupState": "waitingForDesktop",
+            "setupVersion": 1,
+            "setupUrl": "http://unsafe.invalid"
+        }))
         .is_err());
     }
 }

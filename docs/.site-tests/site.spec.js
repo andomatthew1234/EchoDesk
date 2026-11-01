@@ -153,3 +153,39 @@ test("reduced motion keeps content immediately readable", async ({ page }) => {
   await card.click();
   await expect(card).toHaveAttribute("aria-pressed", "true");
 });
+
+for (const size of sizes) {
+  test(`${size.name}: download page is accessible and responsive`, async ({ page }) => {
+    const problems = [];
+    page.on("console", message => {
+      if (message.type() === "error") problems.push(`console: ${message.text()}`);
+    });
+    page.on("pageerror", error => problems.push(`pageerror: ${error.message}`));
+    page.on("requestfailed", request => problems.push(`request: ${request.url()} ${request.failure()?.errorText || "failed"}`));
+
+    await page.setViewportSize({ width: size.width, height: size.height });
+    const response = await page.goto("./download.html", { waitUntil: "networkidle" });
+    expect(response.status()).toBe(200);
+    await expect(page.locator("h1")).toContainText("ready for Windows");
+    await expect(page.locator('.desktop-nav a[aria-current="page"]')).toHaveText("Download");
+    await expect(page.locator(".download-primary")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.5/EchoDesk-Desktop-v0.2.5-win-x64-setup.exe");
+    await expect(page.locator(".download-portable")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.5/EchoDesk-Desktop-v0.2.5-win-x64.zip");
+    await expect(page.locator("[data-installer-sha256]")).toHaveText(/^[A-F0-9]{64}$/);
+    await expect(page.locator("[data-portable-sha256]")).toHaveText(/^[A-F0-9]{64}$/);
+
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBeLessThanOrEqual(1);
+    expect(problems).toEqual([]);
+
+    if (size.width <= 1100) {
+      await page.locator("[data-menu-toggle]").click();
+      await expect(page.locator("[data-mobile-menu]")).toBeVisible();
+    }
+  });
+}
+
+test("home page exposes the Desktop download route", async ({ page }) => {
+  await page.goto("./", { waitUntil: "networkidle" });
+  await expect(page.locator('.desktop-nav a[href="./download.html"]')).toHaveText("Download Desktop App");
+  await expect(page.locator('.software-card a[href="./download.html"]')).toContainText("Download for Windows");
+});

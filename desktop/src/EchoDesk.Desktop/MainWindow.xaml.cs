@@ -13,6 +13,18 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = viewModel;
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if ((args.PropertyName == nameof(MainViewModel.IsGuidedCompleteStep)
+                 && viewModel.IsGuidedCompleteStep)
+                || (args.PropertyName == nameof(MainViewModel.IsGuidedConnectStep)
+                    && viewModel.IsGuidedConnectStep)
+                || (args.PropertyName == nameof(MainViewModel.IsGuidedSetup)
+                    && !viewModel.IsGuidedSetup))
+            {
+                GuidedWifiPasswordBox.Clear();
+            }
+        };
         Loaded += OnLoaded;
         SizeChanged += (_, _) =>
         {
@@ -59,10 +71,50 @@ public partial class MainWindow : Window
         if (result == MessageBoxResult.Yes) await viewModel.RestartAsync();
     }
 
+    private async void FactoryReset_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel viewModel) return;
+        var result = System.Windows.MessageBox.Show(
+            this,
+            "Factory Reset clears the device's setup completion and returns it to the Hello screen. " +
+            "EchoDesk OS remains installed and unrelated flash partitions are not erased. Continue?",
+            "Factory Reset EchoDesk",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (result == MessageBoxResult.Yes) await viewModel.FactoryResetAsync();
+    }
+
+    private void GuidedWifiPassword_Changed(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel && sender is System.Windows.Controls.PasswordBox passwordBox)
+        {
+            viewModel.SetGuidedWifiPassword(passwordBox.Password);
+        }
+    }
+
     private void FirmwareAction_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel viewModel || sender is not FrameworkElement { Tag: string mode }) return;
-        var destructive = mode is "reinstall" or "repair";
+        var destructive = mode is "reinstall" or "repair" or "manualRecovery";
+        if (mode == "manualRecovery")
+        {
+            var recoveryResult = System.Windows.MessageBox.Show(
+                this,
+                "Manual Recovery bypasses EchoDesk model, USB-adapter, installed-version and flash-size checks. " +
+                "It will overwrite the bootloader, partitions and EchoDesk OS on the selected serial port. " +
+                "The bundled firmware is still integrity-checked and writing proceeds only if the ROM bootloader positively identifies an original ESP32.\n\n" +
+                "Close serial terminals and confirm the selected port belongs to your EchoDesk Mini. Continue?",
+                "Confirm Manual Recovery",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            if (recoveryResult == MessageBoxResult.Yes && viewModel.InstallFirmwareCommand.CanExecute(mode))
+            {
+                viewModel.InstallFirmwareCommand.Execute(mode);
+            }
+            return;
+        }
         var action = mode switch
         {
             "update" => "install the available EchoDesk OS update",

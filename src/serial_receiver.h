@@ -38,6 +38,11 @@ uint8_t serial_active_view();
 // Returns current display time string ("HH:MM" or "--:--")
 const char* serial_get_display_time();
 
+// Applies EchoDesk's persisted named timezone to newlib's POSIX TZ runtime.
+// Companion UTC timestamps keep setting the clock, but do not overwrite this
+// preference with a transient fixed offset.
+void serial_apply_configured_timezone();
+
 // C4: Deferred UI rebuild. The parser requests a rebuild (set_theme /
 // set_language / set_orientation); main loop() performs it after the tick.
 void serial_request_ui_rebuild();

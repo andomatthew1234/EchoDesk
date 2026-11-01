@@ -14,6 +14,8 @@ internal static class Program
             MapperUsesOnlyReportedValues();
             FirmwareManagerMappingPreservesSafetyStates();
             MapperAcceptsNullOptionalNumericFields();
+            GuidedSetupPolicyRequiresRealLegalDocumentsAndPinsSelection();
+            WifiSetupMappingAndGuidedPolicyAreAuthoritative();
             await BrokerRoundTripIsBoundedAndRevisionAware();
             Console.WriteLine("EchoDesk.Desktop.Tests: PASS");
             return 0;
@@ -25,20 +27,72 @@ internal static class Program
         }
     }
 
+    private static void WifiSetupMappingAndGuidedPolicyAreAuthoritative()
+    {
+        using var document = JsonDocument.Parse("""
+        {
+          "wifiSetup":{
+            "available":true,"status":"found","message":"EchoDesk found",
+            "selectedDeviceId":"mini-a","provisioned":false,
+            "devices":[
+              {"deviceId":"mini-a","displayName":"Studio EchoDesk","model":"Freenove FNK0114A_2P4",
+               "setupSsid":"EchoDesk-A1B2","address":"192.168.4.1","port":39321,
+               "setupMode":true,"paired":false,"firmwareVersion":"2.31.0","setupState":"wifiSetup"},
+              {"deviceId":"bad","displayName":"Bad record","model":"Freenove FNK0114A_2P4",
+               "address":"192.168.4.2","port":70000,"setupMode":true,"paired":false}
+            ]
+          }
+        }
+        """);
+        var state = BrokerStateMapper.FromPayload(document.RootElement);
+        Assert(state.WifiSetup.Available && state.WifiSetup.Status == "found", "Wi-Fi setup status was not mapped");
+        Assert(state.WifiSetup.Devices.Count == 1, "invalid Wi-Fi setup candidates were not bounded");
+        var device = state.WifiSetup.Devices[0];
+        Assert(device.SetupSsid == "EchoDesk-A1B2" && device.Port == 39321,
+            "temporary setup network identity was lost");
+
+        var fixtureRoot = Path.Combine(Path.GetTempPath(), $"EchoDesk.WifiSetup.{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(fixtureRoot, "legal"));
+            File.WriteAllText(Path.Combine(fixtureRoot, "legal", "ECHODESK-TERMS.md"), "terms");
+            File.WriteAllText(Path.Combine(fixtureRoot, "legal", "PRIVACY.md"), "privacy");
+            var flow = new GuidedSetupFlow(GuidedSetupLegalDocuments.Discover(fixtureRoot));
+            flow.SetTermsAccepted(true);
+            Assert(flow.MoveNext(), "Wi-Fi fixture did not pass legal gate");
+            flow.SelectTransport(GuidedSetupTransport.Wifi);
+            Assert(flow.MoveNext() && flow.Step == GuidedSetupStep.SelectDevice, "Wi-Fi setup did not reach discovery");
+            flow.SelectWifi(device.DeviceId, state.WifiSetup.Devices);
+            Assert(flow.CanContinue && flow.MoveNext() && flow.PinnedWifiDeviceId == "mini-a",
+                "Wi-Fi setup target was not pinned");
+            flow.SelectWifi("another", [device with { DeviceId = "another" }]);
+            Assert(flow.PinnedWifiDeviceId == "mini-a", "pinned Wi-Fi target changed during provisioning");
+            Assert(!flow.CompleteWifi(true, "another"), "a different Wi-Fi device completed the flow");
+            Assert(flow.CompleteWifi(true, "mini-a") && flow.Step == GuidedSetupStep.Complete,
+                "authoritative Wi-Fi provisioning success did not complete the flow");
+        }
+        finally
+        {
+            if (Directory.Exists(fixtureRoot)) Directory.Delete(fixtureRoot, recursive: true);
+        }
+    }
+
     private static void FirmwareManagerMappingPreservesSafetyStates()
     {
+        Assert(BrokerProtocol.EchoDeskMiniHardwareModel == "EchoDesk Mini", "firmware model identity drifted");
         using var document = JsonDocument.Parse("""
         {
           "brokerAvailable":true,"connection":"disconnected",
           "firmwareManager":{
             "available":true,"status":"selectionRequired","selectedPort":"COM7",
-            "selectedHardwareModel":"echodesk-mini-fnk0114a-2p4","boardConfirmed":false,
+            "selectedHardwareModel":"EchoDesk Mini","boardConfirmed":false,
             "writeCompleted":false,"reconnected":false,"currentVersion":"2.28.0",
             "availableVersion":"2.29.0","progressPercent":101,
             "devices":[{
               "port":"COM7","displayName":"USB-SERIAL CH340","vid":"1A86","pid":"7523",
               "adapter":"CH340","chipFamily":"esp32","flashSizeBytes":4194304,
-              "echoDeskHandshake":false,"compatible":true,"requiresBoardConfirmation":true
+              "echoDeskHandshake":false,"compatible":true,"requiresBoardConfirmation":true,
+              "setupState":"notStarted","setupVersion":2,"inBootloader":false
             }]
           }
         }
@@ -49,8 +103,82 @@ internal static class Program
         Assert(state.FirmwareManager.ProgressPercent is null, "out-of-range progress must not be displayed");
         Assert(state.FirmwareManager.Devices.Count == 1, "firmware device list lost");
         Assert(state.FirmwareManager.Devices[0].RequiresBoardConfirmation, "generic CH340 confirmation requirement lost");
+        Assert(state.FirmwareManager.Devices[0].SetupState == "notStarted", "guided setup state lost");
+        Assert(state.FirmwareManager.Devices[0].SetupVersion == 2, "guided setup version lost");
         Assert(!state.FirmwareManager.WriteCompleted && !state.FirmwareManager.Reconnected,
             "incomplete installation was incorrectly promoted to success");
+    }
+
+    private static void GuidedSetupPolicyRequiresRealLegalDocumentsAndPinsSelection()
+    {
+        var fixtureRoot = Path.Combine(Path.GetTempPath(), $"EchoDesk.GuidedSetup.{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(fixtureRoot);
+            var missing = GuidedSetupLegalDocuments.Discover(fixtureRoot);
+            var blocked = new GuidedSetupFlow(missing);
+            blocked.SetTermsAccepted(true);
+            Assert(!blocked.TermsAccepted && !blocked.MoveNext(),
+                "production setup must remain blocked when legal documents are absent");
+
+            var legalRoot = Path.Combine(fixtureRoot, "legal");
+            Directory.CreateDirectory(legalRoot);
+            File.WriteAllText(Path.Combine(legalRoot, "ECHODESK-TERMS.md"), "fixture terms");
+            File.WriteAllText(Path.Combine(legalRoot, "PRIVACY.md"), "fixture privacy");
+            File.WriteAllText(Path.Combine(fixtureRoot, "THIRD-PARTY-NOTICES.md"), "fixture notices");
+            var documents = GuidedSetupLegalDocuments.Discover(fixtureRoot);
+            Assert(documents.HasRequiredDocuments, "fixture legal document seam did not activate");
+
+            var flow = new GuidedSetupFlow(documents);
+            flow.SetTermsAccepted(true);
+            Assert(flow.MoveNext() && flow.Step == GuidedSetupStep.Connect, "accepted terms did not advance");
+            Assert(flow.MoveNext() && flow.Step == GuidedSetupStep.SelectDevice, "connect step did not advance");
+
+            var genericAdapter = new FirmwareDeviceCandidate
+            {
+                Port = "COM3", DisplayName = "USB-SERIAL CH340", Compatible = true,
+                ChipFamily = "esp32", EchoDeskHandshake = false,
+            };
+            var firstMini = new FirmwareDeviceCandidate
+            {
+                Port = "COM7", DisplayName = "EchoDesk Mini A", Compatible = true,
+                ChipFamily = "esp32", EchoDeskHandshake = true,
+                HardwareModel = BrokerProtocol.EchoDeskMiniHardwareModel,
+            };
+            var secondMini = new FirmwareDeviceCandidate
+            {
+                Port = "COM9", DisplayName = "EchoDesk Mini B", Compatible = true,
+                ChipFamily = "esp32", EchoDeskHandshake = true,
+                HardwareModel = BrokerProtocol.EchoDeskMiniHardwareModel,
+            };
+            var bootloaderCandidate = new FirmwareDeviceCandidate
+            {
+                Port = "COM4", DisplayName = "USB-SERIAL CH340", Compatible = true,
+                RequiresBoardConfirmation = true,
+            };
+            var devices = new[] { genericAdapter, bootloaderCandidate, firstMini, secondMini };
+            flow.Select("COM3", devices);
+            Assert(flow.SelectedPort is null, "generic serial adapter was accepted as an EchoDesk Mini");
+            flow.Select("COM4", devices);
+            Assert(flow.SelectedPort == "COM4" && flow.SelectedDeviceRequiresConfirmation,
+                "recoverable bootloader candidate was not offered with an explicit confirmation gate");
+            Assert(!flow.CanContinue, "unidentified bootloader candidate bypassed physical board confirmation");
+            flow.SetBoardConfirmed(true);
+            Assert(flow.CanContinue, "confirmed bootloader candidate remained blocked");
+            flow.Select("COM7", devices);
+            Assert(flow.SelectedPort == "COM7", "suitable device selection was not retained");
+            Assert(flow.MoveNext() && flow.PinnedPort == "COM7", "selection was not pinned before install");
+            flow.Select("COM9", devices);
+            Assert(flow.PinnedPort == "COM7", "pinned setup target changed during installation");
+            Assert(!flow.Complete(writeVerified: true, reconnected: false, setupAcknowledged: true),
+                "incomplete install was promoted to success");
+            Assert(flow.Complete(writeVerified: true, reconnected: true, setupAcknowledged: true)
+                   && flow.Step == GuidedSetupStep.Complete, "verified install did not complete");
+        }
+        finally
+        {
+            if (Directory.Exists(fixtureRoot)) Directory.Delete(fixtureRoot, recursive: true);
+        }
     }
 
     private static void MapperAcceptsNullOptionalNumericFields()
@@ -87,7 +215,8 @@ internal static class Program
             "deviceName":"EchoDesk","hardwareModel":"Freenove FNK0114A_2P4","firmwareVersion":"2.28.0",
             "revision":12,"activeApp":"nowPlaying",
             "supportedApps":["home","codex","clock","performance","nowPlaying","settings"],
-            "settings":{"theme":"dark","brightness":73,"nowPlayingLayout":"carPlay","nowPlayingBackground":"audioBars","nowPlayingBackgroundCustomized":true},
+            "settings":{"theme":"dark","brightness":73,"nowPlayingLayout":"carPlay","nowPlayingBackground":"audioBars","nowPlayingBackgroundCustomized":true,
+              "defaultApp":"codex","clockFormat":"24h","timezone":"Australia/Melbourne","codexPercentageMode":"remaining","codexPreferredDisplay":"weekly","performanceDefaultView":"gpu"},
             "unsupportedSettings":["timezone","performanceDefaultView"]
           }
         }
@@ -98,6 +227,12 @@ internal static class Program
         Assert(state.Device?.SettingsRevision == 12, "device revision lost");
         Assert(state.Device?.Settings.Brightness == 73, "brightness lost");
         Assert(state.Device?.Settings.NowPlayingLayout == "carPlay", "layout lost");
+        Assert(state.Device?.Settings.DefaultApp == "codex", "default app lost");
+        Assert(state.Device?.Settings.ClockFormat == "24h", "clock format lost");
+        Assert(state.Device?.Settings.Timezone == "Australia/Melbourne", "timezone lost");
+        Assert(state.Device?.Settings.CodexPercentageMode == "remaining", "Codex percentage mode lost");
+        Assert(state.Device?.Settings.CodexPreferredDisplay == "weekly", "Codex preferred display lost");
+        Assert(state.Device?.Settings.PerformanceDefaultView == "gpu", "performance default view lost");
         Assert(state.Device?.UnsupportedSettings.Contains("timezone") == true, "unsupported settings lost");
         Assert(state.AiUsage.Available && state.AiUsage.Enabled, "AI usage component lost");
         Assert(state.AiUsage.Status == "live", "AI usage status lost");
@@ -111,6 +246,13 @@ internal static class Program
         var observedSet = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         var observedAiToggle = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         var observedFirmwareInstall = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observedManualRecovery = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observedSetupBegin = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observedSetupComplete = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observedFactoryReset = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observedWifiDiscover = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observedWifiProvision = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observedWifiCancel = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = Task.Run(async () =>
         {
             await using var pipe = new NamedPipeServerStream(
@@ -131,6 +273,13 @@ internal static class Program
                 if (method == "set_settings") observedSet.TrySetResult(request);
                 if (method == "set_ai_usage_enabled") observedAiToggle.TrySetResult(request);
                 if (method == "firmware_install") observedFirmwareInstall.TrySetResult(request);
+                if (method == "firmware_manual_recovery") observedManualRecovery.TrySetResult(request);
+                if (method == "setup_begin") observedSetupBegin.TrySetResult(request);
+                if (method == "setup_complete") observedSetupComplete.TrySetResult(request);
+                if (method == "factory_reset") observedFactoryReset.TrySetResult(request);
+                if (method == "wifi_setup_discover") observedWifiDiscover.TrySetResult(request);
+                if (method == "wifi_setup_provision") observedWifiProvision.TrySetResult(request);
+                if (method == "wifi_setup_cancel") observedWifiCancel.TrySetResult(request);
                 var response = new
                 {
                     version = 1,
@@ -143,6 +292,23 @@ internal static class Program
                         connection = "connected",
                         port = "COM5",
                         firmware = "2.28.0",
+                        wifiSetup = new
+                        {
+                            available = true,
+                            status = method == "wifi_setup_provision" ? "provisioning" : "found",
+                            message = "EchoDesk found",
+                            selectedDeviceId = "mini-a",
+                            provisioned = false,
+                            devices = new[]
+                            {
+                                new
+                                {
+                                    deviceId = "mini-a", displayName = "EchoDesk Mini", model = "Freenove FNK0114A_2P4",
+                                    setupSsid = "EchoDesk-A1B2", address = "192.168.4.1", port = 39321,
+                                    setupMode = true, paired = false, firmwareVersion = "2.31.0",
+                                },
+                            },
+                        },
                         components = new
                         {
                             aiUsage = new
@@ -161,7 +327,7 @@ internal static class Program
                             available = true,
                             status = method == "firmware_install" ? "preparing" : "ready",
                             selectedPort = "COM7",
-                            selectedHardwareModel = "echodesk-mini-fnk0114a-2p4",
+                            selectedHardwareModel = BrokerProtocol.EchoDeskMiniHardwareModel,
                             boardConfirmed = true,
                             writeCompleted = false,
                             reconnected = false,
@@ -180,6 +346,13 @@ internal static class Program
                             hardwareModel = "Freenove FNK0114A_2P4",
                             firmwareVersion = "2.28.0",
                             revision = method == "set_settings" ? 6 : 5,
+                            setupState = method switch
+                            {
+                                "setup_complete" => "completed",
+                                "factory_reset" => "notConfigured",
+                                _ => "inProgress",
+                            },
+                            setupVersion = 2,
                             activeApp = "home",
                             supportedApps = new[] { "home", "nowPlaying" },
                             settings = new
@@ -221,6 +394,52 @@ internal static class Program
         var firmwareParams = firmwareRequest.GetProperty("params");
         Assert(firmwareParams.EnumerateObject().Count() == 1, "firmware request exposed arbitrary flash parameters");
         Assert(firmwareParams.GetProperty("mode").GetString() == "repair", "firmware operation mode missing");
+        var recovering = await client.StartManualRecoveryAsync("COM7", serverReady.Token);
+        Assert(recovering.FirmwareManager.Available, "manual recovery response was not mapped");
+        var recoveryRequest = await observedManualRecovery.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var recoveryParams = recoveryRequest.GetProperty("params");
+        Assert(recoveryParams.EnumerateObject().Count() == 1, "manual recovery exposed arbitrary flash parameters");
+        Assert(recoveryParams.GetProperty("port").GetString() == "COM7", "manual recovery selected port missing");
+        Assert(!recoveryParams.TryGetProperty("mode", out _), "manual recovery must not send an install mode");
+        Assert(!recoveryParams.TryGetProperty("image", out _), "manual recovery must not accept an image path");
+        Assert(!recoveryParams.TryGetProperty("address", out _), "manual recovery must not accept a flash address");
+        var setupStarted = await client.BeginGuidedSetupAsync("COM7", serverReady.Token);
+        Assert(setupStarted.Device?.SetupState == "inProgress", "setup begin response was not mapped");
+        var beginRequest = await observedSetupBegin.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var beginParams = beginRequest.GetProperty("params");
+        Assert(beginParams.EnumerateObject().Count() == 1 && beginParams.GetProperty("port").GetString() == "COM7",
+            "setup begin did not carry only the pinned port");
+        var setupCompleted = await client.CompleteGuidedSetupAsync("COM7", serverReady.Token);
+        Assert(setupCompleted.Device?.SetupState == "completed", "setup completion response was not mapped");
+        var completeRequest = await observedSetupComplete.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var completeParams = completeRequest.GetProperty("params");
+        Assert(completeParams.EnumerateObject().Count() == 1 && completeParams.GetProperty("port").GetString() == "COM7",
+            "setup complete did not carry only the pinned port");
+        var reset = await client.FactoryResetAsync("COM7", serverReady.Token);
+        Assert(reset.Device?.SetupState == "notConfigured", "factory reset response was not mapped");
+        var resetRequest = await observedFactoryReset.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var resetParams = resetRequest.GetProperty("params");
+        Assert(resetParams.EnumerateObject().Count() == 1 && resetParams.GetProperty("port").GetString() == "COM7",
+            "factory reset did not carry only the connected port");
+        var discovered = await client.DiscoverWifiSetupDevicesAsync(serverReady.Token);
+        Assert(discovered.WifiSetup.Devices.Count == 1, "Wi-Fi discovery response was not mapped");
+        var discoverRequest = await observedWifiDiscover.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert(!discoverRequest.GetProperty("params").EnumerateObject().Any(),
+            "Wi-Fi discovery sent unexpected parameters");
+        var provisioning = await client.ProvisionWifiSetupDeviceAsync(
+            "mini-a", "12345678", "Home Wi-Fi", "correct horse battery", serverReady.Token);
+        Assert(provisioning.WifiSetup.Status == "provisioning", "Wi-Fi provisioning response was not authoritative");
+        var provisionRequest = await observedWifiProvision.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var provisionParams = provisionRequest.GetProperty("params");
+        Assert(provisionParams.EnumerateObject().Count() == 4, "Wi-Fi provisioning sent unexpected parameters");
+        Assert(provisionParams.GetProperty("deviceId").GetString() == "mini-a", "Wi-Fi device identity missing");
+        Assert(provisionParams.GetProperty("setupCode").GetString() == "12345678", "Wi-Fi setup code missing");
+        Assert(provisionParams.GetProperty("ssid").GetString() == "Home Wi-Fi", "Wi-Fi SSID missing");
+        Assert(provisionParams.GetProperty("password").GetString() == "correct horse battery", "Wi-Fi password missing");
+        await client.CancelWifiSetupAsync(serverReady.Token);
+        var cancelRequest = await observedWifiCancel.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert(!cancelRequest.GetProperty("params").EnumerateObject().Any(),
+            "Wi-Fi cancellation sent unexpected parameters");
         serverReady.Cancel();
         try { await server; } catch (OperationCanceledException) { }
     }

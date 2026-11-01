@@ -13,4 +13,9 @@ bool ui_echodesk_request_open_app(const char *app);
 const char *ui_echodesk_active_app_name();
 void ui_echodesk_request_restart();
 
+// Queues an onboarding screen transition after the serial/config layer has
+// persisted a new setup state. Applied from ui_echodesk_tick(), never from the
+// serial parser's call stack.
+void ui_echodesk_setup_state_changed();
+
 #endif // UI_ECHODESK_H

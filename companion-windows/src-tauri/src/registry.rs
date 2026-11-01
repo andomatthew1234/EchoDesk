@@ -6,7 +6,10 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
 fn path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_config_dir().ok().map(|d| d.join("devices.json"))
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|d| d.join("devices.json"))
 }
 
 /// Laden; bei fehlender oder unlesbarer Datei eine leere Registry.

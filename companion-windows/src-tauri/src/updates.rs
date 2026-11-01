@@ -189,7 +189,10 @@ fn download_to(
     if let Some(dir) = target.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
-    let response = download_agent().get(url).call().map_err(|e| format!("Download: {e}"))?;
+    let response = download_agent()
+        .get(url)
+        .call()
+        .map_err(|e| format!("Download: {e}"))?;
     let total = response
         .headers()
         .get("content-length")
@@ -197,7 +200,11 @@ fn download_to(
         .and_then(|v| v.parse::<u64>().ok())
         .or(expected)
         .filter(|n| *n > 0);
-    let mut reader = response.into_body().into_with_config().limit(limit).reader();
+    let mut reader = response
+        .into_body()
+        .into_with_config()
+        .limit(limit)
+        .reader();
 
     let part = target.with_extension("part");
     let mut file = std::fs::File::create(&part).map_err(|e| format!("{}: {e}", part.display()))?;
@@ -206,11 +213,14 @@ fn download_to(
     let mut last_emit = Instant::now() - PROGRESS_SLICE;
     on_progress(0, total);
     loop {
-        let n = reader.read(&mut buf).map_err(|e| format!("Download: {e}"))?;
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| format!("Download: {e}"))?;
         if n == 0 {
             break;
         }
-        file.write_all(&buf[..n]).map_err(|e| format!("{}: {e}", part.display()))?;
+        file.write_all(&buf[..n])
+            .map_err(|e| format!("{}: {e}", part.display()))?;
         received += n as u64;
         if last_emit.elapsed() >= PROGRESS_SLICE {
             last_emit = Instant::now();
@@ -258,7 +268,11 @@ pub fn status(app: &AppHandle) -> UpdateStatus {
     let (channel, installed_version, checking) = {
         let s = state.settings.lock().unwrap();
         let checking = *state.release_check.0.lock().unwrap();
-        (s.update_channel, s.installed_firmware_version.clone(), checking)
+        (
+            s.update_channel,
+            s.installed_firmware_version.clone(),
+            checking,
+        )
     };
     let (device_version, device_variant, device_panel) = {
         let conn = state.connection.lock().unwrap();
@@ -289,7 +303,10 @@ pub fn status(app: &AppHandle) -> UpdateStatus {
         latest_version: app_release.as_ref().map(|r| r.version()),
         latest_tag: app_release.as_ref().map(|r| r.tag_name.clone()),
         html_url: app_release.as_ref().and_then(|r| r.html_url.clone()),
-        asset_available: app_release.as_ref().map(|r| r.asset(WINDOWS_APP_ASSET).is_some()).unwrap_or(false),
+        asset_available: app_release
+            .as_ref()
+            .map(|r| r.asset(WINDOWS_APP_ASSET).is_some())
+            .unwrap_or(false),
         current_version,
     };
 
@@ -297,15 +314,30 @@ pub fn status(app: &AppHandle) -> UpdateStatus {
         .as_ref()
         .zip(firmware_dir(app))
         .map(|(r, dir)| CachedFirmware {
-            ili9341: dir.join(release::cached_firmware_name(DisplayVariant::Ili9341, &r.tag_name)).is_file(),
-            st7789: dir.join(release::cached_firmware_name(DisplayVariant::St7789, &r.tag_name)).is_file(),
-            st7701: dir.join(release::cached_firmware_name(DisplayVariant::St7701, &r.tag_name)).is_file(),
+            ili9341: dir
+                .join(release::cached_firmware_name(
+                    DisplayVariant::Ili9341,
+                    &r.tag_name,
+                ))
+                .is_file(),
+            st7789: dir
+                .join(release::cached_firmware_name(
+                    DisplayVariant::St7789,
+                    &r.tag_name,
+                ))
+                .is_file(),
+            st7701: dir
+                .join(release::cached_firmware_name(
+                    DisplayVariant::St7701,
+                    &r.tag_name,
+                ))
+                .is_file(),
         })
         .unwrap_or_default();
     let latest_version = fw_release.as_ref().map(|r| r.version());
-    let panel_detection = latest_version
-        .as_deref()
-        .is_some_and(|v| aimonitor_core::semver::at_least(v, aimonitor_core::protocol::PANEL_DETECTION_MIN_VERSION));
+    let panel_detection = latest_version.as_deref().is_some_and(|v| {
+        aimonitor_core::semver::at_least(v, aimonitor_core::protocol::PANEL_DETECTION_MIN_VERSION)
+    });
     let firmware = FirmwareUpdate {
         has_update: match (&latest_version, &device_version) {
             (Some(latest), Some(device)) => latest != device,
@@ -320,7 +352,12 @@ pub fn status(app: &AppHandle) -> UpdateStatus {
         installed_version,
         missing_assets: fw_release
             .as_ref()
-            .map(|r| release::missing_firmware_assets(r).iter().map(|s| s.to_string()).collect())
+            .map(|r| {
+                release::missing_firmware_assets(r)
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            })
             .unwrap_or_default(),
         s3_available: fw_release
             .as_ref()
@@ -328,7 +365,14 @@ pub fn status(app: &AppHandle) -> UpdateStatus {
         cached,
     };
 
-    UpdateStatus { checked_at, error, channel, checking, app: app_update, firmware }
+    UpdateStatus {
+        checked_at,
+        error,
+        channel,
+        checking,
+        app: app_update,
+        firmware,
+    }
 }
 
 pub fn emit_status(app: &AppHandle) -> UpdateStatus {
@@ -368,7 +412,11 @@ pub fn check(app: &AppHandle, force: bool) -> UpdateStatus {
         cache.checked_at = Some(now);
         match result {
             Ok(releases) => {
-                println!("[updates] {} Releases nach {:?}", releases.len(), started.elapsed());
+                println!(
+                    "[updates] {} Releases nach {:?}",
+                    releases.len(),
+                    started.elapsed()
+                );
                 cache.releases = releases;
                 cache.error = None;
                 drop(cache);
@@ -411,11 +459,19 @@ pub fn start_timer(app: AppHandle) {
 /// Firmware-Asset der Variante in den Cache laden. Liegt die Datei schon
 /// vor, wird sie nicht erneut geladen. Fehler als i18n-Schlüssel oder Text.
 pub fn download_firmware(app: &AppHandle, variant: DisplayVariant) -> Result<FirmwareFile, String> {
-    if app.state::<AppState>().releases.lock().unwrap().checked_at.is_none() {
+    if app
+        .state::<AppState>()
+        .releases
+        .lock()
+        .unwrap()
+        .checked_at
+        .is_none()
+    {
         check(app, false);
     }
     let release = firmware_release(app).ok_or_else(|| "release.none.info".to_string())?;
-    let (asset, fallback) = release::firmware_asset(&release, variant).ok_or_else(|| "flash.err.nofile".to_string())?;
+    let (asset, fallback) =
+        release::firmware_asset(&release, variant).ok_or_else(|| "flash.err.nofile".to_string())?;
     let asset: GitHubAsset = asset.clone();
     let dir = firmware_dir(app).ok_or_else(|| "app_data_dir unbekannt".to_string())?;
     // Beim Fallback landet das Standard-Image unter dem Namen der gewählten
@@ -434,16 +490,31 @@ pub fn download_firmware(app: &AppHandle, variant: DisplayVariant) -> Result<Fir
     if let Ok(meta) = std::fs::metadata(&path) {
         if meta.len() > 0 {
             file.bytes = meta.len();
-            println!("[updates] Firmware {} liegt im Cache ({} B)", path.display(), meta.len());
+            println!(
+                "[updates] Firmware {} liegt im Cache ({} B)",
+                path.display(),
+                meta.len()
+            );
             return Ok(file);
         }
     }
-    println!("[updates] Lade {} ({} B) aus {}", name, asset.size, release.tag_name);
+    println!(
+        "[updates] Lade {} ({} B) aus {}",
+        name, asset.size, release.tag_name
+    );
     let app2 = app.clone();
     let asset_name = name.clone();
     let mut on_progress = |received: u64, total: Option<u64>| {
         let done = total.map(|t| received >= t).unwrap_or(false);
-        let _ = app2.emit(FIRMWARE_DOWNLOAD_EVENT, DownloadProgress { asset: asset_name.clone(), received, total, done });
+        let _ = app2.emit(
+            FIRMWARE_DOWNLOAD_EVENT,
+            DownloadProgress {
+                asset: asset_name.clone(),
+                received,
+                total,
+                done,
+            },
+        );
     };
     let bytes = download_to(
         &asset.browser_download_url,
@@ -453,7 +524,10 @@ pub fn download_firmware(app: &AppHandle, variant: DisplayVariant) -> Result<Fir
         &mut on_progress,
     )
     .map_err(|e| format!("download.failed: {e}"))?;
-    println!("[updates] Firmware gespeichert: {} ({bytes} B)", path.display());
+    println!(
+        "[updates] Firmware gespeichert: {} ({bytes} B)",
+        path.display()
+    );
     file.from_cache = false;
     file.bytes = bytes;
     emit_status(app);
@@ -495,7 +569,10 @@ fn install_inner(app: &AppHandle) -> Result<InstallOutcome, String> {
     let release = app_release(app).ok_or_else(|| "update.err.norelease".to_string())?;
     let asset = release.asset(WINDOWS_APP_ASSET).cloned();
     let (Some(asset), true) = (asset, cfg!(windows)) else {
-        let url = release.html_url.clone().unwrap_or_else(|| RELEASES_PAGE.to_string());
+        let url = release
+            .html_url
+            .clone()
+            .unwrap_or_else(|| RELEASES_PAGE.to_string());
         println!("[updates] Kein Installer für diese Plattform, öffne {url}");
         open_url(&url)?;
         return Ok(InstallOutcome::OpenedBrowser);
@@ -504,12 +581,25 @@ fn install_inner(app: &AppHandle) -> Result<InstallOutcome, String> {
     let dir = std::env::temp_dir().join("ai-monitor-update");
     let target = dir.join(&asset.name);
     let _ = std::fs::remove_file(&target);
-    println!("[updates] Lade {} ({} B) nach {}", asset.name, asset.size, target.display());
+    println!(
+        "[updates] Lade {} ({} B) nach {}",
+        asset.name,
+        asset.size,
+        target.display()
+    );
     let app2 = app.clone();
     let asset_name = asset.name.clone();
     let mut on_progress = |received: u64, total: Option<u64>| {
         let done = total.map(|t| received >= t).unwrap_or(false);
-        let _ = app2.emit(UPDATE_PROGRESS_EVENT, DownloadProgress { asset: asset_name.clone(), received, total, done });
+        let _ = app2.emit(
+            UPDATE_PROGRESS_EVENT,
+            DownloadProgress {
+                asset: asset_name.clone(),
+                received,
+                total,
+                done,
+            },
+        );
     };
     download_to(
         &asset.browser_download_url,
@@ -532,7 +622,8 @@ fn install_inner(app: &AppHandle) -> Result<InstallOutcome, String> {
             .limit(4096)
             .read_to_string()
             .map_err(|e| format!("download.failed: {e}"))?;
-        let expected = release::parse_sha256_sidecar(&text).ok_or_else(|| "update.err.sha256".to_string())?;
+        let expected =
+            release::parse_sha256_sidecar(&text).ok_or_else(|| "update.err.sha256".to_string())?;
         let data = std::fs::read(&target).map_err(|e| e.to_string())?;
         let actual = release::sha256_hex(&data);
         if actual != expected {

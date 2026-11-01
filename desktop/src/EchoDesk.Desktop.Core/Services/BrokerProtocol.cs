@@ -7,6 +7,7 @@ public static class BrokerProtocol
 {
     public const string PipeName = "EchoDesk.Companion.v1";
     public const int Version = 1;
+    public const string EchoDeskMiniHardwareModel = "EchoDesk Mini";
     public const int MaximumLineBytes = 64 * 1024;
 
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)

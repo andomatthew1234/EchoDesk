@@ -19,7 +19,10 @@
 static TFT_eSPI tft = TFT_eSPI();
 static uint8_t touch_orientation = ORIENTATION_LANDSCAPE_RIGHT;
 
-static const uint32_t LV_BUF_PX = DISPLAY_SHORT_SIDE * 10;
+// Nine scanlines keep double-buffered LVGL rendering smooth while leaving
+// enough internal DRAM for the opt-in Wi-Fi discovery sockets. This does not
+// change the panel geometry, SPI configuration or flush semantics.
+static const uint32_t LV_BUF_PX = DISPLAY_SHORT_SIDE * 9;
 static lv_color_t lv_buf1[LV_BUF_PX];
 static lv_color_t lv_buf2[LV_BUF_PX];
 

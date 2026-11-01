@@ -156,7 +156,10 @@ impl Settings {
 
     /// Apply only the fields the user edited to the latest backend state.
     /// Internal smart metadata is copied from self and is not accepted as input.
-    pub(crate) fn apply_patch(&self, patch: &serde_json::Map<String, Value>) -> Result<Self, String> {
+    pub(crate) fn apply_patch(
+        &self,
+        patch: &serde_json::Map<String, Value>,
+    ) -> Result<Self, String> {
         let mut value = serde_json::to_value(self).map_err(|e| e.to_string())?;
         let fields = value.as_object_mut().unwrap();
         for (key, value) in patch {
@@ -170,7 +173,8 @@ impl Settings {
         next.smart_revision = self.smart_revision;
         next.smart_manual = self.smart_manual;
         if (next.view_mode == ViewMode::Intelligent || self.view_mode == ViewMode::Intelligent)
-            && (next.views != self.views || next.view_mode != self.view_mode
+            && (next.views != self.views
+                || next.view_mode != self.view_mode
                 || next.active_view != self.active_view)
         {
             let manual = next.view_mode == ViewMode::Intelligent
@@ -314,7 +318,10 @@ mod tests {
         let value: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["viewMode"], "manual");
         assert_eq!(value["intelligentViews"], true);
-        assert_eq!(Settings::from_disk(&bytes).unwrap().view_mode, ViewMode::Intelligent);
+        assert_eq!(
+            Settings::from_disk(&bytes).unwrap().view_mode,
+            ViewMode::Intelligent
+        );
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct OldSettings {
@@ -324,7 +331,10 @@ mod tests {
         }
         #[derive(Deserialize)]
         #[serde(rename_all = "lowercase")]
-        enum OldViewMode { Manual, Automatic }
+        enum OldViewMode {
+            Manual,
+            Automatic,
+        }
         let old: OldSettings = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(old.provider, Provider::Codex);
         assert_eq!(old.views.len(), 2);
@@ -372,6 +382,9 @@ mod tests {
     fn old_settings_default_ai_usage_to_enabled() {
         let settings: Settings = serde_json::from_value(json!({})).unwrap();
         assert!(settings.ai_usage_enabled);
-        assert_eq!(serde_json::to_value(settings).unwrap()["aiUsageEnabled"], true);
+        assert_eq!(
+            serde_json::to_value(settings).unwrap()["aiUsageEnabled"],
+            true
+        );
     }
 }

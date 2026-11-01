@@ -30,6 +30,7 @@
 #include "ui_echodesk.h"
 #include "ui_settings.h"
 #include "wifi_time.h"
+#include "echodesk_wifi_setup.h"
 
 // ============================================================
 // Globals
@@ -455,6 +456,9 @@ void setup()
     // --- Serial receiver init ---
     serial_receiver_init();
     wifi_time_init();
+#if defined(ECHODESK_OS)
+    echodesk_wifi_setup_init();
+#endif
     update_boot_status(L(STR_USB_CONNECTED));
     wait_for_boot_screen();
 
@@ -478,6 +482,9 @@ void loop()
     // Read serial data
     serial_receiver_tick();
     wifi_time_tick();
+#if defined(ECHODESK_OS)
+    echodesk_wifi_setup_tick();
+#endif
 
     // C4: Perform any UI rebuild requested by the command parser here, OUTSIDE
     // the Serial RX loop, so the expensive full-screen recreate is not reentrant

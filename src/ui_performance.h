@@ -28,4 +28,8 @@ lv_obj_t *ui_performance_recreate();
 // Returns the currently owned screen, or nullptr after LVGL has deleted it.
 lv_obj_t *ui_performance_screen();
 
+// Applies g_config.performance_default_view immediately when the Desktop
+// changes it, and is also used whenever the app is opened from Home.
+void ui_performance_apply_default_view();
+
 #endif // UI_PERFORMANCE_H

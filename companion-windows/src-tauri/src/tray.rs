@@ -48,10 +48,28 @@ fn build_menu(app: &AppHandle, settings: &Settings, active: Provider) -> tauri::
         menu.append(&item)?;
     }
     menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&MenuItem::with_id(app, "refresh", text(lang, "refresh"), true, None::<&str>)?)?;
-    menu.append(&MenuItem::with_id(app, "settings", text(lang, "settings"), true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "refresh",
+        text(lang, "refresh"),
+        true,
+        None::<&str>,
+    )?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "settings",
+        text(lang, "settings"),
+        true,
+        None::<&str>,
+    )?)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&MenuItem::with_id(app, "quit", text(lang, "quit"), true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "quit",
+        text(lang, "quit"),
+        true,
+        None::<&str>,
+    )?)?;
     Ok(menu)
 }
 
@@ -71,7 +89,10 @@ fn tooltip(app: &AppHandle, lang: &str, snap: &Snapshot) -> String {
         ConnectionState::ForeignFirmware => text(lang, "foreignFirmware").to_string(),
         ConnectionState::Disconnected => text(lang, "disconnected").to_string(),
     };
-    format!("AI Monitor · {} · {} · {}", snap.provider_label, value, link)
+    format!(
+        "AI Monitor · {} · {} · {}",
+        snap.provider_label, value, link
+    )
 }
 
 fn tray_image() -> tauri::Result<tauri::image::Image<'static>> {

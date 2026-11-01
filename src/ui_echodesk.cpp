@@ -5,6 +5,9 @@
 #include "api_common.h"
 #include "config.h"
 #include "config_store.h"
+#include "echodesk_control.h"
+#include "echodesk_setup.h"
+#include "echodesk_wifi_setup.h"
 #include "echodesk_usage_state.h"
 #include "serial_receiver.h"
 #include "ui_common.h"
@@ -31,6 +34,15 @@ enum EchoApp : uint8_t {
     ECHO_SETTINGS,
 };
 
+enum class SetupPage : uint8_t {
+    HELLO,
+    LANGUAGE,
+    METHOD,
+    DOWNLOAD,
+    WIFI,
+    IN_PROGRESS,
+};
+
 constexpr uint32_t COLOR_BLACK = 0x000000;
 constexpr uint32_t COLOR_WHITE = 0xFFFFFF;
 constexpr uint32_t ECHO_COLOR_PANEL = 0x0E0E0E;
@@ -44,12 +56,20 @@ lv_obj_t *home_screen = nullptr;
 lv_obj_t *codex_screen = nullptr;
 lv_obj_t *clock_screen = nullptr;
 lv_obj_t *settings_screen = nullptr;
+lv_obj_t *setup_screen = nullptr;
 EchoApp current_app = ECHO_HOME;
 unsigned long last_navigation_ms = 0;
 unsigned long last_refresh_ms = 0;
 unsigned long restart_at_ms = 0;
 EchoApp pending_remote_app = ECHO_HOME;
 bool remote_app_pending = false;
+bool setup_state_change_pending = false;
+SetupPage setup_page = SetupPage::HELLO;
+unsigned long setup_hello_reveal_at = 0;
+lv_obj_t *setup_hello_prompt = nullptr;
+lv_obj_t *setup_hello_button = nullptr;
+lv_obj_t *setup_wifi_status = nullptr;
+lv_obj_t *setup_wifi_retry = nullptr;
 
 struct UsageWidgets {
     lv_obj_t *container = nullptr;
@@ -78,6 +98,7 @@ char last_clock_ampm[3] = "";
 lv_obj_t *brightness_slider = nullptr;
 lv_obj_t *brightness_value = nullptr;
 lv_obj_t *restart_modal = nullptr;
+lv_obj_t *factory_reset_modal = nullptr;
 bool theme_rebuild_pending = false;
 
 lv_color_t color(uint32_t hex) {
@@ -130,6 +151,306 @@ lv_obj_t *make_label(lv_obj_t *parent, const char *text, const lv_font_t *font,
     lv_obj_set_style_text_font(label, font, LV_PART_MAIN);
     lv_obj_set_style_text_color(label, text_color, LV_PART_MAIN);
     return label;
+}
+
+bool navigation_allowed();
+void add_delete_tracking(lv_obj_t *screen, lv_obj_t **slot);
+
+void setup_style_screen(lv_obj_t *screen) {
+    lv_obj_set_style_bg_color(screen, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(screen, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(screen, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+lv_obj_t *setup_make_label(lv_obj_t *parent, const char *text,
+                           const lv_font_t *font = &lv_font_montserrat_16) {
+    lv_obj_t *label = make_label(parent, text, font, lv_color_white());
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    return label;
+}
+
+lv_obj_t *setup_make_button(lv_obj_t *parent, const char *text,
+                            int16_t x, int16_t y, int16_t width) {
+    lv_obj_t *button = lv_button_create(parent);
+    lv_obj_set_size(button, width, 44);
+    lv_obj_set_pos(button, x, y);
+    lv_obj_set_style_bg_color(button, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(button, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(button, 12, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(button, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0xD8D8D8),
+                              LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_t *label = make_label(button, text, &lv_font_montserrat_14,
+                                 lv_color_black());
+    lv_obj_center(label);
+    return button;
+}
+
+lv_obj_t *setup_rect(lv_obj_t *parent, int16_t width, int16_t height,
+                     int16_t x, int16_t y) {
+    lv_obj_t *rect = lv_obj_create(parent);
+    lv_obj_remove_style_all(rect);
+    lv_obj_set_size(rect, width, height);
+    lv_obj_set_pos(rect, x, y);
+    lv_obj_set_style_bg_color(rect, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(rect, LV_OPA_COVER, LV_PART_MAIN);
+    return rect;
+}
+
+lv_obj_t *setup_corner(lv_obj_t *parent, bool bottom_right,
+                       int16_t x, int16_t y) {
+    constexpr int16_t width = 72;
+    constexpr int16_t height = 52;
+    constexpr int16_t thickness = 3;
+    lv_obj_t *corner = lv_obj_create(parent);
+    lv_obj_remove_style_all(corner);
+    lv_obj_set_size(corner, width, height);
+    lv_obj_set_pos(corner, x, y);
+    if (bottom_right) {
+        setup_rect(corner, width, thickness, 0, height - thickness);
+        setup_rect(corner, thickness, height, width - thickness, 0);
+    } else {
+        setup_rect(corner, width, thickness, 0, 0);
+        setup_rect(corner, thickness, height, 0, 0);
+    }
+    return corner;
+}
+
+void setup_anim_set_x(void *object, int32_t value) {
+    lv_obj_set_x(static_cast<lv_obj_t *>(object), value);
+}
+
+void setup_anim_set_y(void *object, int32_t value) {
+    lv_obj_set_y(static_cast<lv_obj_t *>(object), value);
+}
+
+void setup_animate_corner(lv_obj_t *corner, int16_t x, int16_t y,
+                          int16_t delta_x, int16_t delta_y) {
+    lv_anim_t animation;
+    lv_anim_init(&animation);
+    lv_anim_set_var(&animation, corner);
+    lv_anim_set_exec_cb(&animation, setup_anim_set_x);
+    lv_anim_set_values(&animation, x, x + delta_x);
+    lv_anim_set_duration(&animation, 900);
+    lv_anim_set_reverse_duration(&animation, 900);
+    lv_anim_set_repeat_count(&animation, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_path_cb(&animation, lv_anim_path_ease_in_out);
+    lv_anim_start(&animation);
+    lv_anim_init(&animation);
+    lv_anim_set_var(&animation, corner);
+    lv_anim_set_exec_cb(&animation, setup_anim_set_y);
+    lv_anim_set_values(&animation, y, y + delta_y);
+    lv_anim_set_duration(&animation, 900);
+    lv_anim_set_reverse_duration(&animation, 900);
+    lv_anim_set_repeat_count(&animation, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_path_cb(&animation, lv_anim_path_ease_in_out);
+    lv_anim_start(&animation);
+}
+
+lv_obj_t *create_setup_page(SetupPage page);
+
+void load_setup_page(SetupPage page, bool animate = true) {
+    lv_obj_t *old = lv_screen_active();
+    lv_obj_t *next = create_setup_page(page);
+    if (animate) {
+        lv_screen_load_anim(next, LV_SCR_LOAD_ANIM_FADE_IN, 180, 0,
+                            old && old != next);
+    } else {
+        lv_screen_load(next);
+        if (old && old != next) lv_obj_delete(old);
+    }
+    lv_refr_now(nullptr);
+}
+
+void on_setup_begin(lv_event_t *event) {
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !navigation_allowed()) return;
+    load_setup_page(SetupPage::LANGUAGE);
+}
+
+void on_setup_language_continue(lv_event_t *event) {
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !navigation_allowed()) return;
+    g_config.language = LANG_EN;
+    config_save(g_config);
+    load_setup_page(SetupPage::METHOD);
+}
+
+void begin_setup_transport(uint8_t transport) {
+    g_config.setup_transport = echodesk_setup_normalize_transport(transport);
+    g_config.setup_state = ECHODESK_SETUP_WAITING_FOR_DESKTOP;
+    g_config.setup_version = ECHODESK_SETUP_VERSION;
+    config_save(g_config);
+    serial_echodesk_state_changed();
+}
+
+void on_setup_usb(lv_event_t *event) {
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !navigation_allowed()) return;
+    echodesk_wifi_setup_stop();
+    begin_setup_transport(ECHODESK_SETUP_TRANSPORT_USB);
+    load_setup_page(SetupPage::DOWNLOAD);
+}
+
+void on_setup_wifi(lv_event_t *event) {
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !navigation_allowed()) return;
+    begin_setup_transport(ECHODESK_SETUP_TRANSPORT_WIFI);
+    echodesk_wifi_setup_request_start();
+    load_setup_page(SetupPage::WIFI);
+}
+
+void on_setup_wifi_retry(lv_event_t *event) {
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !navigation_allowed()) return;
+    echodesk_wifi_setup_request_start();
+    load_setup_page(SetupPage::WIFI, false);
+}
+
+lv_obj_t *create_setup_page(SetupPage page) {
+    setup_page = page;
+    setup_hello_prompt = nullptr;
+    setup_hello_button = nullptr;
+    setup_wifi_status = nullptr;
+    setup_wifi_retry = nullptr;
+    lv_obj_t *screen = lv_obj_create(nullptr);
+    setup_screen = screen;
+    add_delete_tracking(screen, &setup_screen);
+    setup_style_screen(screen);
+
+    if (page == SetupPage::HELLO) {
+        lv_obj_t *top = setup_corner(screen, false, 18, 16);
+        lv_obj_t *bottom = setup_corner(screen, true, 230, 172);
+        setup_animate_corner(top, 18, 16, 6, 5);
+        setup_animate_corner(bottom, 230, 172, -6, -5);
+        lv_obj_t *hello = setup_make_label(screen, "Hello.",
+                                           &lv_font_montserrat_48);
+        lv_obj_align(hello, LV_ALIGN_CENTER, 0, -23);
+        setup_hello_prompt = setup_make_label(screen, "Let's begin.",
+                                              &lv_font_montserrat_16);
+        lv_obj_align(setup_hello_prompt, LV_ALIGN_CENTER, 0, 35);
+        setup_hello_button = setup_make_button(screen, "LET'S BEGIN", 88, 178, 144);
+        lv_obj_add_event_cb(setup_hello_button, on_setup_begin,
+                            LV_EVENT_CLICKED, nullptr);
+        lv_obj_add_flag(setup_hello_prompt, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(setup_hello_button, LV_OBJ_FLAG_HIDDEN);
+        setup_hello_reveal_at = millis() + 1100;
+    } else if (page == SetupPage::LANGUAGE) {
+        lv_obj_t *heading = setup_make_label(screen, "Choose your language.",
+                                             &lv_font_montserrat_24);
+        lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 24);
+        lv_obj_t *note = setup_make_label(screen,
+            "More languages can be added in a future EchoDesk OS update.",
+            &lv_font_montserrat_12);
+        lv_obj_set_width(note, 280);
+        lv_obj_align(note, LV_ALIGN_TOP_MID, 0, 60);
+        lv_obj_t *language = lv_obj_create(screen);
+        lv_obj_set_size(language, 280, 56);
+        lv_obj_set_pos(language, 20, 102);
+        lv_obj_set_style_bg_color(language, lv_color_hex(0x111111), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(language, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_border_color(language, lv_color_white(), LV_PART_MAIN);
+        lv_obj_set_style_border_width(language, 2, LV_PART_MAIN);
+        lv_obj_set_style_radius(language, 12, LV_PART_MAIN);
+        lv_obj_t *english = setup_make_label(language, "English    SELECTED",
+                                              &lv_font_montserrat_16);
+        lv_obj_center(english);
+        lv_obj_t *button = setup_make_button(screen, "CONTINUE", 88, 180, 144);
+        lv_obj_add_event_cb(button, on_setup_language_continue,
+                            LV_EVENT_CLICKED, nullptr);
+    } else if (page == SetupPage::METHOD) {
+        lv_obj_t *heading = setup_make_label(screen, "How do you want to set up?",
+                                             &lv_font_montserrat_20);
+        lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 25);
+        lv_obj_t *body = setup_make_label(
+            screen, "USB stays the default. Wi-Fi is opt-in and can be changed later.",
+            &lv_font_montserrat_12);
+        lv_obj_set_width(body, 290);
+        lv_obj_align(body, LV_ALIGN_TOP_MID, 0, 58);
+        lv_obj_t *usb = setup_make_button(screen, "SET UP WITH USB", 22, 110, 132);
+        lv_obj_add_event_cb(usb, on_setup_usb, LV_EVENT_CLICKED, nullptr);
+        lv_obj_t *wifi = setup_make_button(screen, "SET UP WITH WI-FI", 166, 110, 132);
+        lv_obj_add_event_cb(wifi, on_setup_wifi, LV_EVENT_CLICKED, nullptr);
+        lv_obj_t *note = setup_make_label(
+            screen, "USB usage data remains available in either mode.",
+            &lv_font_montserrat_12);
+        lv_obj_align(note, LV_ALIGN_BOTTOM_MID, 0, -28);
+    } else if (page == SetupPage::DOWNLOAD) {
+        lv_obj_t *icon = setup_make_label(screen, LV_SYMBOL_DOWNLOAD,
+                                          &lv_font_montserrat_36);
+        lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 17);
+        lv_obj_t *heading = setup_make_label(screen, "Get EchoDesk Desktop.",
+                                             &lv_font_montserrat_20);
+        lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 62);
+        lv_obj_t *body = setup_make_label(
+            screen,
+            "Download EchoDesk Desktop on your PC, then select\n'Set up a new device' to continue.",
+            &lv_font_montserrat_12);
+        lv_obj_set_width(body, 296);
+        lv_obj_align(body, LV_ALIGN_TOP_MID, 0, 96);
+        const char *url = ECHODESK_SETUP_URL;
+        lv_obj_t *url_label = setup_make_label(
+            screen, url[0] ? url : "DOWNLOAD URL NOT CONFIGURED",
+            &lv_font_montserrat_12);
+        lv_obj_set_width(url_label, 292);
+        lv_label_set_long_mode(url_label, LV_LABEL_LONG_DOT);
+        lv_obj_align(url_label, LV_ALIGN_BOTTOM_MID, 0, -30);
+        lv_obj_t *waiting = make_spinner(screen, 22);
+        lv_obj_align(waiting, LV_ALIGN_BOTTOM_MID, 0, -55);
+    } else if (page == SetupPage::WIFI) {
+        char details[128];
+        snprintf(details, sizeof(details),
+                 "1. On your PC, join: %s\n2. Wi-Fi password: %s\n3. In EchoDesk Desktop, select Find Wi-Fi devices.",
+                 echodesk_wifi_setup_ap_ssid(),
+                 echodesk_wifi_setup_pairing_code());
+        lv_obj_t *heading = setup_make_label(screen, "Set up with Wi-Fi",
+                                             &lv_font_montserrat_20);
+        lv_obj_align(heading, LV_ALIGN_TOP_MID, 0, 14);
+        lv_obj_t *details_label = setup_make_label(screen, details,
+                                                   &lv_font_montserrat_12);
+        lv_obj_set_width(details_label, 300);
+        lv_obj_set_style_text_align(details_label, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
+        lv_obj_set_pos(details_label, 10, 52);
+        lv_obj_t *spinner = make_spinner(screen, 20);
+        lv_obj_set_pos(spinner, 24, 185);
+        setup_wifi_status = setup_make_label(screen, "Temporary setup network is starting...",
+                                             &lv_font_montserrat_12);
+        lv_obj_set_width(setup_wifi_status, 245);
+        lv_obj_set_style_text_align(setup_wifi_status, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
+        lv_obj_set_pos(setup_wifi_status, 55, 187);
+        setup_wifi_retry = setup_make_button(screen, "RETRY", 110, 181, 100);
+        lv_obj_add_event_cb(setup_wifi_retry, on_setup_wifi_retry,
+                            LV_EVENT_CLICKED, nullptr);
+        lv_obj_add_flag(setup_wifi_retry, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_t *top = setup_corner(screen, false, 18, 16);
+        lv_obj_t *bottom = setup_corner(screen, true, 230, 172);
+        setup_animate_corner(top, 18, 16, 4, 4);
+        setup_animate_corner(bottom, 230, 172, -4, -4);
+        lv_obj_t *spinner = make_spinner(screen, 34);
+        lv_obj_align(spinner, LV_ALIGN_CENTER, 0, -35);
+        lv_obj_t *heading = setup_make_label(
+            screen, "Connected to EchoDesk Desktop",
+            &lv_font_montserrat_16);
+        lv_obj_set_width(heading, 280);
+        lv_obj_align(heading, LV_ALIGN_CENTER, 0, 14);
+        lv_obj_t *body = setup_make_label(
+            screen, "Preparing setup. Keep the USB cable connected.",
+            &lv_font_montserrat_12);
+        lv_obj_set_width(body, 280);
+        lv_obj_align(body, LV_ALIGN_CENTER, 0, 47);
+    }
+    return screen;
+}
+
+SetupPage setup_page_for_state(uint8_t state) {
+    switch (echodesk_setup_normalize_state(state)) {
+        case ECHODESK_SETUP_WAITING_FOR_DESKTOP:
+            return echodesk_setup_normalize_transport(g_config.setup_transport) ==
+                           ECHODESK_SETUP_TRANSPORT_WIFI
+                       ? SetupPage::WIFI
+                       : SetupPage::DOWNLOAD;
+        case ECHODESK_SETUP_IN_PROGRESS: return SetupPage::IN_PROGRESS;
+        default: return SetupPage::HELLO;
+    }
 }
 
 void on_screen_deleted(lv_event_t *event) {
@@ -349,6 +670,15 @@ void update_usage_widgets(const UsageWidgets &widgets, float fraction,
     lv_label_set_text(widgets.reset, reset_text);
 }
 
+float configured_codex_fraction(float fraction, bool source_shows_remaining) {
+    const bool target_shows_remaining =
+        g_config.codex_percentage_mode == CODEX_PERCENTAGE_REMAINING;
+    if (source_shows_remaining != target_shows_remaining && isfinite(fraction)) {
+        return 1.0f - fraction;
+    }
+    return fraction;
+}
+
 void update_codex() {
     if (!codex_screen) return;
 
@@ -426,23 +756,39 @@ void update_codex() {
 
     lv_obj_add_flag(codex_loading, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(codex_loading_label, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text(codex_mode, codex.usage.shows_remaining ? "PERCENT LEFT" : "PERCENT USED");
+    const bool show_remaining =
+        g_config.codex_percentage_mode == CODEX_PERCENTAGE_REMAINING;
+    lv_label_set_text(codex_mode, show_remaining ? "PERCENT LEFT" : "PERCENT USED");
     bool session_inactive = echodesk_usage_window_is_inactive(
         codex.usage.five_hour_reset_epoch, codex.usage.five_hour_window_minutes);
     bool weekly_inactive = echodesk_usage_window_is_inactive(
         codex.usage.seven_day_reset_epoch, codex.usage.seven_day_window_minutes);
-    if (session_inactive) {
+    const bool weekly_only = g_config.codex_preferred_display == CODEX_DISPLAY_WEEKLY;
+    const bool session_only =
+        g_config.codex_preferred_display == CODEX_DISPLAY_SESSION && !session_inactive;
+    if (session_inactive || weekly_only) {
         lv_obj_add_flag(session_widgets.container, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_y(weekly_widgets.container, 92);
     } else {
         lv_obj_clear_flag(session_widgets.container, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_y(session_widgets.container, session_only ? 92 : 58);
         lv_obj_set_y(weekly_widgets.container, 149);
-        update_usage_widgets(session_widgets, codex.usage.five_hour_utilization,
+        update_usage_widgets(session_widgets,
+                             configured_codex_fraction(
+                                 codex.usage.five_hour_utilization,
+                                 codex.usage.shows_remaining),
                              codex.usage.five_hour_reset_epoch, false);
     }
-    lv_obj_clear_flag(weekly_widgets.container, LV_OBJ_FLAG_HIDDEN);
-    update_usage_widgets(weekly_widgets, codex.usage.seven_day_utilization,
-                         codex.usage.seven_day_reset_epoch, weekly_inactive);
+    if (session_only) {
+        lv_obj_add_flag(weekly_widgets.container, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_clear_flag(weekly_widgets.container, LV_OBJ_FLAG_HIDDEN);
+        update_usage_widgets(weekly_widgets,
+                             configured_codex_fraction(
+                                 codex.usage.seven_day_utilization,
+                                 codex.usage.shows_remaining),
+                             codex.usage.seven_day_reset_epoch, weekly_inactive);
+    }
 }
 
 void set_clock_visible(bool visible) {
@@ -467,7 +813,10 @@ lv_obj_t *create_clock_screen() {
     clock_screen = screen;
     add_delete_tracking(screen, &clock_screen);
     style_screen(screen);
-    add_header(screen, "MELBOURNE");
+    const char *heading = g_config.timezone == ECHODESK_TIMEZONE_UTC ? "UTC" :
+                          g_config.timezone == ECHODESK_TIMEZONE_SYDNEY ? "SYDNEY" :
+                          "MELBOURNE";
+    add_header(screen, heading);
 
     static const int8_t outline_offsets[][2] = {
         {-2, -2}, {0, -2}, {2, -2}, {-2, 0},
@@ -507,15 +856,20 @@ void update_clock() {
     char hour[3];
     char minute[3];
     char ampm[3];
-    strftime(hour, sizeof(hour), "%I", &local_time);
+    const bool format_24h = g_config.clock_format == CLOCK_FORMAT_24_HOUR;
+    strftime(hour, sizeof(hour), format_24h ? "%H" : "%I", &local_time);
     strftime(minute, sizeof(minute), "%M", &local_time);
-    strftime(ampm, sizeof(ampm), "%p", &local_time);
-    if (hour[0] == '0') {
+    if (format_24h) ampm[0] = '\0';
+    else strftime(ampm, sizeof(ampm), "%p", &local_time);
+    if (!format_24h && hour[0] == '0') {
         hour[0] = hour[1];
         hour[1] = '\0';
     }
 
     set_clock_visible(true);
+    if (format_24h && clock_ampm) {
+        lv_obj_add_flag(clock_ampm, LV_OBJ_FLAG_HIDDEN);
+    }
     if (strcmp(hour, last_clock_hour) != 0) {
         static const int8_t outline_offsets[][2] = {
             {-2, -2}, {0, -2}, {2, -2}, {-2, 0},
@@ -634,6 +988,80 @@ void on_restart_pressed(lv_event_t *event) {
     show_restart_dialog();
 }
 
+void on_factory_reset_cancel(lv_event_t *event) {
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !navigation_allowed()) return;
+    if (factory_reset_modal) {
+        lv_obj_delete(factory_reset_modal);
+        factory_reset_modal = nullptr;
+    }
+}
+
+void on_factory_reset_confirm(lv_event_t *event) {
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !navigation_allowed()) return;
+    config_factory_reset_setup(g_config);
+    serial_echodesk_state_changed();
+    ui_echodesk_setup_state_changed();
+    Serial.println("[EchoDesk] Onboarding reset from Settings; preferences retained");
+}
+
+void show_factory_reset_dialog() {
+    if (!settings_screen || factory_reset_modal) return;
+    factory_reset_modal = lv_obj_create(settings_screen);
+    lv_obj_set_size(factory_reset_modal, 320, 240);
+    lv_obj_set_pos(factory_reset_modal, 0, 0);
+    lv_obj_set_style_bg_color(factory_reset_modal, color(COLOR_BLACK), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(factory_reset_modal, LV_OPA_90, LV_PART_MAIN);
+    lv_obj_set_style_border_width(factory_reset_modal, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(factory_reset_modal, 0, LV_PART_MAIN);
+    lv_obj_add_flag(factory_reset_modal, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_move_foreground(factory_reset_modal);
+
+    lv_obj_t *panel = lv_obj_create(factory_reset_modal);
+    lv_obj_set_size(panel, 292, 162);
+    lv_obj_center(panel);
+    lv_obj_set_style_bg_color(panel, color(ECHO_COLOR_PANEL), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_color(panel, color(COLOR_WHITE), LV_PART_MAIN);
+    lv_obj_set_style_border_width(panel, 1, LV_PART_MAIN);
+    lv_obj_set_style_radius(panel, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(panel, 0, LV_PART_MAIN);
+
+    lv_obj_t *question = make_label(panel, "RESET SETUP?", &lv_font_montserrat_16,
+                                    color(COLOR_WHITE));
+    lv_obj_align(question, LV_ALIGN_TOP_MID, 0, 16);
+    lv_obj_t *detail = make_label(
+        panel, "Returns to Hello.\nYour apps and preferences stay saved.",
+        &lv_font_montserrat_12, color(COLOR_GREY));
+    lv_obj_set_width(detail, 260);
+    lv_obj_set_style_text_align(detail, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_align(detail, LV_ALIGN_TOP_MID, 0, 48);
+
+    lv_obj_t *cancel = lv_button_create(panel);
+    style_button(cancel, 8);
+    lv_obj_set_size(cancel, 118, 42);
+    lv_obj_set_pos(cancel, 14, 106);
+    lv_obj_t *cancel_label = make_label(cancel, "CANCEL", &lv_font_montserrat_14,
+                                        color(COLOR_WHITE));
+    lv_obj_center(cancel_label);
+    lv_obj_add_event_cb(cancel, on_factory_reset_cancel, LV_EVENT_CLICKED, nullptr);
+
+    lv_obj_t *confirm = lv_button_create(panel);
+    style_button(confirm, 8);
+    lv_obj_set_size(confirm, 132, 42);
+    lv_obj_set_pos(confirm, 146, 106);
+    lv_obj_set_style_border_color(confirm, color(COLOR_WHITE), LV_PART_MAIN);
+    lv_obj_t *confirm_label = make_label(confirm, "RESET SETUP",
+                                         &lv_font_montserrat_12,
+                                         color(COLOR_WHITE));
+    lv_obj_center(confirm_label);
+    lv_obj_add_event_cb(confirm, on_factory_reset_confirm, LV_EVENT_CLICKED, nullptr);
+}
+
+void on_factory_reset_pressed(lv_event_t *event) {
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !navigation_allowed()) return;
+    show_factory_reset_dialog();
+}
+
 void on_theme_pressed(lv_event_t *event) {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED || !navigation_allowed()) return;
     g_config.theme = g_config.theme == THEME_LIGHT ? THEME_DARK : THEME_LIGHT;
@@ -647,6 +1075,7 @@ void on_theme_pressed(lv_event_t *event) {
 
 lv_obj_t *create_settings_screen() {
     restart_modal = nullptr;
+    factory_reset_modal = nullptr;
     lv_obj_t *screen = lv_obj_create(nullptr);
     settings_screen = screen;
     add_delete_tracking(screen, &settings_screen);
@@ -696,11 +1125,22 @@ lv_obj_t *create_settings_screen() {
 
     lv_obj_t *restart = lv_button_create(screen);
     style_button(restart, 10);
-    lv_obj_set_size(restart, 288, 50);
+    lv_obj_set_size(restart, 134, 50);
     lv_obj_set_pos(restart, 16, 174);
-    lv_obj_t *restart_label = make_label(restart, "RESTART", &lv_font_montserrat_16, color(COLOR_WHITE));
+    lv_obj_t *restart_label = make_label(restart, "RESTART", &lv_font_montserrat_14, color(COLOR_WHITE));
     lv_obj_center(restart_label);
     lv_obj_add_event_cb(restart, on_restart_pressed, LV_EVENT_CLICKED, nullptr);
+
+    lv_obj_t *factory_reset = lv_button_create(screen);
+    style_button(factory_reset, 10);
+    lv_obj_set_size(factory_reset, 134, 50);
+    lv_obj_set_pos(factory_reset, 170, 174);
+    lv_obj_t *factory_reset_label = make_label(
+        factory_reset, "FACTORY RESET", &lv_font_montserrat_12,
+        color(COLOR_WHITE));
+    lv_obj_center(factory_reset_label);
+    lv_obj_add_event_cb(factory_reset, on_factory_reset_pressed,
+                        LV_EVENT_CLICKED, nullptr);
     return screen;
 }
 
@@ -738,6 +1178,7 @@ void show_app(EchoApp app, bool animate) {
             update_clock();
             break;
         case ECHO_PERFORMANCE:
+            ui_performance_apply_default_view();
             target = ui_performance_create();
             break;
         case ECHO_NOW_PLAYING:
@@ -804,24 +1245,111 @@ lv_obj_t *rebuild_current_screen() {
 } // namespace
 
 void ui_echodesk_init() {
-    setenv("TZ", "AEST-10AEDT,M10.1.0,M4.1.0/3", 1);
-    tzset();
+    serial_apply_configured_timezone();
     current_app = ECHO_HOME;
     ui_performance_set_navigation_callbacks(on_performance_home, on_performance_back);
     ui_now_playing_set_navigation_callback(on_now_playing_home);
+    if (echodesk_setup_normalize_state(g_config.setup_state) !=
+        ECHODESK_SETUP_COMPLETED) {
+        load_setup_page(setup_page_for_state(g_config.setup_state));
+        Serial.printf("[EchoDesk] Guided setup active: %s\n",
+                      echodesk_setup_state_name(g_config.setup_state));
+        return;
+    }
     create_home_screen();
-    lv_screen_load_anim(home_screen, LV_SCR_LOAD_ANIM_FADE_IN, 180, 0, true);
+    EchoApp startup_app = ECHO_HOME;
+    switch (g_config.default_app) {
+        case ECHODESK_APP_CODEX: startup_app = ECHO_CODEX; break;
+        case ECHODESK_APP_CLOCK: startup_app = ECHO_CLOCK; break;
+        case ECHODESK_APP_PERFORMANCE: startup_app = ECHO_PERFORMANCE; break;
+        case ECHODESK_APP_NOW_PLAYING: startup_app = ECHO_NOW_PLAYING; break;
+        case ECHODESK_APP_SETTINGS: startup_app = ECHO_SETTINGS; break;
+        default: break;
+    }
+    if (startup_app == ECHO_HOME) {
+        lv_screen_load_anim(home_screen, LV_SCR_LOAD_ANIM_FADE_IN, 180, 0, true);
+    } else {
+        lv_obj_t *boot = lv_screen_active();
+        show_app(startup_app, false);
+        if (boot && boot != lv_screen_active()) lv_obj_delete(boot);
+    }
     lv_refr_now(nullptr);
     Serial.println("[EchoDesk] OS 1.0 shell active (320x240 landscape)");
 }
 
 void ui_echodesk_tick() {
+    unsigned long now = millis();
+    if (setup_state_change_pending) {
+        setup_state_change_pending = false;
+        if (echodesk_setup_normalize_state(g_config.setup_state) ==
+            ECHODESK_SETUP_COMPLETED) {
+            lv_obj_t *old = lv_screen_active();
+            current_app = ECHO_HOME;
+            if (!home_screen) create_home_screen();
+            lv_screen_load_anim(home_screen, LV_SCR_LOAD_ANIM_FADE_IN, 180, 0,
+                                old && old != home_screen);
+            setup_screen = nullptr;
+            lv_refr_now(nullptr);
+            Serial.println("[EchoDesk] Guided setup completed; Home active");
+        } else {
+            load_setup_page(setup_page_for_state(g_config.setup_state));
+        }
+    }
+
+    if (echodesk_setup_normalize_state(g_config.setup_state) !=
+        ECHODESK_SETUP_COMPLETED) {
+        if (setup_page == SetupPage::HELLO && setup_hello_reveal_at != 0 &&
+            static_cast<long>(now - setup_hello_reveal_at) >= 0) {
+            setup_hello_reveal_at = 0;
+            if (setup_hello_prompt) {
+                lv_obj_clear_flag(setup_hello_prompt, LV_OBJ_FLAG_HIDDEN);
+            }
+            if (setup_hello_button) {
+                lv_obj_clear_flag(setup_hello_button, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        if (setup_page == SetupPage::WIFI && setup_wifi_status) {
+            const char *text = "Temporary setup network is starting...";
+            bool retry = false;
+            switch (echodesk_wifi_setup_status()) {
+                case EchoDeskWifiSetupStatus::PROVISIONING:
+                    text = "Waiting securely for EchoDesk Desktop...";
+                    break;
+                case EchoDeskWifiSetupStatus::CONNECTING:
+                    text = "Wi-Fi saved. Connecting to your network...";
+                    break;
+                case EchoDeskWifiSetupStatus::CONNECTED:
+                    text = "Connected. EchoDesk Desktop can now find this device.";
+                    break;
+                case EchoDeskWifiSetupStatus::EXPIRED:
+                    text = "Setup network expired after 15 minutes.";
+                    retry = true;
+                    break;
+                case EchoDeskWifiSetupStatus::ERROR:
+                    text = "Could not start Wi-Fi setup.";
+                    retry = true;
+                    break;
+                default:
+                    break;
+            }
+            lv_label_set_text(setup_wifi_status, text);
+            if (setup_wifi_retry) {
+                if (retry) lv_obj_clear_flag(setup_wifi_retry, LV_OBJ_FLAG_HIDDEN);
+                else lv_obj_add_flag(setup_wifi_retry, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        if (restart_at_ms != 0 && static_cast<long>(now - restart_at_ms) >= 0) {
+            Serial.flush();
+            ESP.restart();
+        }
+        return;
+    }
+
     if (remote_app_pending) {
         remote_app_pending = false;
         show_app(pending_remote_app);
     }
     bool new_data = serial_has_new_data();
-    unsigned long now = millis();
     if (current_app == ECHO_CODEX && (new_data || now - last_refresh_ms >= UI_REFRESH_MS)) {
         update_codex();
         last_refresh_ms = now;
@@ -852,6 +1380,13 @@ void ui_echodesk_tick() {
 }
 
 void ui_echodesk_recreate() {
+    if (echodesk_setup_normalize_state(g_config.setup_state) !=
+        ECHODESK_SETUP_COMPLETED) {
+        load_setup_page(setup_page_for_state(g_config.setup_state), false);
+        lv_refr_now(nullptr);
+        Serial.println("[EchoDesk] Guided setup screen recreated");
+        return;
+    }
     if (current_app != ECHO_HOME && home_screen) {
         lv_obj_t *old_home = home_screen;
         home_screen = nullptr;
@@ -884,7 +1419,8 @@ void ui_echodesk_recreate() {
 }
 
 bool ui_echodesk_request_open_app(const char *app) {
-    if (!app) return false;
+    if (!app || echodesk_setup_normalize_state(g_config.setup_state) !=
+                    ECHODESK_SETUP_COMPLETED) return false;
     if (strcmp(app, "home") == 0) pending_remote_app = ECHO_HOME;
     else if (strcmp(app, "codex") == 0) pending_remote_app = ECHO_CODEX;
     else if (strcmp(app, "clock") == 0) pending_remote_app = ECHO_CLOCK;
@@ -911,6 +1447,10 @@ void ui_echodesk_request_restart() {
     if (restart_at_ms == 0) restart_at_ms = millis() + 350;
 }
 
+void ui_echodesk_setup_state_changed() {
+    setup_state_change_pending = true;
+}
+
 #else
 
 void ui_echodesk_init() {}
@@ -919,5 +1459,6 @@ void ui_echodesk_recreate() {}
 bool ui_echodesk_request_open_app(const char *) { return false; }
 const char *ui_echodesk_active_app_name() { return "unsupported"; }
 void ui_echodesk_request_restart() {}
+void ui_echodesk_setup_state_changed() {}
 
 #endif

@@ -28,6 +28,9 @@ public sealed record BrokerState
     [JsonPropertyName("firmwareManager")]
     public FirmwareManagerState FirmwareManager { get; init; } = FirmwareManagerState.Unavailable;
 
+    [JsonPropertyName("wifiSetup")]
+    public WifiSetupState WifiSetup { get; init; } = WifiSetupState.Unavailable;
+
     [JsonIgnore]
     public bool IsConnected => string.Equals(Connection, "connected", StringComparison.OrdinalIgnoreCase)
                                && Device is not null;
@@ -38,6 +41,40 @@ public sealed record BrokerState
         Connection = "disconnected",
         LastError = error,
     };
+}
+
+public sealed record WifiSetupState
+{
+    public static WifiSetupState Unavailable { get; } = new();
+
+    public bool Available { get; init; }
+    public string Status { get; init; } = "unavailable";
+    public string? Message { get; init; }
+    public string? ErrorCode { get; init; }
+    public IReadOnlyList<WifiSetupDevice> Devices { get; init; } = [];
+    public string? SelectedDeviceId { get; init; }
+    public bool Provisioned { get; init; }
+    public string? ConnectedSsid { get; init; }
+    public string? Address { get; init; }
+}
+
+public sealed record WifiSetupDevice
+{
+    public string DeviceId { get; init; } = "";
+    public string DisplayName { get; init; } = "EchoDesk Mini";
+    public string Model { get; init; } = "";
+    public string? SetupSsid { get; init; }
+    public string Address { get; init; } = "";
+    public int Port { get; init; }
+    public bool SetupMode { get; init; }
+    public bool Paired { get; init; }
+    public string? FirmwareVersion { get; init; }
+    public string? SetupState { get; init; }
+
+    [JsonIgnore]
+    public string Summary => string.IsNullOrWhiteSpace(SetupSsid)
+        ? $"{DisplayName} · {Address}"
+        : $"{DisplayName} · {SetupSsid}";
 }
 
 public sealed record FirmwareManagerState
@@ -79,6 +116,9 @@ public sealed record FirmwareDeviceCandidate
     public string? HardwareModel { get; init; }
     public bool Compatible { get; init; }
     public bool RequiresBoardConfirmation { get; init; }
+    public string? SetupState { get; init; }
+    public int? SetupVersion { get; init; }
+    public bool InBootloader { get; init; }
 
     [JsonIgnore]
     public string Summary => $"{Port} · {DisplayName}";
@@ -133,6 +173,12 @@ public sealed record EchoDeskDevice
 
     [JsonPropertyName("unsupportedSettings")]
     public IReadOnlyList<string> UnsupportedSettings { get; init; } = [];
+
+    [JsonPropertyName("setupState")]
+    public string? SetupState { get; init; }
+
+    [JsonPropertyName("setupVersion")]
+    public int? SetupVersion { get; init; }
 }
 
 public sealed record DeviceSettings
@@ -151,6 +197,24 @@ public sealed record DeviceSettings
 
     [JsonPropertyName("nowPlayingBackgroundCustomized")]
     public bool? NowPlayingBackgroundCustomized { get; init; }
+
+    [JsonPropertyName("defaultApp")]
+    public string? DefaultApp { get; init; }
+
+    [JsonPropertyName("clockFormat")]
+    public string? ClockFormat { get; init; }
+
+    [JsonPropertyName("timezone")]
+    public string? Timezone { get; init; }
+
+    [JsonPropertyName("codexPercentageMode")]
+    public string? CodexPercentageMode { get; init; }
+
+    [JsonPropertyName("codexPreferredDisplay")]
+    public string? CodexPreferredDisplay { get; init; }
+
+    [JsonPropertyName("performanceDefaultView")]
+    public string? PerformanceDefaultView { get; init; }
 }
 
 public sealed record DeviceCapabilities
@@ -192,6 +256,30 @@ public sealed record SettingsPatch
     [JsonPropertyName("nowPlayingBackgroundCustomized")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? NowPlayingBackgroundCustomized { get; init; }
+
+    [JsonPropertyName("defaultApp")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DefaultApp { get; init; }
+
+    [JsonPropertyName("clockFormat")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ClockFormat { get; init; }
+
+    [JsonPropertyName("timezone")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Timezone { get; init; }
+
+    [JsonPropertyName("codexPercentageMode")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CodexPercentageMode { get; init; }
+
+    [JsonPropertyName("codexPreferredDisplay")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CodexPreferredDisplay { get; init; }
+
+    [JsonPropertyName("performanceDefaultView")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PerformanceDefaultView { get; init; }
 }
 
 public static class EchoDeskApps

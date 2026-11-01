@@ -21,10 +21,12 @@
 #include "plugin_scene.h"
 #if defined(ECHODESK_OS)
 #include "echodesk_control.h"
+#include "echodesk_setup.h"
 #include "performance_data.h"
 #include "music_data.h"
 #include "now_playing_layout.h"
 #include "ui_echodesk.h"
+#include "ui_performance.h"
 #endif
 #include "config_store.h"
 #include "localization.h"
@@ -276,12 +278,10 @@ static void apply_timezone_offset_minutes(int offset_minutes) {
     timezone_offset_minutes = (int16_t)offset_minutes;
 
 #if defined(ECHODESK_OS)
-    // EchoDesk is a Melbourne desk appliance. A fixed UTC+10/+11 offset from
-    // one companion frame would become wrong at the next DST transition, so
-    // retain the full Melbourne POSIX rule while the UTC system clock keeps
-    // advancing between companion/NTP updates.
-    setenv("TZ", "AEST-10AEDT,M10.1.0,M4.1.0/3", 1);
-    tzset();
+    // The host offset is still accepted for backwards-compatible telemetry,
+    // but EchoDesk uses its persisted named timezone so DST keeps advancing
+    // correctly between companion frames.
+    serial_apply_configured_timezone();
     return;
 #endif
 
@@ -304,6 +304,19 @@ static void apply_timezone_offset_minutes(int offset_minutes) {
 
     setenv("TZ", tz_buf, 1);
     tzset();
+}
+
+void serial_apply_configured_timezone() {
+#if defined(ECHODESK_OS)
+    const char *posix_rule = "AEST-10AEDT,M10.1.0,M4.1.0/3";
+    if (g_config.timezone == ECHODESK_TIMEZONE_UTC) {
+        posix_rule = "UTC0";
+    }
+    // Melbourne and Sydney currently share the same Australian eastern DST
+    // transition rule, but remain distinct public IANA settings on the wire.
+    setenv("TZ", posix_rule, 1);
+    tzset();
+#endif
 }
 
 // ============================================================
@@ -489,7 +502,9 @@ static void handle_get_info() {
     const char *echodesk_capabilities =
         "\"performanceProtocol\":1,\"musicProtocol\":1,"
         "\"musicBackgroundProtocol\":1,\"musicVisualizerProtocol\":1,";
-    const char *echodesk_control_capability = "\"echoDeskControlProtocol\":1,";
+    const char *echodesk_control_capability =
+        "\"echoDeskControlProtocol\":1,\"echoDeskSetupProtocol\":1,"
+        "\"echoDeskWifiSetupProtocol\":1,";
 #else
     const char *echodesk_capabilities = "";
     const char *echodesk_control_capability = "";
@@ -533,6 +548,14 @@ static void print_echodesk_state(uint32_t request_id = 0,
     response["hardwareModel"] = "Freenove FNK0114A_2P4";
     response["firmwareVersion"] = APP_VERSION;
     response["activeApp"] = ui_echodesk_active_app_name();
+    response["setupState"] = echodesk_setup_state_name(g_config.setup_state);
+    response["setupVersion"] = ECHODESK_SETUP_VERSION;
+    response["setupTransport"] =
+        echodesk_setup_transport_name(g_config.setup_transport);
+    if (strncmp(ECHODESK_SETUP_URL, "https://", 8) == 0 &&
+        strlen(ECHODESK_SETUP_URL) <= 256) {
+        response["setupUrl"] = ECHODESK_SETUP_URL;
+    }
     JsonArray apps = response["supportedApps"].to<JsonArray>();
     for (const char *app : {"home", "codex", "clock", "performance",
                             "nowPlaying", "settings"}) {
@@ -547,12 +570,17 @@ static void print_echodesk_state(uint32_t request_id = 0,
         echodesk_background_name(g_config.now_playing_background);
     settings["nowPlayingBackgroundCustomized"] =
         g_config.now_playing_background_customized;
+    settings["defaultApp"] = echodesk_app_name(g_config.default_app);
+    settings["clockFormat"] = echodesk_clock_format_name(g_config.clock_format);
+    settings["timezone"] = echodesk_timezone_name(g_config.timezone);
+    settings["codexPercentageMode"] =
+        echodesk_codex_percentage_name(g_config.codex_percentage_mode);
+    settings["codexPreferredDisplay"] =
+        echodesk_codex_display_name(g_config.codex_preferred_display);
+    settings["performanceDefaultView"] =
+        echodesk_performance_view_name(g_config.performance_default_view);
     JsonArray unsupported = response["unsupportedSettings"].to<JsonArray>();
-    for (const char *name : {"defaultApp", "clockFormat", "timezone",
-                             "codexPercentageMode", "codexPreferredDisplay",
-                             "performanceDefaultView"}) {
-        unsupported.add(name);
-    }
+    (void)unsupported;
     serializeJson(response, Serial);
     Serial.println();
 }
@@ -590,6 +618,16 @@ static bool echodesk_request_header(JsonDocument &doc, uint32_t &request_id) {
         !doc["requestId"].is<uint32_t>() || request_id == 0) {
         print_echodesk_error(request_id, "invalid_request",
                              "version 1 and nonzero numeric requestId required");
+        return false;
+    }
+    return true;
+}
+
+static bool echodesk_setup_request(JsonDocument &doc, uint32_t &request_id) {
+    if (!echodesk_request_header(doc, request_id)) return false;
+    if (doc.size() != 3) {
+        print_echodesk_error(request_id, "invalid_request",
+                             "setup command accepts only cmd, version and requestId");
         return false;
     }
     return true;
@@ -667,6 +705,48 @@ static void handle_echodesk_set_settings(JsonDocument &doc) {
             }
             patch.has_now_playing_background_customized = true;
             patch.values.now_playing_background_customized = pair.value().as<bool>();
+        } else if (strcmp(key, "defaultApp") == 0) {
+            patch.has_default_app = echodesk_parse_app(
+                pair.value().as<const char*>(), patch.values.default_app);
+            if (!patch.has_default_app) {
+                print_echodesk_error(request_id, "invalid_request", "invalid startup app");
+                return;
+            }
+        } else if (strcmp(key, "clockFormat") == 0) {
+            patch.has_clock_format = echodesk_parse_clock_format(
+                pair.value().as<const char*>(), patch.values.clock_format);
+            if (!patch.has_clock_format) {
+                print_echodesk_error(request_id, "invalid_request", "invalid clock format");
+                return;
+            }
+        } else if (strcmp(key, "timezone") == 0) {
+            patch.has_timezone = echodesk_parse_timezone(
+                pair.value().as<const char*>(), patch.values.timezone);
+            if (!patch.has_timezone) {
+                print_echodesk_error(request_id, "invalid_request", "invalid timezone");
+                return;
+            }
+        } else if (strcmp(key, "codexPercentageMode") == 0) {
+            patch.has_codex_percentage_mode = echodesk_parse_codex_percentage(
+                pair.value().as<const char*>(), patch.values.codex_percentage_mode);
+            if (!patch.has_codex_percentage_mode) {
+                print_echodesk_error(request_id, "invalid_request", "invalid Codex percentage mode");
+                return;
+            }
+        } else if (strcmp(key, "codexPreferredDisplay") == 0) {
+            patch.has_codex_preferred_display = echodesk_parse_codex_display(
+                pair.value().as<const char*>(), patch.values.codex_preferred_display);
+            if (!patch.has_codex_preferred_display) {
+                print_echodesk_error(request_id, "invalid_request", "invalid Codex display");
+                return;
+            }
+        } else if (strcmp(key, "performanceDefaultView") == 0) {
+            patch.has_performance_default_view = echodesk_parse_performance_view(
+                pair.value().as<const char*>(), patch.values.performance_default_view);
+            if (!patch.has_performance_default_view) {
+                print_echodesk_error(request_id, "invalid_request", "invalid Performance view");
+                return;
+            }
         } else {
             print_echodesk_error(request_id, "unsupported", "unsupported setting");
             return;
@@ -676,7 +756,10 @@ static void handle_echodesk_set_settings(JsonDocument &doc) {
     EchoDeskControlSettings current{
         g_config.theme, g_config.brightness_pct, g_config.now_playing_layout,
         g_config.now_playing_background,
-        g_config.now_playing_background_customized};
+        g_config.now_playing_background_customized, g_config.default_app,
+        g_config.clock_format, g_config.timezone,
+        g_config.codex_percentage_mode, g_config.codex_preferred_display,
+        g_config.performance_default_view};
     EchoDeskControlSettings next{};
     const bool persist = doc["persist"] | true;
     const EchoDeskControlApplyResult result = echodesk_apply_settings_patch(
@@ -704,16 +787,30 @@ static void handle_echodesk_set_settings(JsonDocument &doc) {
         next.now_playing_background != current.now_playing_background ||
         next.now_playing_background_customized !=
             current.now_playing_background_customized;
+    const bool clock_changed = next.clock_format != current.clock_format ||
+                               next.timezone != current.timezone;
+    const bool performance_changed =
+        next.performance_default_view != current.performance_default_view;
     g_config.theme = next.theme;
     g_config.brightness_pct = next.brightness;
     g_config.now_playing_layout = next.now_playing_layout;
     g_config.now_playing_background = next.now_playing_background;
     g_config.now_playing_background_customized =
         next.now_playing_background_customized;
+    g_config.default_app = next.default_app;
+    g_config.clock_format = next.clock_format;
+    g_config.timezone = next.timezone;
+    g_config.codex_percentage_mode = next.codex_percentage_mode;
+    g_config.codex_preferred_display = next.codex_preferred_display;
+    g_config.performance_default_view = next.performance_default_view;
     backlight_apply_percent(g_config.brightness_pct);
     if (persist) config_save(g_config);
     if (theme_changed) ui_apply_theme(g_config.theme);
-    if (theme_changed || now_playing_changed) serial_request_ui_rebuild();
+    if (clock_changed) serial_apply_configured_timezone();
+    if (performance_changed) ui_performance_apply_default_view();
+    if (theme_changed || now_playing_changed || clock_changed) {
+        serial_request_ui_rebuild();
+    }
     serial_echodesk_state_changed();
     print_echodesk_ack(request_id, "echodesk_set_settings");
 }
@@ -724,6 +821,61 @@ static void handle_echodesk_restart(JsonDocument &doc) {
     print_echodesk_ack(request_id, "echodesk_restart");
     Serial.flush();
     ui_echodesk_request_restart();
+}
+
+static void handle_echodesk_setup_begin(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_setup_request(doc, request_id)) return;
+    if (echodesk_setup_normalize_state(g_config.setup_state) ==
+        ECHODESK_SETUP_COMPLETED) {
+        // Guided setup also handles verified reinstalls of an already-set-up
+        // device. Acknowledge without regressing it into onboarding.
+        print_echodesk_ack(request_id, "echodesk_setup_begin");
+        return;
+    }
+    if (!echodesk_setup_can_begin(g_config.setup_state)) {
+        print_echodesk_error(request_id, "invalid_state",
+                             "setup is already completed; factory reset first");
+        return;
+    }
+    g_config.language = LANG_EN;
+    g_config.setup_transport = ECHODESK_SETUP_TRANSPORT_USB;
+    g_config.setup_state = ECHODESK_SETUP_IN_PROGRESS;
+    g_config.setup_version = ECHODESK_SETUP_VERSION;
+    config_save(g_config);
+    serial_echodesk_state_changed();
+    print_echodesk_ack(request_id, "echodesk_setup_begin");
+    ui_echodesk_setup_state_changed();
+}
+
+static void handle_echodesk_setup_complete(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_setup_request(doc, request_id)) return;
+    if (echodesk_setup_normalize_state(g_config.setup_state) ==
+        ECHODESK_SETUP_COMPLETED) {
+        print_echodesk_ack(request_id, "echodesk_setup_complete");
+        return;
+    }
+    if (!echodesk_setup_can_complete(g_config.setup_state)) {
+        print_echodesk_error(request_id, "invalid_state",
+                             "setup is already completed");
+        return;
+    }
+    g_config.setup_state = ECHODESK_SETUP_COMPLETED;
+    g_config.setup_version = ECHODESK_SETUP_VERSION;
+    config_save(g_config);
+    serial_echodesk_state_changed();
+    print_echodesk_ack(request_id, "echodesk_setup_complete");
+    ui_echodesk_setup_state_changed();
+}
+
+static void handle_echodesk_factory_reset(JsonDocument &doc) {
+    uint32_t request_id;
+    if (!echodesk_setup_request(doc, request_id)) return;
+    config_factory_reset_setup(g_config);
+    serial_echodesk_state_changed();
+    print_echodesk_ack(request_id, "echodesk_factory_reset");
+    ui_echodesk_setup_state_changed();
 }
 #endif
 
@@ -901,6 +1053,12 @@ static bool parse_command(JsonDocument &doc) {
         handle_echodesk_set_settings(doc);
     } else if (strcmp(cmd, "echodesk_restart") == 0) {
         handle_echodesk_restart(doc);
+    } else if (strcmp(cmd, "echodesk_setup_begin") == 0) {
+        handle_echodesk_setup_begin(doc);
+    } else if (strcmp(cmd, "echodesk_setup_complete") == 0) {
+        handle_echodesk_setup_complete(doc);
+    } else if (strcmp(cmd, "echodesk_factory_reset") == 0) {
+        handle_echodesk_factory_reset(doc);
 #endif
     } else if (strcmp(cmd, "reboot") == 0) {
         handle_reboot();

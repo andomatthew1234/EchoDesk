@@ -20,6 +20,7 @@ mod timezone;
 mod tray;
 mod updates;
 mod window;
+mod wifi_setup;
 
 use aimonitor_core::Source;
 use settings::Settings;

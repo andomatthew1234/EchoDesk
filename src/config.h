@@ -8,7 +8,7 @@
 // ============================================================
 
 // App version
-#define APP_VERSION "2.28.0"
+#define APP_VERSION "2.31.0"
 #define APP_NAME    "AI Usage Monitor"
 
 // Display-Controller-ID (aus Build-Flags abgeleitet, Compile-Zeit).
@@ -177,6 +177,57 @@ extern uint16_t SCREEN_HEIGHT;
 #define NOW_PLAYING_BACKGROUND_AUDIO_BARS  2
 #define NOW_PLAYING_BACKGROUND_DEFAULT     NOW_PLAYING_BACKGROUND_ALBUM_COVER
 
+// EchoDesk Desktop Control settings. Values are deliberately stable because
+// they are persisted in NVS and mirrored by the versioned serial protocol.
+#define ECHODESK_APP_HOME         0
+#define ECHODESK_APP_CODEX        1
+#define ECHODESK_APP_CLOCK        2
+#define ECHODESK_APP_PERFORMANCE  3
+#define ECHODESK_APP_NOW_PLAYING  4
+#define ECHODESK_APP_SETTINGS     5
+#define ECHODESK_APP_DEFAULT      ECHODESK_APP_HOME
+
+#define CLOCK_FORMAT_12_HOUR  0
+#define CLOCK_FORMAT_24_HOUR  1
+#define CLOCK_FORMAT_DEFAULT  CLOCK_FORMAT_12_HOUR
+
+#define ECHODESK_TIMEZONE_MELBOURNE  0
+#define ECHODESK_TIMEZONE_SYDNEY     1
+#define ECHODESK_TIMEZONE_UTC        2
+#define ECHODESK_TIMEZONE_DEFAULT    ECHODESK_TIMEZONE_MELBOURNE
+
+#define CODEX_PERCENTAGE_USED       0
+#define CODEX_PERCENTAGE_REMAINING  1
+#define CODEX_PERCENTAGE_DEFAULT    CODEX_PERCENTAGE_USED
+
+#define CODEX_DISPLAY_BOTH     0
+#define CODEX_DISPLAY_SESSION  1
+#define CODEX_DISPLAY_WEEKLY   2
+#define CODEX_DISPLAY_DEFAULT  CODEX_DISPLAY_BOTH
+
+#define PERFORMANCE_VIEW_OVERVIEW  0
+#define PERFORMANCE_VIEW_CPU       1
+#define PERFORMANCE_VIEW_GPU       2
+#define PERFORMANCE_VIEW_MEMORY    3
+#define PERFORMANCE_VIEW_DEFAULT   PERFORMANCE_VIEW_OVERVIEW
+
+// EchoDesk guided-setup state. setup_version is persisted alongside the state
+// so future firmware can migrate the onboarding flow without re-running it on
+// already configured devices.
+#define ECHODESK_SETUP_VERSION              1
+#define ECHODESK_SETUP_NOT_CONFIGURED       0
+#define ECHODESK_SETUP_WAITING_FOR_DESKTOP  1
+#define ECHODESK_SETUP_IN_PROGRESS          2
+#define ECHODESK_SETUP_COMPLETED            3
+#define ECHODESK_SETUP_TRANSPORT_USB         0
+#define ECHODESK_SETUP_TRANSPORT_WIFI        1
+
+// Release builds may override this with -DECHODESK_SETUP_URL=\"https://...\".
+// Empty is intentional until an official download page exists.
+#ifndef ECHODESK_SETUP_URL
+#define ECHODESK_SETUP_URL ""
+#endif
+
 // ============================================================
 // Language options
 // ============================================================
@@ -208,6 +259,15 @@ struct AppConfig {
     uint8_t  now_playing_layout;       // NOW_PLAYING_LAYOUT_* (EchoDesk only)
     uint8_t  now_playing_background;   // NOW_PLAYING_BACKGROUND_* (EchoDesk only)
     bool     now_playing_background_customized; // Preserve explicit choice across layouts
+    uint8_t  default_app;               // ECHODESK_APP_* (EchoDesk only)
+    uint8_t  clock_format;              // CLOCK_FORMAT_* (EchoDesk only)
+    uint8_t  timezone;                  // ECHODESK_TIMEZONE_* (persisted by IANA name)
+    uint8_t  codex_percentage_mode;     // CODEX_PERCENTAGE_* (EchoDesk only)
+    uint8_t  codex_preferred_display;   // CODEX_DISPLAY_* (EchoDesk only)
+    uint8_t  performance_default_view;  // PERFORMANCE_VIEW_* (EchoDesk only)
+    uint8_t  setup_state;               // ECHODESK_SETUP_* (EchoDesk only)
+    uint8_t  setup_version;             // Persisted guided-setup schema version
+    uint8_t  setup_transport;           // ECHODESK_SETUP_TRANSPORT_*; USB is default
 };
 
 // ============================================================

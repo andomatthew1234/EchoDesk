@@ -755,6 +755,9 @@ Ist keine Geräteversion bekannt, fällt der Host für die ACK- und Brightness-P
 | 2.26.0 | Now Playing mit GSMTC-Metadaten, 96×96-Artwork, drei Layouts und bestätigten Wiedergabesteuerungen | `(music_data.cpp)`, `(ui_now_playing.cpp)`, `(companion-windows/src-tauri/src/music.rs)` |
 | 2.27.0 | Unabhängige Hintergrundwahl, 320×240-Albumhintergrund und opt-in Audio Bars mit 16 FFT-Bändern | `(music_data.cpp)`, `(ui_now_playing.cpp)`, `(companion-windows/src-tauri/src/audio_visualizer.rs)` |
 | 2.28.0 | EchoDesk Desktop Control v1 mit App-Navigation, versioniertem Gerätezustand, Revisionsschutz und persistenten Einstellungen | `(echodesk_control.cpp)`, `(serial_receiver.cpp)`, `(ui_echodesk.cpp)` |
+| 2.29.0 | Startup-App, 12/24-Stunden-Uhr, benannte DST-Zeitzonen, Codex-Modus/-Ansicht und Performance-Standardansicht über Desktop Control v1 | `(config_store.cpp)`, `(echodesk_control.cpp)`, `(ui_echodesk.cpp)`, `(ui_performance.cpp)` |
+| 2.30.0 | Versionierte Ersteinrichtung, persistenter Setup-Zustand und sicherer Factory Reset ohne vollständiges Flash-Löschen | `(echodesk_setup.cpp)`, `(config_store.cpp)`, `(serial_receiver.cpp)`, `(ui_echodesk.cpp)` |
+| 2.31.0 | Optionale geschützte WLAN-Einrichtung mit lokal begrenzter Discovery, Pairing-Code und authentifizierter Wiedererkennung; USB bleibt Standard | `(echodesk_wifi_setup.cpp)`, `(echodesk_wifi_protocol.cpp)`, `(wifi_time.cpp)` |
 
 Unbekannte Felder werden von der Firmware ignoriert (ArduinoJson-Zugriff per Schlüssel), unbekannte Provider fallen auf `claude` zurück `(providers.cpp:107)`.
 
@@ -1103,7 +1106,7 @@ message without a request ID is emitted when touchscreen navigation or a
 supported setting changes:
 
 ```json
-{"type":"echodesk_state","version":1,"requestId":41,"revision":7,"deviceName":"EchoDesk","hardwareModel":"Freenove FNK0114A_2P4","firmwareVersion":"2.28.0","activeApp":"home","supportedApps":["home","codex","clock","performance","nowPlaying","settings"],"settings":{"theme":"dark","brightness":80,"nowPlayingLayout":"carPlay","nowPlayingBackground":"audioBars","nowPlayingBackgroundCustomized":true},"unsupportedSettings":["defaultApp","clockFormat","timezone","codexPercentageMode","codexPreferredDisplay","performanceDefaultView"]}
+{"type":"echodesk_state","version":1,"requestId":41,"revision":7,"deviceName":"EchoDesk","hardwareModel":"Freenove FNK0114A_2P4","firmwareVersion":"2.29.0","activeApp":"home","supportedApps":["home","codex","clock","performance","nowPlaying","settings"],"settings":{"theme":"dark","brightness":80,"nowPlayingLayout":"carPlay","nowPlayingBackground":"audioBars","nowPlayingBackgroundCustomized":true,"defaultApp":"home","clockFormat":"24h","timezone":"Australia/Sydney","codexPercentageMode":"remaining","codexPreferredDisplay":"both","performanceDefaultView":"overview"},"unsupportedSettings":[]}
 ```
 
 Settings updates are partial but atomic. `baseRevision` must match the current
@@ -1123,6 +1126,14 @@ Only a brightness-only update may use `persist:false`; this supports smooth
 slider preview without writing NVS. The final debounced update uses
 `persist:true`.
 
+From firmware 2.29.0, the remaining preferences are supported without changing
+the control protocol version. `defaultApp` accepts every supported app name;
+`clockFormat` is `12h` or `24h`; `timezone` is `Australia/Melbourne`,
+`Australia/Sydney` or `UTC`; `codexPercentageMode` is `used` or `remaining`;
+`codexPreferredDisplay` is `both`, `session` or `weekly`; and
+`performanceDefaultView` is `overview`, `cpu`, `gpu` or `memory`. Australian
+timezone settings retain DST rules rather than storing a fixed offset.
+
 Successful mutating requests return:
 
 ```json
@@ -1141,3 +1152,29 @@ Feishin may omit timeline data. The researched optional fallback is a
 loopback-only adapter to Feishin's existing Remote WebSocket in the Windows
 companion; it is deliberately not a Jellyfin or ESP32 credential flow. See
 [`feishin-windows-media-research.md`](feishin-windows-media-research.md).
+
+## 15. Guided setup extension v1
+
+Firmware 2.30.0 adds the versioned setup state and commands described in
+[`guided-device-setup.md`](guided-device-setup.md). `echodesk_state` includes
+both `setupState` and `setupVersion:1`; valid states are `notConfigured`,
+`waitingForDesktop`, `inProgress`, and `completed`. `setupUrl` is omitted unless
+the firmware was built with a bounded HTTPS download URL.
+
+```json
+{"cmd":"echodesk_setup_begin","version":1,"requestId":101}
+{"cmd":"echodesk_setup_complete","version":1,"requestId":102}
+{"cmd":"echodesk_factory_reset","version":1,"requestId":103}
+```
+
+All three use the normal `echodesk_ack`/`echodesk_error` exchange. Begin moves
+an incomplete device to `inProgress`; complete persists `completed` and opens
+Home. Completed-state requests are idempotent. Factory reset clears onboarding
+completion without erasing firmware or unrelated flash partitions and returns
+the display to Hello.
+
+Firmware 2.31.0 adds an optional Wi-Fi provisioning choice without changing
+these USB serial messages. Discovery and credential provisioning use a
+separate, bounded local-network protocol documented in
+[`wifi-setup-protocol.md`](wifi-setup-protocol.md). Firmware installation,
+recovery and the normal live data path remain USB-only.

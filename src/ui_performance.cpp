@@ -6,7 +6,6 @@
 #include "performance_data.h"
 
 #include <Arduino.h>
-#include <Preferences.h>
 #include <math.h>
 #include <stdio.h>
 
@@ -35,8 +34,6 @@ constexpr uint8_t FIRST_VIEW = static_cast<uint8_t>(PerformanceView::ALL_USAGE);
 constexpr uint8_t LAST_VIEW = static_cast<uint8_t>(PerformanceView::THERMAL_PRESSURE);
 constexpr uint32_t REFRESH_INTERVAL_MS = 1000;
 constexpr uint32_t NAVIGATION_GUARD_MS = 250;
-constexpr const char *PREFERENCES_NAMESPACE = "echo_perf";
-constexpr const char *PREFERENCES_VIEW_KEY = "view";
 
 lv_obj_t *screen = nullptr;
 lv_obj_t *content = nullptr;
@@ -139,22 +136,13 @@ bool is_temperature_view(PerformanceView view) {
     return view >= PerformanceView::ALL_TEMPERATURES;
 }
 
-void save_view(PerformanceView view) {
-    const uint8_t raw = static_cast<uint8_t>(view);
-    if (raw < FIRST_VIEW || raw > LAST_VIEW) return;
-    Preferences preferences;
-    if (!preferences.begin(PREFERENCES_NAMESPACE, false)) return;
-    preferences.putUChar(PREFERENCES_VIEW_KEY, raw);
-    preferences.end();
-}
-
-PerformanceView load_view() {
-    Preferences preferences;
-    if (!preferences.begin(PREFERENCES_NAMESPACE, true)) return PerformanceView::ALL_USAGE;
-    const uint8_t raw = preferences.getUChar(PREFERENCES_VIEW_KEY, FIRST_VIEW);
-    preferences.end();
-    if (raw < FIRST_VIEW || raw > LAST_VIEW) return PerformanceView::ALL_USAGE;
-    return static_cast<PerformanceView>(raw);
+PerformanceView configured_default_view() {
+    switch (g_config.performance_default_view) {
+        case PERFORMANCE_VIEW_CPU: return PerformanceView::CPU_USAGE;
+        case PERFORMANCE_VIEW_GPU: return PerformanceView::GPU_USAGE;
+        case PERFORMANCE_VIEW_MEMORY: return PerformanceView::MEMORY_USAGE;
+        default: return PerformanceView::ALL_USAGE;
+    }
 }
 
 void clear_widget_references() {
@@ -275,7 +263,6 @@ void on_view_selected(lv_event_t *event) {
     if (raw < FIRST_VIEW || raw > LAST_VIEW) return;
     current_view = selected;
     last_metric_view = selected;
-    save_view(selected);
     render_current_view();
 }
 
@@ -976,7 +963,7 @@ void ui_performance_set_navigation_callbacks(UiPerformanceNavigationCallback hom
 
 lv_obj_t *ui_performance_create() {
     if (screen) return screen;
-    last_metric_view = load_view();
+    last_metric_view = configured_default_view();
     current_view = last_metric_view;
     selector_tab = is_temperature_view(current_view) ? SelectorTab::TEMPERATURE : SelectorTab::USAGE;
     return create_screen_impl();
@@ -1005,6 +992,14 @@ lv_obj_t *ui_performance_screen() {
     return screen;
 }
 
+void ui_performance_apply_default_view() {
+    last_metric_view = configured_default_view();
+    current_view = last_metric_view;
+    selector_tab = is_temperature_view(current_view)
+                       ? SelectorTab::TEMPERATURE : SelectorTab::USAGE;
+    if (screen) render_current_view();
+}
+
 #else
 
 void ui_performance_set_navigation_callbacks(UiPerformanceNavigationCallback, UiPerformanceNavigationCallback,
@@ -1013,5 +1008,6 @@ lv_obj_t *ui_performance_create() { return nullptr; }
 void ui_performance_tick() {}
 lv_obj_t *ui_performance_recreate() { return nullptr; }
 lv_obj_t *ui_performance_screen() { return nullptr; }
+void ui_performance_apply_default_view() {}
 
 #endif

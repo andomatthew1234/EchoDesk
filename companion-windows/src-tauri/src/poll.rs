@@ -84,9 +84,10 @@ pub fn start_fetch(app: &AppHandle) {
         let snap = current_snapshot(&app);
         if snap.provider == provider && snap.status.is_ok() && !snap.fetching {
             if let Some(entry) = &snap.entry {
-                serial_service::send(&app, serial_service::Job::SmartUsage(
-                    provider, usage_signals(entry),
-                ));
+                serial_service::send(
+                    &app,
+                    serial_service::Job::SmartUsage(provider, usage_signals(entry)),
+                );
             }
         }
         if again {
@@ -157,8 +158,12 @@ pub fn refresh_plugins(app: &AppHandle) {
                 let mut store = state.plugins.lock().unwrap();
                 let accepted = store.apply_fetch(&id, &sha256, &fetched_settings, result);
                 let attention = if accepted {
-                    store.records.get(&id).and_then(|record| record.data.as_ref()
-                        .map(|data| record.manifest.attention_states(data)))
+                    store.records.get(&id).and_then(|record| {
+                        record
+                            .data
+                            .as_ref()
+                            .map(|data| record.manifest.attention_states(data))
+                    })
                 } else {
                     None
                 };
@@ -166,7 +171,10 @@ pub fn refresh_plugins(app: &AppHandle) {
             };
             let _ = app.emit(plugins::PLUGINS_EVENT, list);
             if let Some(attention) = attention {
-                serial_service::send(&app, serial_service::Job::SmartPlugin(id.clone(), attention));
+                serial_service::send(
+                    &app,
+                    serial_service::Job::SmartPlugin(id.clone(), attention),
+                );
             }
             serial_service::request_resend(&app);
         }
@@ -229,9 +237,10 @@ pub fn refresh_views(app: &AppHandle) {
                 state.view_clients.lock().unwrap().insert(provider, src);
                 if snapshot.status.is_ok() {
                     if let Some(entry) = &snapshot.entry {
-                        serial_service::send(&app, serial_service::Job::SmartUsage(
-                            provider, usage_signals(entry),
-                        ));
+                        serial_service::send(
+                            &app,
+                            serial_service::Job::SmartUsage(provider, usage_signals(entry)),
+                        );
                     }
                 }
                 state

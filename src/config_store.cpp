@@ -8,6 +8,7 @@
 #include "config_store.h"
 #include "board.h"
 #include "config.h"
+#include "echodesk_setup.h"
 #include <Preferences.h>
 
 // ============================================================
@@ -16,6 +17,20 @@
 AppConfig g_config;
 
 static Preferences prefs;
+
+static const char *timezone_name(uint8_t timezone) {
+    switch (timezone) {
+        case ECHODESK_TIMEZONE_SYDNEY: return "Australia/Sydney";
+        case ECHODESK_TIMEZONE_UTC: return "UTC";
+        default: return "Australia/Melbourne";
+    }
+}
+
+static uint8_t timezone_from_name(const String &name) {
+    if (name == "Australia/Sydney") return ECHODESK_TIMEZONE_SYDNEY;
+    if (name == "UTC") return ECHODESK_TIMEZONE_UTC;
+    return ECHODESK_TIMEZONE_MELBOURNE;
+}
 
 // ============================================================
 // Load config from NVS
@@ -32,6 +47,18 @@ void config_load(AppConfig &cfg) {
         cfg.now_playing_layout = NOW_PLAYING_LAYOUT_DEFAULT;
         cfg.now_playing_background = NOW_PLAYING_BACKGROUND_DEFAULT;
         cfg.now_playing_background_customized = false;
+        cfg.default_app = ECHODESK_APP_DEFAULT;
+        cfg.clock_format = CLOCK_FORMAT_DEFAULT;
+        cfg.timezone = ECHODESK_TIMEZONE_DEFAULT;
+        cfg.codex_percentage_mode = CODEX_PERCENTAGE_DEFAULT;
+        cfg.codex_preferred_display = CODEX_DISPLAY_DEFAULT;
+        cfg.performance_default_view = PERFORMANCE_VIEW_DEFAULT;
+        cfg.setup_state = ECHODESK_SETUP_NOT_CONFIGURED;
+        cfg.setup_version = ECHODESK_SETUP_VERSION;
+        cfg.setup_transport = ECHODESK_SETUP_TRANSPORT_USB;
+#if defined(ECHODESK_OS)
+        cfg.language = LANG_EN;
+#endif
         Serial.println("[Config] Voreinstellungen (dieses Board speichert nicht)");
         return;
     }
@@ -41,7 +68,11 @@ void config_load(AppConfig &cfg) {
     cfg.poll_interval_sec = prefs.getUInt("poll_sec", DEFAULT_POLL_INTERVAL_SEC);
     cfg.orientation       = prefs.getUChar("orient", ORIENTATION_PORTRAIT);
     cfg.theme             = prefs.getUChar("theme", THEME_DARK);
+#if defined(ECHODESK_OS)
+    cfg.language          = prefs.getUChar("lang", LANG_EN);
+#else
     cfg.language          = prefs.getUChar("lang", LANG_DE);
+#endif
     cfg.brightness_pct    = prefs.getUChar("bright", BRIGHTNESS_DEFAULT_PERCENT);
     cfg.now_playing_layout = prefs.getUChar("np_layout", NOW_PLAYING_LAYOUT_DEFAULT);
     cfg.now_playing_background = prefs.getUChar(
@@ -49,6 +80,26 @@ void config_load(AppConfig &cfg) {
                      ? NOW_PLAYING_BACKGROUND_ECHODESK
                      : NOW_PLAYING_BACKGROUND_ALBUM_COVER);
     cfg.now_playing_background_customized = prefs.getBool("np_bg_custom", false);
+    cfg.default_app = prefs.getUChar("default_app", ECHODESK_APP_DEFAULT);
+    cfg.clock_format = prefs.getUChar("clock_fmt", CLOCK_FORMAT_DEFAULT);
+    cfg.timezone = timezone_from_name(
+        prefs.getString("timezone", timezone_name(ECHODESK_TIMEZONE_DEFAULT)));
+    cfg.codex_percentage_mode = prefs.getUChar("codex_pct", CODEX_PERCENTAGE_DEFAULT);
+    cfg.codex_preferred_display = prefs.getUChar("codex_view", CODEX_DISPLAY_DEFAULT);
+    cfg.performance_default_view = prefs.getUChar("perf_view", PERFORMANCE_VIEW_DEFAULT);
+    const bool has_setup_state = prefs.isKey("setup_state");
+    // Every released EchoDesk OS before guided setup wrote at least one of
+    // these keys during its first boot. Treat that as an already configured
+    // device so an update never forces an existing customer into onboarding.
+    const bool has_legacy_config = prefs.isKey("orient") || prefs.isKey("bright") ||
+                                   prefs.isKey("theme") || prefs.isKey("default_app");
+    cfg.setup_state = echodesk_setup_initial_state(
+        has_setup_state,
+        prefs.getUChar("setup_state", ECHODESK_SETUP_NOT_CONFIGURED),
+        has_legacy_config);
+    cfg.setup_version = prefs.getUChar("setup_ver", ECHODESK_SETUP_VERSION);
+    cfg.setup_transport = echodesk_setup_normalize_transport(
+        prefs.getUChar("setup_link", ECHODESK_SETUP_TRANSPORT_USB));
     if (cfg.brightness_pct < BRIGHTNESS_MIN_PERCENT) cfg.brightness_pct = BRIGHTNESS_MIN_PERCENT;
     if (cfg.brightness_pct > BRIGHTNESS_MAX_PERCENT) cfg.brightness_pct = BRIGHTNESS_MAX_PERCENT;
     if (cfg.now_playing_layout > NOW_PLAYING_LAYOUT_ECHODESK) {
@@ -63,8 +114,35 @@ void config_load(AppConfig &cfg) {
                 ? NOW_PLAYING_BACKGROUND_ECHODESK
                 : NOW_PLAYING_BACKGROUND_ALBUM_COVER;
     }
+    if (cfg.default_app > ECHODESK_APP_SETTINGS) {
+        cfg.default_app = ECHODESK_APP_DEFAULT;
+    }
+    if (cfg.clock_format > CLOCK_FORMAT_24_HOUR) {
+        cfg.clock_format = CLOCK_FORMAT_DEFAULT;
+    }
+    if (cfg.timezone > ECHODESK_TIMEZONE_UTC) {
+        cfg.timezone = ECHODESK_TIMEZONE_DEFAULT;
+    }
+    if (cfg.codex_percentage_mode > CODEX_PERCENTAGE_REMAINING) {
+        cfg.codex_percentage_mode = CODEX_PERCENTAGE_DEFAULT;
+    }
+    if (cfg.codex_preferred_display > CODEX_DISPLAY_WEEKLY) {
+        cfg.codex_preferred_display = CODEX_DISPLAY_DEFAULT;
+    }
+    if (cfg.performance_default_view > PERFORMANCE_VIEW_MEMORY) {
+        cfg.performance_default_view = PERFORMANCE_VIEW_DEFAULT;
+    }
+    cfg.setup_state = echodesk_setup_normalize_state(cfg.setup_state);
+    if (cfg.setup_version == 0 || cfg.setup_version > ECHODESK_SETUP_VERSION) {
+        cfg.setup_version = ECHODESK_SETUP_VERSION;
+    }
 
     prefs.end();
+
+    if (!has_setup_state && has_legacy_config) {
+        Serial.println("[Config] Migrating existing EchoDesk as setup completed");
+        config_save(cfg);
+    }
 
     Serial.println("[Config] Loaded from NVS");
     Serial.printf("[Config] Poll interval: %u sec\n", cfg.poll_interval_sec);
@@ -85,6 +163,21 @@ void config_load(AppConfig &cfg) {
     Serial.printf("[Config] Now Playing background: %u (%s)\n",
                   cfg.now_playing_background,
                   cfg.now_playing_background_customized ? "custom" : "layout default");
+    Serial.printf("[Config] EchoDesk startup app: %u\n", cfg.default_app);
+    Serial.printf("[Config] EchoDesk clock: %s, timezone: %s\n",
+                  cfg.clock_format == CLOCK_FORMAT_24_HOUR ? "24h" : "12h",
+                  timezone_name(cfg.timezone));
+    Serial.printf("[Config] EchoDesk Codex: %s, display: %u\n",
+                  cfg.codex_percentage_mode == CODEX_PERCENTAGE_REMAINING
+                      ? "remaining" : "used",
+                  cfg.codex_preferred_display);
+    Serial.printf("[Config] EchoDesk Performance default: %u\n",
+                  cfg.performance_default_view);
+    Serial.printf("[Config] EchoDesk setup: %s (v%u)\n",
+                  echodesk_setup_state_name(cfg.setup_state),
+                  static_cast<unsigned>(cfg.setup_version));
+    Serial.printf("[Config] EchoDesk setup transport: %s\n",
+                  echodesk_setup_transport_name(cfg.setup_transport));
 }
 
 // ============================================================
@@ -106,7 +199,27 @@ void config_save(const AppConfig &cfg) {
     prefs.putUChar("np_layout", cfg.now_playing_layout);
     prefs.putUChar("np_bg", cfg.now_playing_background);
     prefs.putBool("np_bg_custom", cfg.now_playing_background_customized);
+    prefs.putUChar("default_app", cfg.default_app);
+    prefs.putUChar("clock_fmt", cfg.clock_format);
+    // Store the public IANA identifier, not the implementation-specific POSIX
+    // rule used by newlib at runtime.
+    prefs.putString("timezone", timezone_name(cfg.timezone));
+    prefs.putUChar("codex_pct", cfg.codex_percentage_mode);
+    prefs.putUChar("codex_view", cfg.codex_preferred_display);
+    prefs.putUChar("perf_view", cfg.performance_default_view);
+    prefs.putUChar("setup_state", cfg.setup_state);
+    prefs.putUChar("setup_ver", cfg.setup_version);
+    prefs.putUChar("setup_link", cfg.setup_transport);
 
     prefs.end();
     Serial.println("[Config] Saved to NVS");
+}
+
+void config_factory_reset_setup(AppConfig &cfg) {
+    cfg.setup_state = ECHODESK_SETUP_NOT_CONFIGURED;
+    cfg.setup_version = ECHODESK_SETUP_VERSION;
+    cfg.setup_transport = ECHODESK_SETUP_TRANSPORT_USB;
+    cfg.language = LANG_EN;
+    config_save(cfg);
+    Serial.println("[Config] Guided setup reset without erasing unrelated flash data");
 }

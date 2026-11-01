@@ -66,8 +66,45 @@ public sealed class BrokerClient : IAsyncDisposable
         CancellationToken cancellationToken = default) =>
         StateRequestAsync("firmware_install", new { mode }, cancellationToken);
 
+    public Task<BrokerState> StartManualRecoveryAsync(
+        string port,
+        CancellationToken cancellationToken = default) =>
+        StateRequestAsync("firmware_manual_recovery", new { port }, cancellationToken);
+
+    public Task<BrokerState> BeginGuidedSetupAsync(
+        string port,
+        CancellationToken cancellationToken = default) =>
+        StateRequestAsync("setup_begin", new { port }, cancellationToken);
+
+    public Task<BrokerState> CompleteGuidedSetupAsync(
+        string port,
+        CancellationToken cancellationToken = default) =>
+        StateRequestAsync("setup_complete", new { port }, cancellationToken);
+
+    public Task<BrokerState> FactoryResetAsync(
+        string port,
+        CancellationToken cancellationToken = default) =>
+        StateRequestAsync("factory_reset", new { port }, cancellationToken);
+
     public Task<BrokerState> CancelFirmwareOperationAsync(CancellationToken cancellationToken = default) =>
         StateRequestAsync("firmware_cancel", null, cancellationToken);
+
+    public Task<BrokerState> DiscoverWifiSetupDevicesAsync(CancellationToken cancellationToken = default) =>
+        StateRequestAsync("wifi_setup_discover", null, cancellationToken);
+
+    public Task<BrokerState> ProvisionWifiSetupDeviceAsync(
+        string deviceId,
+        string setupCode,
+        string ssid,
+        string password,
+        CancellationToken cancellationToken = default) =>
+        StateRequestAsync(
+            "wifi_setup_provision",
+            new { deviceId, setupCode, ssid, password },
+            cancellationToken);
+
+    public Task<BrokerState> CancelWifiSetupAsync(CancellationToken cancellationToken = default) =>
+        StateRequestAsync("wifi_setup_cancel", null, cancellationToken);
 
     public Task<BrokerState> SetFirmwareUpdateNotificationsAsync(
         bool enabled,
@@ -93,7 +130,7 @@ public sealed class BrokerClient : IAsyncDisposable
                 pipe = connected;
                 delay = TimeSpan.FromSeconds(1);
                 var readerTask = ReadLoopAsync(connected, cancellationToken);
-                await StateRequestAsync("hello", new { client = "EchoDesk Desktop", clientVersion = "0.2.2" }, cancellationToken)
+                await StateRequestAsync("hello", new { client = "EchoDesk Desktop", clientVersion = "0.2.5" }, cancellationToken)
                     .ConfigureAwait(false);
                 await readerTask.ConfigureAwait(false);
             }
@@ -193,8 +230,10 @@ public sealed class BrokerClient : IAsyncDisposable
             timeout.CancelAfter(TimeSpan.FromSeconds(method switch
             {
                 "restart" => 8,
-                "firmware_scan" or "firmware_check_updates" or "firmware_select_device" => 15,
-                "firmware_install" or "firmware_cancel" => 30,
+                "firmware_scan" or "firmware_check_updates" or "firmware_select_device"
+                    or "wifi_setup_discover" => 15,
+                "firmware_install" or "firmware_manual_recovery" or "firmware_cancel"
+                    or "wifi_setup_provision" or "wifi_setup_cancel" => 30,
                 _ => 4,
             }));
             var request = new Dictionary<string, object?>

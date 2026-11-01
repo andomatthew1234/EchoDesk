@@ -7,7 +7,7 @@ use crate::serial_service::{self, ConnectionState, Job};
 use crate::state::AppState;
 use aimonitor_flash::{
     flash_image, parse_firmware_manifest, probe_device, validate_merged_image, verify_sha256,
-    FirmwareManifest, FirmwareRelease, FlashEvent, TargetChip, FLASH_BAUD,
+    DeviceProbe, FirmwareManifest, FirmwareRelease, FlashEvent, TargetChip, FLASH_BAUD,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -20,7 +20,7 @@ use tauri::{AppHandle, Manager};
 pub const MINI_MODEL: &str = "EchoDesk Mini";
 pub const MINI_HARDWARE_ID: &str = "freenove-fnk0114a-2p4";
 pub const MINI_REPORTED_MODEL: &str = "Freenove FNK0114A_2P4";
-pub const DESKTOP_VERSION: &str = "0.2.0";
+pub const DESKTOP_VERSION: &str = "0.2.5";
 const RECONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const PAUSE_TIMEOUT: Duration = Duration::from_secs(5);
 const SETTLE_DELAY: Duration = Duration::from_millis(500);
@@ -39,6 +39,9 @@ pub struct FirmwareDevice {
     pub echo_desk_handshake: bool,
     pub firmware_version: Option<String>,
     pub hardware_model: Option<String>,
+    pub setup_state: Option<String>,
+    pub setup_version: Option<u64>,
+    pub device_mode: String,
     pub compatible: bool,
     pub requires_board_confirmation: bool,
 }
@@ -106,6 +109,18 @@ pub struct SelectDeviceRequest {
     pub board_confirmed: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManualRecoveryRequest {
+    pub port: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetupPortRequest {
+    pub port: String,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum InstallMode {
@@ -130,6 +145,58 @@ impl InstallMode {
 #[serde(deny_unknown_fields)]
 pub struct InstallRequest {
     pub mode: InstallMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstallPolicy {
+    Normal,
+    Esp32OnlyRecovery,
+}
+
+fn validate_probe_for_policy(
+    policy: InstallPolicy,
+    probe: Option<DeviceProbe>,
+) -> Result<(), &'static str> {
+    let probe = probe.ok_or("unsupported_chip")?;
+    if probe.chip != TargetChip::Esp32 {
+        return Err("wrong_chip");
+    }
+    if policy == InstallPolicy::Normal && probe.flash_size_bytes != Some(MAX_FIRMWARE_BYTES) {
+        return Err("wrong_flash_size");
+    }
+    Ok(())
+}
+
+fn validate_version_for_policy(
+    policy: InstallPolicy,
+    mode: InstallMode,
+    current: Option<&str>,
+    available: &str,
+) -> Result<(), &'static str> {
+    if policy == InstallPolicy::Esp32OnlyRecovery {
+        return Ok(());
+    }
+    if matches!(mode, InstallMode::Update)
+        && !current
+            .is_some_and(|version| aimonitor_core::semver::compare(version, available).is_lt())
+    {
+        return Err("firmware_not_newer");
+    }
+    if current.is_some_and(|version| aimonitor_core::semver::compare(version, available).is_gt()) {
+        return Err("firmware_downgrade_blocked");
+    }
+    Ok(())
+}
+
+fn validate_desktop_version_for_policy(
+    policy: InstallPolicy,
+    desktop: &str,
+    minimum: &str,
+) -> Result<(), &'static str> {
+    if policy == InstallPolicy::Normal && !aimonitor_core::semver::at_least(desktop, minimum) {
+        return Err("desktop_update_required");
+    }
+    Ok(())
 }
 
 fn bump(app: &AppHandle) {
@@ -160,22 +227,27 @@ pub fn snapshot(app: &AppHandle) -> FirmwareManagerState {
     snapshot
 }
 
-fn reported_mini(app: &AppHandle, port: &str) -> bool {
+fn reported_state(app: &AppHandle, port: &str) -> Option<Value> {
     let state = app.state::<AppState>();
     let connection = state.connection.lock().unwrap();
     if connection.state != ConnectionState::Connected || connection.port.as_deref() != Some(port) {
-        return false;
+        return None;
     }
     drop(connection);
-    let matched = state
+    let reported = state
         .echo_desk_state
         .lock()
         .unwrap()
         .as_ref()
-        .and_then(|value| value.get("hardwareModel"))
-        .and_then(Value::as_str)
-        == Some(MINI_REPORTED_MODEL);
-    matched
+        .filter(|value| {
+            value.get("hardwareModel").and_then(Value::as_str) == Some(MINI_REPORTED_MODEL)
+        })
+        .cloned();
+    reported
+}
+
+fn reported_mini(app: &AppHandle, port: &str) -> bool {
+    reported_state(app, port).is_some()
 }
 
 fn discovery_classification(
@@ -210,6 +282,22 @@ fn enumerate(app: &AppHandle) -> Vec<FirmwareDevice> {
             let connected = connection.state == ConnectionState::Connected
                 && connection.port.as_deref() == Some(port.name.as_str());
             let proven = connected && reported_mini(app, &port.name);
+            let reported = proven.then(|| reported_state(app, &port.name)).flatten();
+            let setup_state = reported
+                .as_ref()
+                .and_then(|state| state.get("setupState"))
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let setup_version = reported
+                .as_ref()
+                .and_then(|state| state.get("setupVersion"))
+                .and_then(Value::as_u64);
+            let device_mode = match setup_state.as_deref() {
+                Some("completed") => "configured",
+                Some(_) => "setup",
+                None if proven => "legacy",
+                None => "candidate",
+            };
             let usb_serial_candidate = port.vid.is_some() && port.pid.is_some();
             let (compatible, requires_board_confirmation) =
                 discovery_classification(proven, usb_serial_candidate);
@@ -231,6 +319,9 @@ fn enumerate(app: &AppHandle) -> Vec<FirmwareDevice> {
                 echo_desk_handshake: proven,
                 firmware_version,
                 hardware_model: proven.then(|| MINI_MODEL.into()),
+                setup_state,
+                setup_version,
+                device_mode: device_mode.into(),
                 compatible,
                 requires_board_confirmation,
             }
@@ -565,6 +656,126 @@ fn request_device(app: &AppHandle, method: &str, params: Value) -> Result<Value,
         })
 }
 
+fn validate_setup_selection(
+    selected: &FirmwareManagerState,
+    requested_port: &str,
+    present: bool,
+) -> Result<(), &'static str> {
+    if selected.selected_port.as_deref() != Some(requested_port) {
+        return Err("setup_device_selection_changed");
+    }
+    if selected.selected_hardware_model.as_deref() != Some(MINI_MODEL) || !selected.board_confirmed
+    {
+        return Err("board_confirmation_required");
+    }
+    if !present {
+        return Err("device_not_found");
+    }
+    Ok(())
+}
+
+fn selected_setup_port(
+    app: &AppHandle,
+    request: &SetupPortRequest,
+) -> Result<FirmwareManagerState, String> {
+    let selected = snapshot(app);
+    let present = aimonitor_serial::ports::list_ports()
+        .iter()
+        .any(|item| item.name == request.port);
+    validate_setup_selection(&selected, &request.port, present).map_err(str::to_string)?;
+    Ok(selected)
+}
+
+fn wait_for_reported_state(app: &AppHandle, port: &str, timeout: Duration) -> Option<Value> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(state) = reported_state(app, port) {
+            return Some(state);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Starts the versioned on-device setup session on the already selected and
+/// hardware-verified port. Legacy firmware and a confirmed ESP32 bootloader
+/// candidate cannot understand this preparation command; both may continue to
+/// the existing installer, which will provide setup-capable firmware.
+pub fn setup_begin(
+    app: &AppHandle,
+    request: SetupPortRequest,
+) -> Result<FirmwareManagerState, String> {
+    let selected = selected_setup_port(app, &request)?;
+    let expected_handshake = selected
+        .devices
+        .iter()
+        .find(|device| device.port == request.port)
+        .is_some_and(|device| device.echo_desk_handshake);
+    if expected_handshake {
+        let state = wait_for_reported_state(app, &request.port, Duration::from_secs(6))
+            .ok_or_else(|| "setup_device_reconnect_timeout".to_string())?;
+        if state.get("setupVersion").and_then(Value::as_u64) == Some(1) {
+            request_device(app, "setup_begin", json!({}))?;
+        }
+    }
+    update_state(app, |state| {
+        state.operation = Some("guidedSetup".into());
+        state.message = Some(if expected_handshake {
+            "EchoDesk acknowledged the guided setup session.".into()
+        } else {
+            "Verified ESP32 selected; setup communication will begin after installation.".into()
+        });
+        state.error_code = None;
+        state.error_message = None;
+    });
+    Ok(snapshot(app))
+}
+
+/// Completes setup only after the same selected port has reconnected as a
+/// proven EchoDesk Mini running the versioned setup protocol.
+pub fn setup_complete(
+    app: &AppHandle,
+    request: SetupPortRequest,
+) -> Result<FirmwareManagerState, String> {
+    selected_setup_port(app, &request)?;
+    let state = wait_for_reported_state(app, &request.port, Duration::from_secs(6))
+        .ok_or_else(|| "setup_device_reconnect_timeout".to_string())?;
+    if state.get("setupVersion").and_then(Value::as_u64) != Some(1) {
+        return Err("setup_protocol_unavailable".into());
+    }
+    request_device(app, "setup_complete", json!({}))?;
+    update_state(app, |state| {
+        state.operation = Some("guidedSetup".into());
+        state.message = Some("EchoDesk setup is complete.".into());
+        state.error_code = None;
+        state.error_message = None;
+    });
+    Ok(snapshot(app))
+}
+
+/// Factory reset is intentionally an application-level NVS operation. The
+/// device firmware owns which setup keys are cleared; the host never erases
+/// flash or supplies an arbitrary address.
+pub fn factory_reset(
+    app: &AppHandle,
+    request: SetupPortRequest,
+) -> Result<FirmwareManagerState, String> {
+    let connection = app.state::<AppState>().connection.lock().unwrap().clone();
+    if connection.state != ConnectionState::Connected
+        || connection.port.as_deref() != Some(request.port.as_str())
+        || !reported_mini(app, &request.port)
+    {
+        return Err("setup_device_selection_changed".into());
+    }
+    request_device(app, "factory_reset", json!({}))?;
+    update_state(app, |state| {
+        state.message = Some("Factory reset accepted. EchoDesk is restarting into setup.".into());
+    });
+    Ok(snapshot(app))
+}
+
 fn restore_settings(app: &AppHandle, backup: &Value) {
     let current = app
         .state::<AppState>()
@@ -643,7 +854,12 @@ fn cancelled(app: &AppHandle) -> bool {
         .cancel_requested
 }
 
-fn run_install(app: AppHandle, mode: InstallMode, port: String) -> Result<(), String> {
+fn run_install(
+    app: AppHandle,
+    mode: InstallMode,
+    port: String,
+    policy: InstallPolicy,
+) -> Result<(), String> {
     let state = app.state::<AppState>();
     if state.flashing.swap(true, Ordering::SeqCst) {
         return Err("firmware_operation_running".into());
@@ -662,22 +878,11 @@ fn run_install(app: AppHandle, mode: InstallMode, port: String) -> Result<(), St
 
     let (directory, catalogue) = manifest()?;
     let release = mini_release(&catalogue)?;
-    if !aimonitor_core::semver::at_least(DESKTOP_VERSION, &release.minimum_desktop_version) {
-        return Err("desktop_update_required".into());
-    }
+    validate_desktop_version_for_policy(policy, DESKTOP_VERSION, &release.minimum_desktop_version)
+        .map_err(str::to_string)?;
     let current = snapshot(&app).current_version;
-    if matches!(mode, InstallMode::Update)
-        && !current.as_deref().is_some_and(|version| {
-            aimonitor_core::semver::compare(version, &release.firmware_version).is_lt()
-        })
-    {
-        return Err("firmware_not_newer".into());
-    }
-    if current.as_deref().is_some_and(|version| {
-        aimonitor_core::semver::compare(version, &release.firmware_version).is_gt()
-    }) {
-        return Err("firmware_downgrade_blocked".into());
-    }
+    validate_version_for_policy(policy, mode, current.as_deref(), &release.firmware_version)
+        .map_err(str::to_string)?;
     update_state(&app, |state| {
         state.status = "installing".into();
         state.stage = Some("verifying_firmware".into());
@@ -697,12 +902,7 @@ fn run_install(app: AppHandle, mode: InstallMode, port: String) -> Result<(), St
         state.stage = Some("entering_bootloader".into());
     });
     match probe_device(&port) {
-        Ok(Some(probe))
-            if probe.chip == TargetChip::Esp32
-                && probe.flash_size_bytes == Some(MAX_FIRMWARE_BYTES) => {}
-        Ok(Some(probe)) if probe.chip != TargetChip::Esp32 => return Err("wrong_chip".into()),
-        Ok(Some(_)) => return Err("wrong_flash_size".into()),
-        Ok(None) => return Err("unsupported_chip".into()),
+        Ok(probe) => validate_probe_for_policy(policy, probe).map_err(str::to_string)?,
         Err(error) => return Err(format!("bootloader_identification_failed:{error}")),
     }
     if cancelled(&app) {
@@ -849,7 +1049,84 @@ pub fn install(app: &AppHandle, request: InstallRequest) -> Result<FirmwareManag
     std::thread::Builder::new()
         .name("echodesk-firmware-install".into())
         .spawn(move || {
-            if let Err(error) = run_install(worker_app.clone(), request.mode, port) {
+            if let Err(error) = run_install(
+                worker_app.clone(),
+                request.mode,
+                port,
+                InstallPolicy::Normal,
+            ) {
+                let cancelled = error == "operation_cancelled";
+                update_state(&worker_app, |state| {
+                    state.status = if cancelled { "cancelled" } else { "error" }.into();
+                    if !cancelled {
+                        let (code, message) = public_error(&error);
+                        state.error_code = Some(code.into());
+                        state.error_message = Some(message.into());
+                    }
+                    state.progress_percent = None;
+                });
+            }
+        })
+        .map_err(|error| format!("firmware_worker_failed:{error}"))?;
+    Ok(snapshot(app))
+}
+
+/// Explicit recovery escape hatch for a user-selected serial port. This does
+/// not trust adapter metadata, an EchoDesk handshake, a hardware-model claim,
+/// the reported flash capacity, or the installed firmware version. The
+/// bundled image and manifest are still verified, and the ROM bootloader must
+/// positively identify the target as an original ESP32 before any write.
+pub fn manual_recovery(
+    app: &AppHandle,
+    request: ManualRecoveryRequest,
+) -> Result<FirmwareManagerState, String> {
+    let current = snapshot(app);
+    if matches!(
+        current.status.as_str(),
+        "preparing"
+            | "installing"
+            | "enteringBootloader"
+            | "writing"
+            | "verifying"
+            | "restarting"
+            | "reconnecting"
+    ) {
+        return Err("firmware_operation_running".into());
+    }
+    let port = aimonitor_serial::ports::list_ports()
+        .into_iter()
+        .find(|item| item.name == request.port)
+        .map(|item| item.name)
+        .ok_or_else(|| "device_not_found".to_string())?;
+
+    update_state(app, |state| {
+        state.status = "preparing".into();
+        state.operation = Some("manualRecovery".into());
+        state.stage = Some("preparing".into());
+        state.progress_percent = None;
+        state.message = Some(
+            "Manual recovery will continue only if the selected port reports an ESP32 bootloader."
+                .into(),
+        );
+        state.error_code = None;
+        state.error_message = None;
+        state.selected_port = Some(port.clone());
+        state.selected_hardware_model = None;
+        state.board_confirmed = false;
+        state.write_completed = false;
+        state.reconnected = false;
+        state.cancel_requested = false;
+    });
+    let worker_app = app.clone();
+    std::thread::Builder::new()
+        .name("echodesk-firmware-manual-recovery".into())
+        .spawn(move || {
+            if let Err(error) = run_install(
+                worker_app.clone(),
+                InstallMode::Repair,
+                port,
+                InstallPolicy::Esp32OnlyRecovery,
+            ) {
                 let cancelled = error == "operation_cancelled";
                 update_state(&worker_app, |state| {
                     state.status = if cancelled { "cancelled" } else { "error" }.into();
@@ -950,6 +1227,18 @@ pub fn public_error(internal: &str) -> (&'static str, &'static str) {
             "write_in_progress",
             "The write is in progress and cannot be interrupted safely.",
         ),
+        "setup_device_selection_changed" => (
+            "setup_device_changed",
+            "The selected EchoDesk changed or disconnected. Select the device again before continuing.",
+        ),
+        "setup_device_reconnect_timeout" => (
+            "setup_reconnect_timeout",
+            "The selected EchoDesk did not reconnect in time. Reconnect it and retry this setup step.",
+        ),
+        "setup_protocol_unavailable" => (
+            "setup_protocol_unavailable",
+            "Install the bundled EchoDesk OS before completing guided setup.",
+        ),
         _ => (
             "firmware_error",
             "EchoDesk could not complete the firmware operation. Reconnect the device and try again.",
@@ -992,6 +1281,124 @@ mod tests {
     }
 
     #[test]
+    fn manual_recovery_accepts_only_a_port() {
+        let request: ManualRecoveryRequest = serde_json::from_str(r#"{"port":"COM7"}"#).unwrap();
+        assert_eq!(request.port, "COM7");
+        assert!(serde_json::from_str::<ManualRecoveryRequest>(
+            r#"{"port":"COM7","image":"evil.bin"}"#
+        )
+        .is_err());
+        assert!(
+            serde_json::from_str::<ManualRecoveryRequest>(r#"{"port":"COM7","address":4096}"#)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn guided_setup_requests_accept_only_the_pinned_port() {
+        let request: SetupPortRequest = serde_json::from_str(r#"{"port":"COM7"}"#).unwrap();
+        assert_eq!(request.port, "COM7");
+        assert!(
+            serde_json::from_str::<SetupPortRequest>(r#"{"port":"COM7","image":"other.bin"}"#)
+                .is_err()
+        );
+        let mut selected = FirmwareManagerState::default();
+        selected.selected_port = Some("COM7".into());
+        selected.selected_hardware_model = Some(MINI_MODEL.into());
+        selected.board_confirmed = true;
+        assert_eq!(validate_setup_selection(&selected, "COM7", true), Ok(()));
+        assert_eq!(
+            validate_setup_selection(&selected, "COM8", true),
+            Err("setup_device_selection_changed")
+        );
+        assert_eq!(
+            validate_setup_selection(&selected, "COM7", false),
+            Err("device_not_found")
+        );
+        selected.board_confirmed = false;
+        assert_eq!(
+            validate_setup_selection(&selected, "COM7", true),
+            Err("board_confirmation_required")
+        );
+    }
+
+    #[test]
+    fn manual_recovery_requires_esp32_but_not_reported_flash_size() {
+        let esp32_4mb = DeviceProbe {
+            chip: TargetChip::Esp32,
+            flash_size_bytes: Some(MAX_FIRMWARE_BYTES),
+        };
+        let esp32_unknown_size = DeviceProbe {
+            chip: TargetChip::Esp32,
+            flash_size_bytes: None,
+        };
+        let esp32s3 = DeviceProbe {
+            chip: TargetChip::Esp32S3,
+            flash_size_bytes: Some(16 * 1024 * 1024),
+        };
+
+        assert_eq!(
+            validate_probe_for_policy(InstallPolicy::Normal, Some(esp32_4mb)),
+            Ok(())
+        );
+        assert_eq!(
+            validate_probe_for_policy(InstallPolicy::Normal, Some(esp32_unknown_size)),
+            Err("wrong_flash_size")
+        );
+        assert_eq!(
+            validate_probe_for_policy(InstallPolicy::Esp32OnlyRecovery, Some(esp32_unknown_size)),
+            Ok(())
+        );
+        assert_eq!(
+            validate_probe_for_policy(InstallPolicy::Esp32OnlyRecovery, Some(esp32s3)),
+            Err("wrong_chip")
+        );
+        assert_eq!(
+            validate_probe_for_policy(InstallPolicy::Esp32OnlyRecovery, None),
+            Err("unsupported_chip")
+        );
+    }
+
+    #[test]
+    fn manual_recovery_bypasses_version_gates() {
+        assert_eq!(
+            validate_desktop_version_for_policy(InstallPolicy::Normal, "0.2.0", "0.3.0"),
+            Err("desktop_update_required")
+        );
+        assert_eq!(
+            validate_desktop_version_for_policy(InstallPolicy::Esp32OnlyRecovery, "0.2.0", "0.3.0"),
+            Ok(())
+        );
+        assert_eq!(
+            validate_version_for_policy(
+                InstallPolicy::Normal,
+                InstallMode::Update,
+                Some("2.28.0"),
+                "2.28.0"
+            ),
+            Err("firmware_not_newer")
+        );
+        assert_eq!(
+            validate_version_for_policy(
+                InstallPolicy::Normal,
+                InstallMode::Repair,
+                Some("2.29.0"),
+                "2.28.0"
+            ),
+            Err("firmware_downgrade_blocked")
+        );
+        assert_eq!(
+            validate_version_for_policy(
+                InstallPolicy::Esp32OnlyRecovery,
+                InstallMode::Repair,
+                Some("99.0.0"),
+                "2.28.0"
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
     fn release_selection_enforces_complete_mini_flash_layout() {
         let valid = FirmwareRelease {
             firmware_version: "2.28.0".into(),
@@ -1026,7 +1433,7 @@ mod tests {
 
     #[test]
     fn desktop_version_and_public_errors_are_stable() {
-        assert_eq!(DESKTOP_VERSION, "0.2.0");
+        assert_eq!(DESKTOP_VERSION, "0.2.5");
         assert!(aimonitor_core::semver::at_least(DESKTOP_VERSION, "0.2.0"));
         assert_eq!(public_error("wrong_flash_size").0, "wrong_hardware");
         assert_eq!(
