@@ -20,7 +20,8 @@ $expectedCliSha256 = 'F81570B0CD7593ABB9822EB2362F9B9EDA3A382A571457718EE37E664E
 $expectedFlashEngineVersion = '4.6.0'
 $firmwarePackager = Join-Path $repositoryRoot 'scripts\package_echodesk_firmware.ps1'
 $firmwareManifest = Join-Path $desktopRoot 'firmware\firmware-manifest.json'
-$firmwareImage = Join-Path $repositoryRoot 'dist\ai-monitor-freenove-fnk0114a-2p4.bin'
+$firmwareRelease = (Get-Content -LiteralPath $firmwareManifest -Raw | ConvertFrom-Json).releases[0]
+$firmwareImage = Join-Path (Join-Path $desktopRoot 'firmware') ($firmwareRelease.imageFile -replace '/', [IO.Path]::DirectorySeparatorChar)
 
 # Fail before the expensive application build if the bundled firmware release is
 # malformed, targets the wrong ESP32 layout, or differs from its pinned digest.
@@ -105,7 +106,6 @@ Copy-Item -LiteralPath (Join-Path $desktopRoot 'install.ps1') -Destination $publ
 Copy-Item -LiteralPath (Join-Path $desktopRoot 'uninstall.ps1') -Destination $publish -Force
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'LICENSE') -Destination $publish -Force
 & $firmwarePackager -ManifestPath $firmwareManifest -SourceFirmware $firmwareImage -DestinationRoot $firmwareDirectory
-$firmwareRelease = (Get-Content -LiteralPath $firmwareManifest -Raw | ConvertFrom-Json).releases[0]
 $packagedFirmwarePath = Join-Path $firmwareDirectory ($firmwareRelease.imageFile -replace '/', [IO.Path]::DirectorySeparatorChar)
 
 $manifest = [ordered]@{
