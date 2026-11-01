@@ -12,12 +12,32 @@ OUTPUT_BIN_ST7789="$INSTALLER_DIR/bin/ai-monitor-st7789.bin"
 # Guition ESP32-S3-4848S040; benannt nach der Display-Kennung aus get_info.
 OUTPUT_BIN_S3="$INSTALLER_DIR/bin/ai-monitor-st7701.bin"
 BOOT_APP0="$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin"
+STAGING_DIR="$(mktemp -d)"
+trap 'rm -rf "$STAGING_DIR"' EXIT
 
 echo "=== Building firmware ==="
 cd "$PROJECT_DIR"
 # Die Umgebungen einzeln nennen: das S3-Board haengt an einer anderen
 # Plattform, und ein `pio run` ueber mehrere Plattformen bricht ab.
 pio run -e esp32dev -e esp32dev-st7789
+
+# pioarduino replaces the classic Espressif platform package below and may
+# remove its build directories. Preserve the completed ESP32 artifacts before
+# switching platforms so the final merge never depends on PlatformIO's package
+# cleanup behaviour.
+for f in \
+  "$FIRMWARE_DIR/bootloader.bin" "$FIRMWARE_DIR/partitions.bin" "$FIRMWARE_DIR/firmware.bin" \
+  "$FIRMWARE_ST7789_DIR/bootloader.bin" "$FIRMWARE_ST7789_DIR/partitions.bin" "$FIRMWARE_ST7789_DIR/firmware.bin" \
+  "$BOOT_APP0"; do
+  if [ ! -f "$f" ]; then
+    echo "ERROR: Missing $f"
+    exit 1
+  fi
+done
+mkdir -p "$STAGING_DIR/esp32dev" "$STAGING_DIR/esp32dev-st7789"
+cp "$FIRMWARE_DIR/bootloader.bin" "$FIRMWARE_DIR/partitions.bin" "$FIRMWARE_DIR/firmware.bin" "$STAGING_DIR/esp32dev/"
+cp "$FIRMWARE_ST7789_DIR/bootloader.bin" "$FIRMWARE_ST7789_DIR/partitions.bin" "$FIRMWARE_ST7789_DIR/firmware.bin" "$STAGING_DIR/esp32dev-st7789/"
+cp "$BOOT_APP0" "$STAGING_DIR/boot_app0.bin"
 # Die S3-Plattform (pioarduino) tauscht beim Wechsel tool-esptoolpy gegen ihre
 # eigene Version aus; der erste Lauf danach bricht mit einem TypeError ab, der
 # zweite baut normal.
@@ -28,20 +48,12 @@ echo "=== Merging firmware binary ==="
 
 # Verify required files exist
 for f in \
-  "$FIRMWARE_DIR/bootloader.bin" "$FIRMWARE_DIR/partitions.bin" "$FIRMWARE_DIR/firmware.bin" \
-  "$FIRMWARE_ST7789_DIR/bootloader.bin" "$FIRMWARE_ST7789_DIR/partitions.bin" "$FIRMWARE_ST7789_DIR/firmware.bin" \
   "$FIRMWARE_S3_DIR/firmware.factory.bin" "$FIRMWARE_S3_DIR/firmware.bin"; do
   if [ ! -f "$f" ]; then
     echo "ERROR: Missing $f"
     exit 1
   fi
 done
-
-if [ ! -f "$BOOT_APP0" ]; then
-  echo "ERROR: Missing boot_app0.bin at $BOOT_APP0"
-  echo "Try: pio pkg install -g -p espressif32"
-  exit 1
-fi
 
 mkdir -p "$INSTALLER_DIR/bin"
 
@@ -50,27 +62,27 @@ esptool.py --chip esp32 merge_bin \
   --flash_mode dio \
   --flash_freq 40m \
   --flash_size 4MB \
-  0x1000  "$FIRMWARE_DIR/bootloader.bin" \
-  0x8000  "$FIRMWARE_DIR/partitions.bin" \
-  0xe000  "$BOOT_APP0" \
-  0x10000 "$FIRMWARE_DIR/firmware.bin"
+  0x1000  "$STAGING_DIR/esp32dev/bootloader.bin" \
+  0x8000  "$STAGING_DIR/esp32dev/partitions.bin" \
+  0xe000  "$STAGING_DIR/boot_app0.bin" \
+  0x10000 "$STAGING_DIR/esp32dev/firmware.bin"
 
 esptool.py --chip esp32 merge_bin \
   -o "$OUTPUT_BIN_ST7789" \
   --flash_mode dio \
   --flash_freq 40m \
   --flash_size 4MB \
-  0x1000  "$FIRMWARE_ST7789_DIR/bootloader.bin" \
-  0x8000  "$FIRMWARE_ST7789_DIR/partitions.bin" \
-  0xe000  "$BOOT_APP0" \
-  0x10000 "$FIRMWARE_ST7789_DIR/firmware.bin"
+  0x1000  "$STAGING_DIR/esp32dev-st7789/bootloader.bin" \
+  0x8000  "$STAGING_DIR/esp32dev-st7789/partitions.bin" \
+  0xe000  "$STAGING_DIR/boot_app0.bin" \
+  0x10000 "$STAGING_DIR/esp32dev-st7789/firmware.bin"
 
 # S3: die Plattform legt das vollstaendige Image ab 0x0 schon selbst an
 # (Bootloader an 0x0, 16 MB, siehe platformio.ini).
 cp "$FIRMWARE_S3_DIR/firmware.factory.bin" "$OUTPUT_BIN_S3"
 
-cp "$FIRMWARE_DIR/firmware.bin" "$INSTALLER_DIR/bin/firmware-ota.bin"
-cp "$FIRMWARE_ST7789_DIR/firmware.bin" "$INSTALLER_DIR/bin/firmware-ota-st7789.bin"
+cp "$STAGING_DIR/esp32dev/firmware.bin" "$INSTALLER_DIR/bin/firmware-ota.bin"
+cp "$STAGING_DIR/esp32dev-st7789/firmware.bin" "$INSTALLER_DIR/bin/firmware-ota-st7789.bin"
 cp "$FIRMWARE_S3_DIR/firmware.bin" "$INSTALLER_DIR/bin/firmware-ota-st7701.bin"
 
 echo ""
