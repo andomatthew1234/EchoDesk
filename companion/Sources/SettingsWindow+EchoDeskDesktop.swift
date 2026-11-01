@@ -1,6 +1,8 @@
 #if ECHODESK_DESKTOP
 import Cocoa
 
+private let echoDeskFirstRunOnboardingKey = "EchoDeskFirstRunOnboardingCompletedV1"
+
 enum EchoDeskDesktopPage: Int, CaseIterable {
     case overview, deviceControl, customisation, setup, recovery
 }
@@ -84,6 +86,111 @@ extension SettingsWindowController {
             }
         }
         selectEchoDeskPage(.overview)
+        presentEchoDeskFirstRunOnboardingIfNeeded(in: root)
+    }
+
+    private func presentEchoDeskFirstRunOnboardingIfNeeded(in root: NSView) {
+        let defaults = UserDefaults.standard
+        let pendingUSBSetup = defaults.string(forKey: "EchoDeskPendingSetupPortV2") != nil
+            && defaults.integer(forKey: "EchoDeskGuidedSetupStepV2") != EchoDeskSetupStep.connect.rawValue
+        // A setup_begin flow already in progress is more authoritative than
+        // first-run presentation. Let main.swift restore its saved step rather
+        // than covering it or resetting it to Connect.
+        guard !pendingUSBSetup,
+              !defaults.bool(forKey: echoDeskFirstRunOnboardingKey) else { return }
+
+        let overlay = EchoDeskSurfaceView(.canvas)
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        overlay.setAccessibilityElement(true)
+        overlay.setAccessibilityRole(.group)
+        overlay.setAccessibilityLabel("EchoDesk Desktop first-run setup")
+        root.addSubview(overlay, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            overlay.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            overlay.topAnchor.constraint(equalTo: root.topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+
+        let mark = NSTextField(labelWithString: "⌗")
+        mark.font = .systemFont(ofSize: 46, weight: .bold)
+        mark.alignment = .center
+        mark.textColor = .controlAccentColor
+        let welcomeTitle = echoDeskHero("Welcome to the EchoDesk Desktop app")
+        welcomeTitle.alignment = .center
+        let welcomeDetail = echoDeskMuted("Your desktop companion for setup, customisation, Codex usage and recovery.")
+        welcomeDetail.alignment = .center
+        let continueButton = echoDeskPrimaryButton("Continue", #selector(echoDeskFirstRunContinue))
+        continueButton.keyEquivalent = "\r"
+        let welcomeStack = echoDeskPageStack([mark, welcomeTitle, welcomeDetail, continueButton])
+        welcomeStack.alignment = .centerX
+        let welcomeScreen = echoDeskCard(welcomeStack, padding: 40)
+
+        let setupMark = NSImageView()
+        setupMark.image = NSImage(systemSymbolName: "display.and.arrow.down",
+                                  accessibilityDescription: nil)
+        setupMark.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 42, weight: .medium)
+        setupMark.contentTintColor = .controlAccentColor
+        let setupTitle = echoDeskHero("Setup your first EchoDesk now?")
+        setupTitle.alignment = .center
+        let setupDetail = echoDeskMuted("You can set up by USB or WiFi now, or come back from Setup new device later.")
+        setupDetail.alignment = .center
+        let notNow = NSButton(title: "Not now", target: self, action: #selector(echoDeskFirstRunNotNow))
+        let yes = echoDeskPrimaryButton("Yes", #selector(echoDeskFirstRunYes))
+        yes.keyEquivalent = "\r"
+        let setupActions = NSStackView(views: [notNow, yes])
+        setupActions.orientation = .horizontal
+        setupActions.alignment = .centerY
+        setupActions.spacing = 10
+        let setupStack = echoDeskPageStack([setupMark, setupTitle, setupDetail, setupActions])
+        setupStack.alignment = .centerX
+        let setupScreen = echoDeskCard(setupStack, padding: 40)
+        setupScreen.isHidden = true
+
+        for screen in [welcomeScreen, setupScreen] {
+            screen.translatesAutoresizingMaskIntoConstraints = false
+            overlay.addSubview(screen)
+            NSLayoutConstraint.activate([
+                screen.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+                screen.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+                screen.widthAnchor.constraint(equalToConstant: 580),
+                screen.widthAnchor.constraint(lessThanOrEqualTo: overlay.widthAnchor, constant: -48),
+            ])
+        }
+        echoDeskFirstRunOverlay = overlay
+        echoDeskFirstRunWelcomeScreen = welcomeScreen
+        echoDeskFirstRunSetupScreen = setupScreen
+        echoDeskFirstRunYesButton = yes
+        window?.makeFirstResponder(continueButton)
+    }
+
+    @objc private func echoDeskFirstRunContinue() {
+        echoDeskFirstRunWelcomeScreen?.isHidden = true
+        echoDeskFirstRunSetupScreen?.isHidden = false
+        window?.makeFirstResponder(echoDeskFirstRunYesButton)
+    }
+
+    @objc private func echoDeskFirstRunYes() {
+        completeEchoDeskFirstRunOnboarding(openSetup: true)
+    }
+
+    @objc private func echoDeskFirstRunNotNow() {
+        completeEchoDeskFirstRunOnboarding(openSetup: false)
+    }
+
+    private func completeEchoDeskFirstRunOnboarding(openSetup: Bool) {
+        UserDefaults.standard.set(true, forKey: echoDeskFirstRunOnboardingKey)
+        echoDeskFirstRunOverlay?.removeFromSuperview()
+        echoDeskFirstRunOverlay = nil
+        echoDeskFirstRunWelcomeScreen = nil
+        echoDeskFirstRunSetupScreen = nil
+        echoDeskFirstRunYesButton = nil
+        if openSetup {
+            selectEchoDeskPage(.setup)
+            setEchoDeskSetupStep(.connect)
+        } else {
+            selectEchoDeskPage(.overview)
+        }
     }
 
     private func buildEchoDeskSidebar(in sidebar: NSView) {

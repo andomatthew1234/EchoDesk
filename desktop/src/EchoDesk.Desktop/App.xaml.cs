@@ -54,7 +54,12 @@ public partial class App : System.Windows.Application
         };
         viewModel.Start();
 
-        if (e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase) && viewModel.MinimizeToTray)
+        // A first launch must remain visible even if Windows starts the app
+        // with the tray flag; otherwise onboarding could be hidden before the
+        // user has made the persisted Yes/Not now choice.
+        if (e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase)
+            && viewModel.MinimizeToTray
+            && !viewModel.IsFirstRun)
         {
             window.Show();
             window.Hide();

@@ -318,20 +318,163 @@ cp -R "$BUILD_DIR" "$SCRIPT_DIR/build"
 #   6. ZIP aus gestapelter .app erzeugen (ditto)
 DMG_PATH="$SCRIPT_DIR/build/$RELEASE_STEM.dmg"
 rm -f "$DMG_PATH"
-DMG_STAGING="$(mktemp -d)"
-cp -R "$SCRIPT_DIR/build/$APP_NAME.app" "$DMG_STAGING/"
-ln -sf /Applications "$DMG_STAGING/Applications"
 
-if hdiutil create -volname "$APP_NAME" \
-  -srcfolder "$DMG_STAGING" \
-  -ov -format UDZO \
-  "$DMG_PATH" >/dev/null 2>&1; then
-  echo "Built DMG: $DMG_PATH"
+if [ "$PRODUCT_MODE" = "echodesk" ]; then
+  # The supplied artwork is a 2x 1536x1024 canvas. Finder's icon-view window
+  # uses the matching 768x512 point layout; sips creates the deterministic 1x
+  # backing file that Finder records in .DS_Store.
+  DMG_BACKGROUND_SOURCE="$SCRIPT_DIR/Resources/DMG/EchoDesk-DMG-Background.png"
+  [ -f "$DMG_BACKGROUND_SOURCE" ] || {
+    echo "ERROR: EchoDesk DMG background is missing: $DMG_BACKGROUND_SOURCE"
+    exit 1
+  }
+  [ -x /usr/bin/sips ] || { echo "ERROR: /usr/bin/sips is required to build the EchoDesk DMG"; exit 1; }
+  [ -x /usr/bin/osascript ] || { echo "ERROR: /usr/bin/osascript is required to style the EchoDesk DMG"; exit 1; }
+  [ -x /usr/bin/hdiutil ] || { echo "ERROR: /usr/bin/hdiutil is required to build the EchoDesk DMG"; exit 1; }
+
+  BG_WIDTH=$(/usr/bin/sips -g pixelWidth "$DMG_BACKGROUND_SOURCE" 2>/dev/null | awk '/pixelWidth:/ {print $2}')
+  BG_HEIGHT=$(/usr/bin/sips -g pixelHeight "$DMG_BACKGROUND_SOURCE" 2>/dev/null | awk '/pixelHeight:/ {print $2}')
+  [ "$BG_WIDTH" = "1536" ] && [ "$BG_HEIGHT" = "1024" ] || {
+    echo "ERROR: EchoDesk DMG background must be 1536x1024 (found ${BG_WIDTH:-?}x${BG_HEIGHT:-?})"
+    exit 1
+  }
+
+  DMG_WORK_DIR="$(mktemp -d /tmp/echodesk-dmg.XXXXXX)"
+  DMG_MOUNT_DIR="$DMG_WORK_DIR/mount"
+  DMG_RW_PATH="$DMG_WORK_DIR/EchoDesk-Desktop-writable.dmg"
+  DMG_IS_MOUNTED=0
+  mkdir -p "$DMG_MOUNT_DIR"
+
+  cleanup_echodesk_dmg() {
+    if [ "$DMG_IS_MOUNTED" = "1" ]; then
+      /usr/bin/hdiutil detach "$DMG_MOUNT_DIR" >/dev/null 2>&1 \
+        || /usr/bin/hdiutil detach "$DMG_MOUNT_DIR" -force >/dev/null 2>&1 \
+        || true
+    fi
+    case "$DMG_WORK_DIR" in
+      /tmp/echodesk-dmg.*) rm -rf -- "$DMG_WORK_DIR" ;;
+    esac
+  }
+  trap cleanup_echodesk_dmg EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  APP_KB=$(du -sk "$SCRIPT_DIR/build/$APP_NAME.app" | awk '{print $1}')
+  DMG_SIZE_KB=$((APP_KB + 65536))
+  /usr/bin/hdiutil create -ov -size "${DMG_SIZE_KB}k" -fs HFS+ \
+    -volname "$APP_NAME" -format UDRW "$DMG_RW_PATH" >/dev/null || {
+      echo "ERROR: Could not create the writable EchoDesk DMG"
+      exit 1
+    }
+  /usr/bin/hdiutil attach "$DMG_RW_PATH" -readwrite -noverify -noautoopen \
+    -mountpoint "$DMG_MOUNT_DIR" >/dev/null || {
+      echo "ERROR: Could not mount the writable EchoDesk DMG"
+      exit 1
+    }
+  DMG_IS_MOUNTED=1
+
+  ditto "$SCRIPT_DIR/build/$APP_NAME.app" "$DMG_MOUNT_DIR/$APP_NAME.app"
+  ln -s /Applications "$DMG_MOUNT_DIR/Applications"
+  mkdir -p "$DMG_MOUNT_DIR/.background"
+  /usr/bin/sips -z 512 768 "$DMG_BACKGROUND_SOURCE" \
+    --out "$DMG_MOUNT_DIR/.background/EchoDesk-DMG-Background.png" >/dev/null
+  SCALED_WIDTH=$(/usr/bin/sips -g pixelWidth "$DMG_MOUNT_DIR/.background/EchoDesk-DMG-Background.png" 2>/dev/null | awk '/pixelWidth:/ {print $2}')
+  SCALED_HEIGHT=$(/usr/bin/sips -g pixelHeight "$DMG_MOUNT_DIR/.background/EchoDesk-DMG-Background.png" 2>/dev/null | awk '/pixelHeight:/ {print $2}')
+  [ "$SCALED_WIDTH" = "768" ] && [ "$SCALED_HEIGHT" = "512" ] || {
+    echo "ERROR: Could not scale the EchoDesk DMG background to 768x512"
+    exit 1
+  }
+
+  # The background contains the arrow and installation instruction. Positions
+  # below are the centres of its two rounded icon panels.
+  configure_echodesk_dmg_finder() {
+    /usr/bin/osascript <<OSA
+with timeout of 30 seconds
+  tell application "Finder"
+    tell disk "$APP_NAME"
+      try
+        close container window
+      end try
+      open
+      delay 2
+      set current view of container window to icon view
+      set toolbar visible of container window to false
+      set statusbar visible of container window to false
+      set pathbar visible of container window to false
+      set sidebar width of container window to 0
+      set bounds of container window to {100, 100, 868, 612}
+      set viewOptions to icon view options of container window
+      set arrangement of viewOptions to not arranged
+      set icon size of viewOptions to 128
+      set text size of viewOptions to 14
+      set label position of viewOptions to bottom
+      set shows item info of viewOptions to false
+      set shows icon preview of viewOptions to true
+      set background picture of viewOptions to file ".background:EchoDesk-DMG-Background.png"
+      set extension hidden of item "$APP_NAME.app" to true
+      set position of item "$APP_NAME.app" to {168, 265}
+      set position of item "Applications" to {600, 265}
+      update without registering applications
+      delay 3
+      close
+    end tell
+  end tell
+end timeout
+OSA
+  }
+
+  DMG_FINDER_CONFIGURED=0
+  for DMG_FINDER_ATTEMPT in 1 2 3 4; do
+    if ! /usr/bin/hdiutil info | grep -Fq -- "$DMG_MOUNT_DIR"; then
+      echo "ERROR: EchoDesk DMG mount disappeared before Finder layout attempt $DMG_FINDER_ATTEMPT"
+      break
+    fi
+    if configure_echodesk_dmg_finder; then
+      DMG_FINDER_CONFIGURED=1
+      break
+    fi
+    echo "WARNING: Finder layout attempt $DMG_FINDER_ATTEMPT/4 failed; retrying..."
+    sleep $((DMG_FINDER_ATTEMPT * 2))
+  done
+  if [ "$DMG_FINDER_CONFIGURED" != "1" ]; then
+    echo "ERROR: Finder could not configure the EchoDesk DMG layout"
+    exit 1
+  fi
+  sync
+  [ -f "$DMG_MOUNT_DIR/.DS_Store" ] || {
+    echo "ERROR: Finder did not persist the EchoDesk DMG layout (.DS_Store missing)"
+    exit 1
+  }
+  /usr/bin/hdiutil detach "$DMG_MOUNT_DIR" >/dev/null || {
+    echo "ERROR: Could not detach the configured EchoDesk DMG"
+    exit 1
+  }
+  DMG_IS_MOUNTED=0
+  /usr/bin/hdiutil convert "$DMG_RW_PATH" -format UDZO -imagekey zlib-level=9 \
+    -o "$DMG_PATH" >/dev/null || {
+      echo "ERROR: Could not convert the configured EchoDesk DMG to UDZO"
+      exit 1
+    }
+  cleanup_echodesk_dmg
+  trap - EXIT INT TERM
+  [ -s "$DMG_PATH" ] || { echo "ERROR: EchoDesk DMG output is missing or empty"; exit 1; }
+  echo "Built styled EchoDesk DMG: $DMG_PATH"
 else
-  echo "WARNING: hdiutil DMG build failed — skipping notarization."
-  DMG_PATH=""
+  # Preserve the original AI Monitor packaging path.
+  DMG_STAGING="$(mktemp -d)"
+  cp -R "$SCRIPT_DIR/build/$APP_NAME.app" "$DMG_STAGING/"
+  ln -sf /Applications "$DMG_STAGING/Applications"
+  if hdiutil create -volname "$APP_NAME" \
+    -srcfolder "$DMG_STAGING" \
+    -ov -format UDZO \
+    "$DMG_PATH" >/dev/null 2>&1; then
+    echo "Built DMG: $DMG_PATH"
+  else
+    echo "WARNING: hdiutil DMG build failed — skipping notarization."
+    DMG_PATH=""
+  fi
+  rm -rf "$DMG_STAGING"
 fi
-rm -rf "$DMG_STAGING"
 
 # =============================================================================
 # Notarization + Stapling (nur mit Developer ID + NOTARIZE=1)

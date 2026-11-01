@@ -4068,12 +4068,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 #if ECHODESK_DESKTOP
         settingsController.show()
         let defaults = UserDefaults.standard
-        let firstDesktopLaunch = !defaults.bool(forKey: "EchoDeskDesktopIntroducedV027")
         let pendingUSBSetup = defaults.string(forKey: "EchoDeskPendingSetupPortV2") != nil
             && defaults.integer(forKey: "EchoDeskGuidedSetupStepV2") != EchoDeskSetupStep.connect.rawValue
-        if firstDesktopLaunch || pendingUSBSetup {
+        if pendingUSBSetup {
             settingsController.selectEchoDeskPage(.setup)
-            defaults.set(true, forKey: "EchoDeskDesktopIntroducedV027")
         }
 #else
         settingsController.show()

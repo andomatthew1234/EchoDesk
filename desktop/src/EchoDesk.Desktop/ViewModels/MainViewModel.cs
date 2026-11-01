@@ -16,6 +16,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private readonly PreferencesService preferencesService;
     private readonly SynchronizationContext uiContext;
     private readonly GuidedSetupFlow guidedSetup;
+    private readonly FirstRunFlow firstRun;
     private DesktopPreferences preferences;
     private BrokerState state = BrokerState.Offline();
     private string selectedPage = "Overview";
@@ -53,6 +54,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         uiContext = SynchronizationContext.Current ?? new SynchronizationContext();
         guidedSetup = new GuidedSetupFlow();
         preferences = preferencesService.Load();
+        firstRun = new FirstRunFlow(preferences.FirstRunCompleted);
+        selectedPage = preferences.FirstRunCompleted ? "Overview" : "First run";
         broker.StateChanged += OnStateChanged;
         NavigateCommand = new RelayCommand(page => SelectedPage = page as string ?? "Overview");
         RefreshCommand = new AsyncRelayCommand(_ => ExecuteAsync(() => broker.RefreshAsync(), "Device information refreshed."));
@@ -123,6 +126,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             _ => IsGuidedQuickSettingsStep && !guidedSetupFinalizing);
         FinishGuidedSetupCommand = new RelayCommand(_ => FinishGuidedSetup());
         StartSetupAfterRecoveryCommand = new RelayCommand(_ => StartSetupAfterRecovery());
+        FirstRunContinueCommand = new RelayCommand(_ => ContinueFirstRun(), _ => IsFirstRunWelcome);
+        FirstRunChoiceCommand = new RelayCommand(CompleteFirstRun, _ => IsFirstRunSetupPrompt);
         AppearanceOptions = ["system", "light", "dark"];
         LayoutOptions =
         [
@@ -193,6 +198,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public AsyncRelayCommand CompleteGuidedQuickSettingsCommand { get; }
     public RelayCommand FinishGuidedSetupCommand { get; }
     public RelayCommand StartSetupAfterRecoveryCommand { get; }
+    public RelayCommand FirstRunContinueCommand { get; }
+    public RelayCommand FirstRunChoiceCommand { get; }
     public ObservableCollection<AppTile> AppTiles { get; }
     public IReadOnlyList<string> AppearanceOptions { get; }
     public IReadOnlyList<Choice> LayoutOptions { get; }
@@ -212,7 +219,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             if (!Set(ref selectedPage, value)) return;
             Raise(nameof(IsOverview)); Raise(nameof(IsDeviceControl)); Raise(nameof(IsCustomisation)); Raise(nameof(IsSetupUpdates));
-            Raise(nameof(IsGuidedSetup));
+            Raise(nameof(IsGuidedSetup)); Raise(nameof(IsFirstRun)); Raise(nameof(IsMainShellEnabled));
             if (IsSetupUpdates && IsBrokerAvailable && !FirmwareOperationActive)
             {
                 ScanFirmwareDevicesCommand.Execute(null);
@@ -229,6 +236,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
 
     public bool IsOverview => SelectedPage == "Overview";
+    public bool IsFirstRun => SelectedPage == "First run";
+    public bool IsMainShellEnabled => !IsFirstRun;
+    public bool IsFirstRunWelcome => IsFirstRun && firstRun.Step == FirstRunStep.Welcome;
+    public bool IsFirstRunSetupPrompt => IsFirstRun && firstRun.Step == FirstRunStep.SetupPrompt;
     public bool IsDeviceControl => SelectedPage == "Device Control";
     public bool IsCustomisation => SelectedPage == "Customisation";
     public bool IsSetupUpdates => SelectedPage == "Device recovery & updates";
@@ -1081,6 +1092,30 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         GuidedSetupError = null;
         SelectedPage = "Set up a new device";
         RaiseGuidedSetupComputed();
+    }
+
+    private void ContinueFirstRun()
+    {
+        if (!firstRun.Continue()) return;
+        Raise(nameof(IsFirstRunWelcome));
+        Raise(nameof(IsFirstRunSetupPrompt));
+        FirstRunContinueCommand.Refresh();
+        FirstRunChoiceCommand.Refresh();
+    }
+
+    private void CompleteFirstRun(object? choice)
+    {
+        if (!firstRun.Finish()) return;
+        preferences = preferences with { FirstRunCompleted = true };
+        SavePreferences();
+        if (string.Equals(choice as string, "yes", StringComparison.OrdinalIgnoreCase))
+            StartSetupAfterRecovery();
+        else
+            SelectedPage = "Overview";
+        Raise(nameof(IsFirstRunWelcome));
+        Raise(nameof(IsFirstRunSetupPrompt));
+        FirstRunContinueCommand.Refresh();
+        FirstRunChoiceCommand.Refresh();
     }
 
     private async Task OpenAppAsync(object? parameter)

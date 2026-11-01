@@ -26,6 +26,11 @@ your provider credentials.
 3. Connect the EchoDesk display by USB. The bundled host starts invisibly and
    reconnects automatically.
 
+On first launch, Desktop shows a local two-screen welcome and asks whether to
+set up the first EchoDesk now. **Yes** opens the existing Setup new device flow;
+**Not now** opens Overview. The completed welcome is remembered locally and
+does not wait for the Host or a connected device.
+
 USB remains the default connection. During first setup, **Setup with Wi-Fi**
 starts a temporary protected `EchoDesk-XXXX` network on the Mini. Join it in
 Windows with the on-screen 8-digit code, choose **Find Wi-Fi devices** in

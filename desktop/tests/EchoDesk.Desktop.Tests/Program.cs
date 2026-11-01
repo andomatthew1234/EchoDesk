@@ -14,6 +14,7 @@ internal static class Program
             MapperUsesOnlyReportedValues();
             FirmwareManagerMappingPreservesSafetyStates();
             MapperAcceptsNullOptionalNumericFields();
+            FirstRunOnboardingIsDismissibleAndOneTime();
             GuidedSetupStartsAtConnectAndPinsSelection();
             WifiSetupMappingAndGuidedPolicyAreAuthoritative();
             await BrokerRoundTripIsBoundedAndRevisionAware();
@@ -25,6 +26,32 @@ internal static class Program
             Console.Error.WriteLine($"EchoDesk.Desktop.Tests: FAIL\n{error}");
             return 1;
         }
+    }
+
+    private static void FirstRunOnboardingIsDismissibleAndOneTime()
+    {
+        var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var upgradedPreferences = JsonSerializer.Deserialize<DesktopPreferences>("{}", json) ?? new();
+        Assert(!upgradedPreferences.FirstRunCompleted,
+            "an existing settings file without the first-run flag was treated as completed");
+        var persisted = JsonSerializer.Deserialize<DesktopPreferences>(
+            JsonSerializer.Serialize(upgradedPreferences with { FirstRunCompleted = true }, json), json);
+        Assert(persisted?.FirstRunCompleted == true,
+            "first-run completion did not survive local preference serialization");
+
+        var firstLaunch = new FirstRunFlow();
+        Assert(firstLaunch.Step == FirstRunStep.Welcome,
+            "a fresh Desktop install did not begin at the welcome screen");
+        Assert(firstLaunch.Continue() && firstLaunch.Step == FirstRunStep.SetupPrompt,
+            "Continue did not advance to the setup question");
+        Assert(firstLaunch.Finish() && firstLaunch.Step == FirstRunStep.Complete,
+            "Not now/Yes could not dismiss first-run onboarding");
+        Assert(!firstLaunch.Continue() && !firstLaunch.Finish(),
+            "completed first-run onboarding was re-entered");
+
+        var returningLaunch = new FirstRunFlow(alreadyCompleted: true);
+        Assert(returningLaunch.Step == FirstRunStep.Complete,
+            "persisted first-run completion was ignored");
     }
 
     private static void WifiSetupMappingAndGuidedPolicyAreAuthoritative()

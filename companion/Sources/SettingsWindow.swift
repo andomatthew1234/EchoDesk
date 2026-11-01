@@ -132,6 +132,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskSidebarButtons: [NSButton] = []
     var echoDeskPageViews: [NSView] = []
     var echoDeskSelectedPage: EchoDeskDesktopPage = .overview
+    var echoDeskFirstRunOverlay: NSView?
+    var echoDeskFirstRunWelcomeScreen: NSView?
+    var echoDeskFirstRunSetupScreen: NSView?
+    var echoDeskFirstRunYesButton: NSButton?
     var echoDeskConnectionDot: StatusIndicator!
     var echoDeskSidebarConnectionDot: StatusIndicator!
     var echoDeskSidebarConnectionLabel: NSTextField!

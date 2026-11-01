@@ -7,8 +7,11 @@ connection, firmware update, and recovery path.
 
 The normal desktop window matches the Windows product structure: Overview,
 Device Control, Customisation, Setup new device, and Device recovery & updates.
-Setup starts directly at the USB/WiFi connection choice; there is no legal or
-Terms step. WiFi setup never silently joins or alters a Mac's network.
+On first launch, a local two-screen welcome asks whether to set up the first
+EchoDesk now. Choosing Yes opens the existing USB/WiFi setup flow; Not now
+opens Overview. The completed welcome is remembered locally and does not
+depend on a Host or connected device. There is no legal or Terms step. WiFi
+setup never silently joins or alters a Mac's network.
 
 ## Build on macOS
 
@@ -31,6 +34,11 @@ The build verifies the bundled EchoDesk OS before packaging it and produces:
 - `build/EchoDesk Desktop.app`
 - `build/EchoDesk-Desktop-v0.2.7-macos-universal.dmg`
 - `build/EchoDesk-Desktop-v0.2.7-macos-universal.zip`
+
+The EchoDesk DMG uses the checked-in 1536×1024 installer artwork, a matching
+768×512 Finder icon-view window, and fixed left-to-right EchoDesk Desktop →
+Applications placement. The build fails if the artwork or Finder layout cannot
+be applied, preventing an unstyled installer from being released.
 
 Without a Developer ID certificate the local build is ad-hoc signed and is
 for testing only. The release workflow refuses to upload an ad-hoc build. A
