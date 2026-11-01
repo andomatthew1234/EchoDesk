@@ -266,8 +266,16 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${MACOS_CERT_P12_BASE64:-}" ]]; then
-            echo "::error::Refusing to publish an ad-hoc signed macOS build. Configure signing/notarization secrets first."
-            exit 1
+            if [[ "$PRODUCT_MODE" != "echodesk" ]]; then
+              echo "::error::Refusing to publish an ad-hoc signed AI Monitor build. Configure signing/notarization secrets first."
+              exit 1
+            fi
+            # EchoDesk Desktop is intentionally distributed as an independent,
+            # ad-hoc signed build until an Apple Developer ID is configured.
+            # Gatekeeper guidance is published on the EchoDesk download page.
+            codesign --verify --deep --strict --verbose=2 "companion/build/$APP_BUNDLE"
+            echo "::warning::Publishing ad-hoc signed EchoDesk Desktop; notarization checks are unavailable."
+            exit 0
           fi
           codesign --verify --deep --strict --verbose=2 "companion/build/$APP_BUNDLE"
           xcrun stapler validate "companion/build/$APP_BUNDLE"
