@@ -120,6 +120,13 @@ jobs:
           .\scripts\test_echodesk_firmware_package.ps1
           -SourceFirmware .\desktop\firmware\echodesk-mini\2.31.0\echodesk-os.bin
 
+      - name: Build performance helper resource
+        shell: pwsh
+        run: >-
+          dotnet publish
+          .\companion-windows\tools\echodesk-performance-helper\echodesk-performance-helper.csproj
+          -c Release
+
       - name: Test Rust workspace
         working-directory: companion-windows
         run: cargo test --workspace --locked
