@@ -153,7 +153,7 @@ final class EchoDeskSidebarButton: NSButton {
 /// card containing a hidden hit target.
 final class EchoDeskActionTile: NSButton {
     private let symbolView = NSImageView()
-    private let titleLabel = NSTextField(labelWithString: "")
+    private let titleLabel = NSTextField(wrappingLabelWithString: "")
     private let detailLabel = NSTextField(wrappingLabelWithString: "")
     private let disclosure = NSImageView()
     private var tracking: NSTrackingArea?
@@ -181,14 +181,18 @@ final class EchoDeskActionTile: NSButton {
 
         titleLabel.stringValue = title
         titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.maximumNumberOfLines = 0
         detailLabel.stringValue = detail
         detailLabel.font = .systemFont(ofSize: 12)
         detailLabel.textColor = .secondaryLabelColor
         detailLabel.maximumNumberOfLines = 0
         let labels = NSStackView(views: [titleLabel, detailLabel])
         labels.orientation = .vertical
-        labels.alignment = .width
+        labels.alignment = .leading
         labels.spacing = 3
+        for label in [titleLabel, detailLabel] {
+            label.widthAnchor.constraint(equalTo: labels.widthAnchor).isActive = true
+        }
         labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
         labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -260,7 +264,7 @@ final class EchoDeskSetupProgressControl: NSSegmentedControl {
 }
 
 final class EchoDeskScreenPreview: NSView {
-    enum Kind { case home, nowPlaying, clock, dashboard, appearance }
+    enum Kind { case home, nowPlaying, clock, dashboard, appearance, desktop }
     var kind: Kind { didSet { needsDisplay = true } }
     var dark = true { didSet { needsDisplay = true } }
     var primaryText = "12:42" { didSet { needsDisplay = true } }
@@ -272,7 +276,7 @@ final class EchoDeskScreenPreview: NSView {
         wantsLayer = true
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
-        setAccessibilityLabel("EchoDesk screen preview")
+        setAccessibilityLabel(kind == .desktop ? "EchoDesk Desktop appearance preview" : "EchoDesk screen preview")
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
@@ -281,19 +285,24 @@ final class EchoDeskScreenPreview: NSView {
     var musicBackground = "blurredAlbumCover" { didSet { needsDisplay = true } }
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 224) }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
-        // A preview is always the Mini's 320 × 240 display. Fit it within the
-        // allotted stage rather than stretching its contents on a wide Mac.
-        let scale = min((bounds.width - 16) / 320, (bounds.height - 12) / 240)
+        let artworkHeight: CGFloat = kind == .desktop ? 176 : 240
+        let scale = min((bounds.width - 16) / 320, (bounds.height - 12) / artworkHeight)
         guard scale > 0 else { return }
         context.saveGState()
         defer { context.restoreGState() }
-        context.translateBy(x: bounds.midX - 160 * scale, y: bounds.midY - 120 * scale)
+        context.translateBy(x: bounds.midX - 160 * scale, y: bounds.midY - artworkHeight * scale / 2)
         context.scaleBy(x: scale, y: scale)
-        let frame = NSRect(x: 1, y: 1, width: 318, height: 238)
+        let frame = NSRect(x: 1, y: 1, width: 318, height: artworkHeight - 2)
         let shape = NSBezierPath(roundedRect: frame, xRadius: 16, yRadius: 16)
-        (dark ? NSColor(calibratedWhite: 0.075, alpha: 1) : NSColor(calibratedWhite: 0.97, alpha: 1)).setFill()
+        let background = dark ? NSColor(calibratedWhite: 0.075, alpha: 1) : NSColor(calibratedWhite: 0.97, alpha: 1)
+        (kind == .desktop ? NSColor.windowBackgroundColor : background).setFill()
         shape.fill()
         NSColor.separatorColor.setStroke(); shape.lineWidth = 1; shape.stroke()
         shape.addClip()
@@ -314,6 +323,23 @@ final class EchoDeskScreenPreview: NSView {
             image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
         }
         switch kind {
+        case .desktop:
+            // Preview the Mac window using its actual semantic colours. Its
+            // appearance is independent from the Mini's light/dark setting.
+            NSColor.labelColor.withAlphaComponent(0.05).setFill()
+            NSBezierPath(rect: NSRect(x: 0, y: 0, width: 84, height: artworkHeight)).fill()
+            NSColor.separatorColor.setFill()
+            NSBezierPath(rect: NSRect(x: 84, y: 0, width: 1, height: artworkHeight)).fill()
+            for (i, color) in [NSColor.systemRed, .systemYellow, .systemGreen].enumerated() {
+                color.setFill()
+                NSBezierPath(ovalIn: NSRect(x: CGFloat(11 + 12 * i), y: artworkHeight - 21, width: 7, height: 7)).fill()
+            }
+            NSColor.controlAccentColor.withAlphaComponent(0.18).setFill()
+            NSBezierPath(roundedRect: NSRect(x: 8, y: 96, width: 67, height: 22), xRadius: 5, yRadius: 5).fill()
+            label("Overview", NSRect(x: 12, y: 98, width: 61, height: 16), 11, .semibold, .labelColor, .left)
+            label("EchoDesk", NSRect(x: 106, y: 92, width: 194, height: 29), 22, .semibold, .labelColor, .left)
+            let name = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? "Dark appearance" : "Light appearance"
+            label(name, NSRect(x: 106, y: 69, width: 194, height: 18), 13, .regular, .secondaryLabelColor, .left)
         case .clock, .appearance:
             label(primaryText, NSRect(x: 10, y: 103, width: 300, height: 58), 43, .medium, foreground)
             label(secondaryText, NSRect(x: 14, y: 83, width: 292, height: 18), 13, .medium, muted)
@@ -530,6 +556,7 @@ extension SettingsWindowController {
         guard !setupInProgress,
               !defaults.bool(forKey: echoDeskFirstRunOnboardingKey) else { return }
 
+        window?.subtitle = "Welcome"
         let overlay = EchoDeskSurfaceView(.canvas)
         overlay.translatesAutoresizingMaskIntoConstraints = false
         overlay.setAccessibilityElement(true)
@@ -566,8 +593,10 @@ extension SettingsWindowController {
         setupActions.orientation = .horizontal
         setupActions.alignment = .centerY
         setupActions.spacing = 10
-        let setupStack = echoDeskPageStack([setupMark, setupTitle, setupDetail, setupActions])
+        let setupStack = echoDeskPageStack([setupMark, setupTitle, setupDetail])
         setupStack.alignment = .centerX
+        // Keep the pair together beneath the centred welcome text.
+        setupStack.addArrangedSubview(setupActions)
         let setupScreen = echoDeskCard(setupStack, padding: 40)
         setupScreen.isHidden = true
 
@@ -952,7 +981,8 @@ extension SettingsWindowController {
             echoDeskSectionTitle("Quick controls"), brightnessHeading, echoDeskOverviewBrightness,
             echoDeskLabeledControl("Appearance", echoDeskOverviewTheme), buttons, echoDeskCommandStatus,
         ], spacing: 10)
-        let workspace = echoDeskAdaptiveColumns([previewFrame, quickControls], collapseBelow: 690)
+        echoDeskOverviewBrightness.widthAnchor.constraint(equalTo: quickControls.widthAnchor).isActive = true
+        let workspace = echoDeskAdaptiveColumns([previewFrame, quickControls], collapseBelow: 610)
 
         let info = EchoDeskFlowGrid(views: [
             echoDeskCompactFact("Model", echoDeskHardwareLabel), echoDeskCompactFact("Firmware", echoDeskFirmwareLabel),
@@ -1138,7 +1168,7 @@ extension SettingsWindowController {
                 preview: preview(.pcDashboard, .dashboard, primary: "PC Dashboard", secondary: "Four metrics"),
                 content: dashboard)),
             (.preferences, echoDeskFocusedSettingsSection(.preferences,
-                preview: preview(.preferences, .appearance, primary: "EchoDesk", secondary: "Desktop appearance"),
+                preview: preview(.preferences, .desktop, primary: "EchoDesk", secondary: "Desktop appearance"),
                 content: desktop)),
         ]
         echoDeskCustomisationSections = Dictionary(uniqueKeysWithValues: sectionContent.map { ($0.0.rawValue, $0.1) })
@@ -1478,7 +1508,11 @@ extension SettingsWindowController {
         caption.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
         control.setAccessibilityLabel(title)
         let field = NSStackView(views: [caption, control])
-        field.orientation = .vertical; field.alignment = .width; field.spacing = 4
+        field.orientation = .vertical; field.alignment = .leading; field.spacing = 4
+        caption.widthAnchor.constraint(equalTo: field.widthAnchor).isActive = true
+        if control is NSTextField || control is NSPopUpButton {
+            control.widthAnchor.constraint(equalTo: field.widthAnchor).isActive = true
+        }
         return field
     }
 
@@ -2904,6 +2938,7 @@ extension SettingsWindowController {
         echoDeskRecoveryCompletion.isHidden = true
         echoDeskRecoveryDevicePopup.isEnabled = false
         setEchoDeskRecoveryActionsEnabled(false)
+        revealEchoDeskRecoveryFeedback(echoDeskRecoveryStatus)
         if action == 3 { performEchoDeskVerifiedRecovery(port: port) }
         else {
             FirmwareManager.shared.flashPhase = .idle
@@ -3041,6 +3076,16 @@ extension SettingsWindowController {
         echoDeskRecoveryFlashSucceeded = false
         echoDeskRecoveryResetSent = false
         refreshEchoDeskRecoveryDevices()
+        revealEchoDeskRecoveryFeedback(success ? echoDeskRecoveryCompletion : echoDeskRecoveryStatus)
+    }
+
+    private func revealEchoDeskRecoveryFeedback(_ view: NSView?) {
+        // The action can be far below its progress or completion message on a
+        // compact display. Reveal the result only on the active recovery page.
+        guard echoDeskSelectedPage == .recovery, let view, !view.isHidden,
+              let viewport = view.enclosingScrollView else { return }
+        viewport.layoutSubtreeIfNeeded()
+        view.scrollToVisible(view.bounds)
     }
 
     private func setEchoDeskRecoveryActionsEnabled(_ enabled: Bool) {
@@ -3126,8 +3171,6 @@ extension SettingsWindowController {
         let dark = echoDeskQuickTheme?.selectedSegment != 0
         for preview in echoDeskCustomisationPreviews.values { preview.dark = dark }
         echoDeskOverviewPreview?.dark = dark
-        echoDeskCustomisationPreviews[EchoDeskCustomisationSection.preferences.rawValue]?.dark =
-            NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         if let popup = echoDeskSettingControls["clockFormat"] as? NSPopUpButton {
             let clock = echoDeskCustomisationPreviews[EchoDeskCustomisationSection.clock.rawValue]
             let timezone = echoDeskSettingControls["timezone"] as? NSPopUpButton

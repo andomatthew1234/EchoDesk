@@ -1,6 +1,39 @@
 #if ECHODESK_DESKTOP
 import AppKit
 
+/// The user, not a popup's preferred width or a hidden page, sizes the
+/// workspace. AppKit derives an NSWindow's allowable sizes from constraints
+/// reaching its content view. Keep those form constraints inside the viewport;
+/// only the window drives the two dimensions across this boundary.
+final class EchoDeskWindowViewport: NSView {
+    let workspace = NSView()
+    private var workspaceWidth: NSLayoutConstraint?
+    private var workspaceHeight: NSLayoutConstraint?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        workspace.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(workspace)
+        let width = workspace.widthAnchor.constraint(equalToConstant: frameRect.width)
+        let height = workspace.heightAnchor.constraint(equalToConstant: frameRect.height)
+        workspaceWidth = width
+        workspaceHeight = height
+        NSLayoutConstraint.activate([
+            workspace.leadingAnchor.constraint(equalTo: leadingAnchor),
+            workspace.bottomAnchor.constraint(equalTo: bottomAnchor),
+            width, height
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func setFrameSize(_ size: NSSize) {
+        super.setFrameSize(size)
+        workspaceWidth?.constant = size.width
+        workspaceHeight?.constant = size.height
+    }
+}
+
 /// Equal-width native controls in reading order. Resizing changes only their
 /// constraints: the controls (and their first responder and targets) survive.
 final class EchoDeskFlowGrid: NSView {

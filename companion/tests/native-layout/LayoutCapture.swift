@@ -36,6 +36,10 @@ private final class LayoutReview {
         NSApp.appearance = appearance
         controller = SettingsWindowController()
         guard let window = controller.window else { throw CaptureError("No desktop window") }
+        // The saved System preference can clear the test app appearance when
+        // constructing the settings page. Apply the requested test appearance
+        // to both the app (menus/toolbar) and window after that initialization.
+        NSApp.appearance = appearance
         window.appearance = appearance
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -48,6 +52,7 @@ private final class LayoutReview {
         controller.echoDeskFirstRunContinue()
         try shot("first-device")
         controller.echoDeskFirstRunNotNow()
+        try page(.overview, "overview-disconnected")
 
         // Representative fixture values are applied to existing UI bindings,
         // never to the live transport. Device operations cannot run here.
@@ -131,7 +136,8 @@ private final class LayoutReview {
         try shot("recovery")
         try scrolled("recovery-maintenance")
         controller.echoDeskRecoveryCompletion.isHidden = false
-        try scrolled("recovery-complete")
+        controller.echoDeskRecoveryStatus.stringValue = "Installation complete."
+        try shot("recovery-complete")
         controller.presentEchoDeskClockModeChooser()
         try dialog("clock-chooser")
         for mode in ["stopwatch", "countdown", "focus"] {
@@ -150,6 +156,41 @@ private final class LayoutReview {
         }
         let data = try JSONSerialization.data(withJSONObject: results, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: output.appendingPathComponent("geometry.json"))
+        if requestedSize.width == 1440 { try exerciseResizing(window) }
+    }
+
+    /// Exercise the same window in both directions instead of testing only
+    /// independent launches. Use the real sidebar action and native menu.
+    private func exerciseResizing(_ window: NSWindow) throws {
+        controller.selectEchoDeskPage(.customisation)
+        let key = "clock"
+        let category = NSButton()
+        category.identifier = NSUserInterfaceItemIdentifier(key)
+        controller.echoDeskOpenCustomisationSection(category)
+        var passes: [[String: Any]] = []
+        let sequence: [(Int, Int)] = [(900,650), (1100,750), (1280,800), (1440,900)]
+        for (w,h) in sequence {
+            let size = NSSize(width:w, height:h)
+            window.setFrame(NSRect(origin:.zero, size:size), display:true)
+            for hide in [false, true, false] {
+                if controller.echoDeskSidebarView?.isHidden != hide { controller.echoDeskToggleSidebar() }
+                settle()
+                guard let view = controller.echoDeskCustomisationSections[key],
+                      !view.isHidden, controller.echoDeskSelectedPage == .customisation,
+                      let scroll = controller.echoDeskPageViews[EchoDeskDesktopPage.customisation.rawValue] as? NSScrollView else {
+                    throw CaptureError("Resizing lost the selected Clock category")
+                }
+                let expected = CGFloat(w) - (hide ? 0 : (controller.echoDeskSidebarView?.bounds.width ?? 0))
+                passes.append(["target":w,"settledWidth":window.frame.width,"sidebarHidden":hide,
+                               "pageViewport":scroll.bounds.width])
+                guard window.frame.size == size, abs(scroll.bounds.width - expected) < 1,
+                      controller.echoDeskSidebarView?.isHidden == hide else {
+                    throw CaptureError("Window or sidebar didn't settle at requested size: \(passes.last!)")
+                }
+            }
+        }
+        try JSONSerialization.data(withJSONObject: passes, options: [.prettyPrinted])
+            .write(to: output.appendingPathComponent("live-resize.json"))
     }
 
     private func page(_ page: EchoDeskDesktopPage, _ name: String) throws {

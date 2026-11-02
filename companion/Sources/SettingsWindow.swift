@@ -519,7 +519,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         guard let content = window?.contentView else { return }
 
 #if ECHODESK_DESKTOP
-        buildEchoDeskDesktopUI(in: content)
+        let viewport = EchoDeskWindowViewport(frame: content.bounds)
+        window?.contentView = viewport
+        buildEchoDeskDesktopUI(in: viewport.workspace)
         return
 #endif
 
@@ -1428,6 +1430,58 @@ final class FlashDialogController: NSWindowController, NSWindowDelegate {
     private func buildUI() {
         guard let content = window?.contentView else { return }
 
+#if ECHODESK_DESKTOP
+        // The Mini has one supported image. The generic companion's board
+        // selector offers CYD and S3 variants the EchoDesk service rejects.
+        let title = NSTextField(wrappingLabelWithString: "Install EchoDesk OS?")
+        title.font = .systemFont(ofSize: 19, weight: .semibold)
+        let target = NSTextField(wrappingLabelWithString: "EchoDesk Mini · Freenove FNK0114A_2P4")
+        target.font = .systemFont(ofSize: 13, weight: .medium)
+        let info = NSTextField(wrappingLabelWithString: infoText)
+        info.textColor = .secondaryLabelColor
+        let heading = NSTextField(labelWithString: "Before installing")
+        heading.font = .systemFont(ofSize: 13, weight: .semibold)
+        let chipMatches = detectedChip.map { $0.esptoolName == kFirmwareChipESP32.esptoolName } ?? true
+        let checks = NSTextField(wrappingLabelWithString: preflightItems.joined(separator: "\n"))
+        checks.textColor = canStart && chipMatches ? .secondaryLabelColor : .labelColor
+        let detail = chipMatches ? warning : "This chip is not supported by EchoDesk Mini. Nothing can be installed."
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(onCancel))
+        cancel.keyEquivalent = "\u{1b}"
+        startBtn = NSButton(title: "Install EchoDesk OS", target: self, action: #selector(onStart))
+        startBtn.isEnabled = canStart && chipMatches
+        startBtn.bezelStyle = .rounded
+        let actions = NSStackView(views: [NSView(), cancel, startBtn])
+        actions.orientation = .horizontal
+        actions.spacing = 8
+        let stack = NSStackView(views: [title, target, info, heading, checks])
+        if let detail, !detail.isEmpty {
+            let notice = NSTextField(wrappingLabelWithString: detail)
+            notice.textColor = .systemOrange
+            stack.addArrangedSubview(notice)
+        }
+        let beforeActions = stack.arrangedSubviews.last ?? checks
+        stack.addArrangedSubview(actions)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.setCustomSpacing(15, after: title)
+        stack.setCustomSpacing(16, after: info)
+        stack.setCustomSpacing(14, after: beforeActions)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(stack)
+        for child in stack.arrangedSubviews {
+            child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 18)
+        ])
+        content.layoutSubtreeIfNeeded()
+        window?.setContentSize(NSSize(width: content.bounds.width, height: ceil(stack.fittingSize.height + 36)))
+        window?.title = "Install EchoDesk OS"
+        window?.initialFirstResponder = cancel
+#else
         let title = NSTextField(labelWithString: L("flashdlg.title"))
         title.font = NSFont.appFont(.title3, weight: .semibold)
         title.translatesAutoresizingMaskIntoConstraints = false
@@ -1439,11 +1493,7 @@ final class FlashDialogController: NSWindowController, NSWindowDelegate {
         infoLabel.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(infoLabel)
 
-#if ECHODESK_DESKTOP
-        let preflightTitle = NSTextField(labelWithString: "Before installing")
-#else
         let preflightTitle = NSTextField(labelWithString: "Preflight-Check")
-#endif
         preflightTitle.font = NSFont.appFont(.callout, weight: .medium)
         preflightTitle.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(preflightTitle)
@@ -1574,14 +1624,6 @@ final class FlashDialogController: NSWindowController, NSWindowDelegate {
             cancelBtn.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -18),
             cancelBtn.trailingAnchor.constraint(equalTo: startBtn.leadingAnchor, constant: -10),
         ])
-#if ECHODESK_DESKTOP
-        // The warning, preflight checks and localised hint can each wrap.
-        // Size to their measured height so that neither footer button covers them.
-        content.layoutSubtreeIfNeeded()
-        let bodyHeight = content.bounds.maxY - hint.frame.minY
-        let footerHeight = max(cancelBtn.fittingSize.height, startBtn.fittingSize.height)
-        window?.setContentSize(NSSize(width: content.bounds.width, height: ceil(bodyHeight + 18 + footerHeight + 18)))
-        window?.initialFirstResponder = cancelBtn
 #endif
     }
 
@@ -1593,6 +1635,10 @@ final class FlashDialogController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func onStart() {
+#if ECHODESK_DESKTOP
+        guard startBtn.isEnabled else { return }
+        finish(kDisplayVariantST7789)
+#else
         let chosen: String
         if radioS3.state == .on {
             chosen = kDisplayVariantST7701
@@ -1602,6 +1648,7 @@ final class FlashDialogController: NSWindowController, NSWindowDelegate {
             chosen = kDisplayVariantILI9341
         }
         finish(chosen)
+#endif
     }
 
     @objc private func onCancel() {

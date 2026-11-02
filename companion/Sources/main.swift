@@ -128,6 +128,9 @@ func firmwareChip(for variant: String) -> FirmwareChip {
 }
 /// Anzeigename einer Display-Variante fuer Dialoge.
 func displayVariantName(_ variant: String) -> String {
+#if ECHODESK_DESKTOP
+    if variant == kDisplayVariantST7789 { return "EchoDesk Mini (Freenove FNK0114A_2P4, ST7789)" }
+#endif
     switch variant {
     case kDisplayVariantST7789: return L("flashdlg.variant.alt")
     case kDisplayVariantST7701: return L("flashdlg.variant.s3")
@@ -4672,6 +4675,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let missingAssets = fw.missingExpectedAssetNames
         let esptoolReady = fw.resolveEsptool() != nil
         let canStart = fw.hasExpectedReleaseAssets && esptoolReady && !fw.isFlashing && !fw.isDownloading
+#if ECHODESK_DESKTOP
+        let items = [
+            "USB port: \(shortPort)",
+            fw.hasExpectedReleaseAssets ? "EchoDesk OS image available" : "Missing firmware: \(missingAssets.joined(separator: ", "))",
+            esptoolReady ? "Flashing tool available" : "Flashing tool missing",
+            "Keep the USB cable connected until installation finishes."
+        ]
+#else
         let items = [
             "USB: \(shortPort) erkannt",
             fw.hasExpectedReleaseAssets
@@ -4680,6 +4691,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             esptoolReady ? L("flash.pre.tool.ok") : L("flash.pre.tool.missing"),
             L("flash.hint.cable")
         ]
+#endif
         return (items, canStart)
     }
 
@@ -4691,6 +4703,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                               completion: ((Bool, String) -> Void)? = nil) {
         let fw = FirmwareManager.shared
         let alert = NSAlert()
+#if ECHODESK_DESKTOP
+        alert.messageText = "Install EchoDesk OS \(fw.latestVersionDisplay)?"
+        alert.informativeText = "EchoDesk Mini · Freenove FNK0114A_2P4\nUSB: \(port)\n\nKeep the USB cable connected until installation finishes."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Install EchoDesk OS").keyEquivalent = ""
+        alert.addButton(withTitle: "Cancel").keyEquivalent = "\r"
+#else
         alert.messageText = L("flash.confirm.title", fw.latestVersionDisplay)
         alert.informativeText = detectedCYD
             ? L("flash.confirm.cyd")
@@ -4703,6 +4722,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if variant != kDisplayVariantST7701 {
             alert.addButton(withTitle: L("flash.confirm.other"))
         }
+#endif
         present(alert) { [weak self] response in
             guard let self = self else { return }
             switch response {
@@ -4967,6 +4987,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.messageText = L("flash.failed.title")
         // Die andere Display-Variante gibt es nur bei den CYDs; das S3-Board hat
         // genau ein Panel.
+#if ECHODESK_DESKTOP
+        // EchoDesk Mini has no interchangeable display variant.
+        let offerOtherVariant = false
+        alert.informativeText = message
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Try Again")
+        alert.addButton(withTitle: "Close")
+#else
         let offerOtherVariant = variant != kDisplayVariantST7701
         alert.informativeText = offerOtherVariant
             ? "\(message)\n\nRecovery: Du kannst denselben Flash erneut versuchen oder die andere Display-Variante flashen."
@@ -4975,6 +5003,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.addButton(withTitle: L("flash.retry"))
         if offerOtherVariant { alert.addButton(withTitle: L("flash.othervariant.short")) }
         alert.addButton(withTitle: "Schließen")
+#endif
         present(alert) { [weak self] response in
             guard let self = self else { return }
             switch response {
