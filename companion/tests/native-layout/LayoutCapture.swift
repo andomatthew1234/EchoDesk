@@ -4,6 +4,10 @@
 import Cocoa
 import QuartzCore
 
+final class ReviewWindow: NSWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
+}
+
 final class LayoutCaptureDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         DispatchQueue.main.async {
@@ -34,6 +38,7 @@ private final class LayoutReview {
         guard let window = controller.window else { throw CaptureError("No desktop window") }
         window.appearance = appearance
         window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
         window.setFrame(NSRect(origin: .zero, size: requestedSize), display: true)
         guard window.frame.size == requestedSize else {
             throw CaptureError("Requested \(requestedSize); got \(window.frame)")
@@ -61,6 +66,14 @@ private final class LayoutReview {
         controller.echoDeskComponentStatus?.stringValue = "ACTIVE"
         controller.echoDeskComponentDetail?.stringValue = "Codex usage is being sent to EchoDesk."
         controller.echoDeskComponentUpdated?.stringValue = "Last successful update: a minute ago"
+        controller.echoDeskOverviewBrightness?.isEnabled = true
+        controller.echoDeskDeviceBrightness?.isEnabled = true
+        controller.echoDeskOverviewTheme?.isEnabled = true
+        #if VISUAL_CONNECTED_PREVIEW
+        controller.echoDeskOverviewPreview?.primaryText = "Bedside Mode"
+        controller.echoDeskOverviewPreview?.secondaryText = "Open on your device"
+        controller.echoDeskMaintenanceButtons.forEach { $0.isEnabled = true }
+        #endif
         controller.echoDeskAppButtons.values.flatMap { $0 }.forEach { $0.isEnabled = true }
         try page(.overview, "overview")
         try scrolled("overview-lower")
@@ -73,7 +86,8 @@ private final class LayoutReview {
         try sheet("confirm-reset")
 
         try page(.customisation, "customisation")
-        for key in controller.echoDeskCustomisationSections.keys.sorted() {
+        for key in Set(controller.echoDeskCustomisationSections.keys).union(["bedside"]).sorted() {
+            controller.selectEchoDeskPage(.customisation)
             let button = NSButton()
             button.identifier = NSUserInterfaceItemIdentifier(key)
             controller.echoDeskOpenCustomisationSection(button)
@@ -101,6 +115,10 @@ private final class LayoutReview {
                 controller.echoDeskSetupDeviceName.stringValue = "EchoDesk Mini"
                 controller.echoDeskSetupDeviceFirmware.stringValue = "EchoDesk OS 2.33.0"
                 controller.echoDeskSetupDeviceSerial.stringValue = "/dev/cu.usbserial-fixture"
+                controller.echoDeskSetupDeviceModel.stringValue = "Model: EchoDesk Mini"
+                #if VISUAL_USB_START
+                controller.echoDeskSetupStartButton?.isEnabled = true
+                #endif
             }
             try shot("setup-" + name)
         }
@@ -198,8 +216,12 @@ private final class LayoutReview {
             view.subviews.forEach(inspect)
         }
         inspect(root)
-        results[name] = ["windowWidth": window.frame.width, "windowHeight": window.frame.height,
+        results[name] = ["requestedParentWidth": requestedSize.width, "requestedParentHeight": requestedSize.height,
+                         "windowWidth": window.frame.width, "windowHeight": window.frame.height,
                          "pixelsWide": rep.pixelsWide, "pixelsHigh": rep.pixelsHigh, "items": frames]
+        if override == nil && requestedSize != window.frame.size {
+            print("WINDOW GREW: \(name), requested \(requestedSize), settled \(window.frame.size)")
+        }
         print("Captured \(name) (\(rep.pixelsWide)×\(rep.pixelsHigh))")
     }
 }

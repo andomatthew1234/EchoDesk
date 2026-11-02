@@ -671,6 +671,7 @@ extension SettingsWindowController {
         }
         let add = NSButton(title: "Add alarm", target: self, action: #selector(echoDeskBedsideAddAlarm))
         add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+        add.imagePosition = .imageLeading
         add.isEnabled = bedsideStateReady && echoDeskBedsideAlarmDrafts.count < 8
         let autoSave = bedsideMuted("Changes save automatically on EchoDesk.")
         let actions = NSStackView(views: [autoSave, NSView(), add])
@@ -796,6 +797,7 @@ extension SettingsWindowController {
         ], spacing: 8)
         let addTime = NSButton(title: "Add schedule point", target: self, action: #selector(echoDeskBedsideAddSchedule))
         addTime.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+        addTime.imagePosition = .imageLeading
         addTime.isEnabled = bedsideStateReady && echoDeskBedsideScheduleDrafts.count < 8
         echoDeskBedsideScheduleAddButton = addTime
         let timelineTools = EchoDeskAdaptiveStackView(views: [timeline, exactEditor], collapseBelow: 820)

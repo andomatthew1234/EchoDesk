@@ -161,6 +161,7 @@ final class EchoDeskActionTile: NSButton {
 
     init(title: String, detail: String, symbol: String, target: AnyObject?, action: Selector?) {
         super.init(frame: .zero)
+        self.title = ""
         self.target = target
         self.action = action
         isBordered = false
@@ -1348,6 +1349,8 @@ extension SettingsWindowController {
         let header = echoDeskPageHeader("Device recovery & updates",
             "Update EchoDesk OS or restore a device over USB.")
         echoDeskRecoveryDevicePopup = EchoDeskPopupButton(frame: .zero, pullsDown: false)
+        echoDeskRecoveryDevicePopup.target = self
+        echoDeskRecoveryDevicePopup.action = #selector(echoDeskRecoveryScan)
         echoDeskRecoveryDevicePopup.translatesAutoresizingMaskIntoConstraints = false
         let recoveryPopupMinimum = echoDeskRecoveryDevicePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 240)
         recoveryPopupMinimum.priority = .defaultHigh
@@ -2482,32 +2485,41 @@ extension SettingsWindowController {
     @objc private func echoDeskRevealUnknownDevices() { echoDeskShowUnknownDevices = true; refreshEchoDeskSetupDevices() }
     @objc private func echoDeskSetupPortChanged() { updateEchoDeskSetupDeviceCard() }
 
+    private func updateEchoDeskDeviceChoices(_ popup: NSPopUpButton, entries: [(String, String)],
+                                             placeholder: String) {
+        let titles = entries.isEmpty ? [placeholder] : entries.map { $0.1 }
+        // Refresh runs regularly while these menus may be open. Preserve the
+        // live NSMenu (including keyboard focus) unless its contents changed.
+        if popup.itemTitles != titles {
+            let selected = popup.selectedItem?.representedObject as? String
+            popup.removeAllItems()
+            if entries.isEmpty { popup.addItem(withTitle: placeholder) }
+            for (port, title) in entries {
+                popup.addItem(withTitle: title)
+                popup.lastItem?.representedObject = port
+            }
+            if let selected, let item = popup.itemArray.first(where: { ($0.representedObject as? String) == selected }) {
+                popup.select(item)
+            }
+        }
+        popup.isEnabled = !entries.isEmpty
+    }
+
     func refreshEchoDeskSetupDevices() {
         guard echoDeskSetupUSBPopup != nil, let monitor else { return }
-        let selected = echoDeskSetupUSBPopup.selectedItem?.representedObject as? String
-        echoDeskSetupUSBPopup.removeAllItems()
+        var entries: [(String, String)] = []
         if monitor.serialPort.state == .connected,
            let port = monitor.serialPort.connectedPort,
            DeviceRegistry.shared.currentProfile() != nil {
-            echoDeskSetupUSBPopup.addItem(withTitle: "EchoDesk Mini — \(port)")
-            echoDeskSetupUSBPopup.lastItem?.representedObject = port
+            entries.append((port, "EchoDesk Mini — \(port)"))
         }
         if echoDeskShowUnknownDevices {
             for port in monitor.serialPort.availablePortPaths()
-                where !(echoDeskSetupUSBPopup.itemArray.contains { ($0.representedObject as? String) == port }) {
-                echoDeskSetupUSBPopup.addItem(withTitle: "Unidentified serial device — \(port)")
-                echoDeskSetupUSBPopup.lastItem?.representedObject = port
+                where !entries.contains(where: { $0.0 == port }) {
+                entries.append((port, "Unidentified serial device — \(port)"))
             }
         }
-        if echoDeskSetupUSBPopup.numberOfItems == 0 {
-            echoDeskSetupUSBPopup.addItem(withTitle: "No known EchoDesk detected")
-            echoDeskSetupUSBPopup.isEnabled = false
-        } else {
-            echoDeskSetupUSBPopup.isEnabled = true
-            if let selected, let item = echoDeskSetupUSBPopup.itemArray.first(where: { ($0.representedObject as? String) == selected }) {
-                echoDeskSetupUSBPopup.select(item)
-            }
-        }
+        updateEchoDeskDeviceChoices(echoDeskSetupUSBPopup, entries: entries, placeholder: "No known EchoDesk detected")
         updateEchoDeskSetupDeviceCard()
     }
 
@@ -2518,7 +2530,8 @@ extension SettingsWindowController {
         echoDeskSetupStartButton?.isEnabled = port != nil
         echoDeskSetupDeviceName?.stringValue = profile?.friendlyName ?? (port == nil ? "No known EchoDesk found" : "Unidentified serial device")
         echoDeskSetupDeviceModel?.stringValue = "Model: \(connected ? "Freenove FNK0114A_2P4" : "Confirmation required")"
-        echoDeskSetupDeviceFirmware?.stringValue = "Firmware: \(monitor?.serialPort.deviceFirmwareVersion.map { "EchoDesk OS \($0)" } ?? "Not reported")"
+        let installed = connected ? monitor?.serialPort.deviceFirmwareVersion : nil
+        echoDeskSetupDeviceFirmware?.stringValue = "Firmware: \(installed.map { "EchoDesk OS \($0)" } ?? "Not reported")"
         echoDeskSetupDeviceSerial?.stringValue = "USB Serial: \(port ?? "—")"
     }
 
@@ -2798,25 +2811,17 @@ extension SettingsWindowController {
 
     @objc private func echoDeskRecoveryScan() { refreshEchoDeskRecoveryDevices() }
     func refreshEchoDeskRecoveryDevices() {
-        guard echoDeskRecoveryDevicePopup != nil, let monitor else { return }
-        let selected = echoDeskRecoveryDevicePopup.selectedItem?.representedObject as? String
-        echoDeskRecoveryDevicePopup.removeAllItems()
-        for port in monitor.serialPort.availablePortPaths() {
+        guard echoDeskRecoveryDevicePopup != nil, echoDeskPendingRecoveryPort == nil, let monitor else { return }
+        let entries: [(String, String)] = monitor.serialPort.availablePortPaths().map { port in
             let prefix = port == monitor.serialPort.connectedPort && monitor.serialPort.state == .connected
                 ? "EchoDesk Mini" : "USB serial device"
-            echoDeskRecoveryDevicePopup.addItem(withTitle: "\(prefix) — \(port)")
-            echoDeskRecoveryDevicePopup.lastItem?.representedObject = port
+            return (port, "\(prefix) — \(port)")
         }
-        if echoDeskRecoveryDevicePopup.numberOfItems == 0 {
-            echoDeskRecoveryDevicePopup.addItem(withTitle: "No serial devices detected")
-            echoDeskRecoveryDevicePopup.isEnabled = false
-        } else {
-            echoDeskRecoveryDevicePopup.isEnabled = true
-            if let selected, let item = echoDeskRecoveryDevicePopup.itemArray.first(where: { ($0.representedObject as? String) == selected }) {
-                echoDeskRecoveryDevicePopup.select(item)
-            }
-        }
-        let installed = monitor.serialPort.deviceFirmwareVersion
+        updateEchoDeskDeviceChoices(echoDeskRecoveryDevicePopup, entries: entries, placeholder: "No serial devices detected")
+        let selected = echoDeskRecoveryDevicePopup.selectedItem?.representedObject as? String
+        let known = selected != nil && selected == monitor.serialPort.connectedPort && monitor.serialPort.state == .connected
+        let installed = known ? monitor.serialPort.deviceFirmwareVersion : nil
+        setEchoDeskRecoveryActionsEnabled(selected != nil)
         let available = FirmwareManager.shared.latestFirmwareVersionTag ?? EchoDeskFirmwareBundle.version
         echoDeskRecoveryInstalledVersion?.stringValue = installed.map { "EchoDesk OS \($0)" } ?? "Not reported"
         echoDeskRecoveryAvailableVersion?.stringValue = "EchoDesk OS \(available)"
@@ -2989,13 +2994,12 @@ extension SettingsWindowController {
         echoDeskRecoveryOperationStarted = false
         echoDeskRecoveryFlashSucceeded = false
         echoDeskRecoveryResetSent = false
-        echoDeskRecoveryDevicePopup?.isEnabled = (echoDeskRecoveryDevicePopup?.numberOfItems ?? 0) > 0
-        setEchoDeskRecoveryActionsEnabled(true)
+        refreshEchoDeskRecoveryDevices()
     }
 
     private func setEchoDeskRecoveryActionsEnabled(_ enabled: Bool) {
         func update(_ view: NSView) {
-            if let control = view as? NSControl { control.isEnabled = enabled }
+            if let control = view as? NSButton { control.isEnabled = enabled }
             view.subviews.forEach(update)
         }
         echoDeskRecoveryActions?.arrangedSubviews.forEach(update)
