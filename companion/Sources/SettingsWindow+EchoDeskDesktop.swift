@@ -223,6 +223,11 @@ final class EchoDeskActionTile: NSButton {
         super.hitTest(point) == nil ? nil : self
     }
 
+    override var focusRingMaskBounds: NSRect { bounds }
+    override func drawFocusRingMask() {
+        NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
+    }
+
     override func updateTrackingAreas() {
         if let tracking { removeTrackingArea(tracking) }
         tracking = NSTrackingArea(rect: bounds, options: [.activeInKeyWindow, .mouseEnteredAndExited],
@@ -272,6 +277,8 @@ final class EchoDeskScreenPreview: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     var metrics: [String] = [] { didSet { needsDisplay = true } }
+    var musicLayout = "albumCover" { didSet { needsDisplay = true } }
+    var musicBackground = "blurredAlbumCover" { didSet { needsDisplay = true } }
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 224) }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -311,12 +318,33 @@ final class EchoDeskScreenPreview: NSView {
             label(primaryText, NSRect(x: 10, y: 103, width: 300, height: 58), 43, .medium, foreground)
             label(secondaryText, NSRect(x: 14, y: 83, width: 292, height: 18), 13, .medium, muted)
         case .nowPlaying:
-            let art = NSRect(x: 20, y: 69, width: 100, height: 100)
+            // Match the Mini's centre-cover and side-by-side compositions.
+            if musicBackground == "blurredAlbumCover" {
+                NSColor.systemIndigo.withAlphaComponent(0.13).setFill(); shape.fill()
+            } else if musicBackground == "audioBars" {
+                foreground.withAlphaComponent(0.12).setFill()
+                for (index, height) in [22, 40, 32, 64, 48, 76, 37, 56, 28, 45, 62, 31, 44, 24, 39, 18].enumerated() {
+                    NSBezierPath(rect: NSRect(x: CGFloat(index * 20), y: 0, width: 15, height: CGFloat(height))).fill()
+                }
+            }
+            let centred = musicLayout == "albumCover"
+            let art = centred ? NSRect(x: 106, y: 98, width: 108, height: 108)
+                              : (musicLayout == "carPlay" ? NSRect(x: 8, y: 66, width: 126, height: 126)
+                                                         : NSRect(x: 14, y: 66, width: 112, height: 112))
             NSColor.systemIndigo.withAlphaComponent(0.75).setFill()
-            NSBezierPath(roundedRect: art, xRadius: 10, yRadius: 10).fill()
-            symbol("music.note", rect: NSRect(x: 51, y: 101, width: 38, height: 38), color: .white)
-            label(primaryText, NSRect(x: 134, y: 121, width: 166, height: 24), 18, .semibold, foreground, .left)
-            label(secondaryText, NSRect(x: 134, y: 99, width: 166, height: 20), 13, .regular, muted, .left)
+            let radius: CGFloat = musicLayout == "echoDesk" ? 0 : 14
+            NSBezierPath(roundedRect: art, xRadius: radius, yRadius: radius).fill()
+            symbol("music.note", rect: NSRect(x: art.midX - 19, y: art.midY - 19, width: 38, height: 38), color: .white)
+            label(primaryText, centred ? NSRect(x: 16, y: 70, width: 288, height: 24)
+                                       : NSRect(x: 146, y: 137, width: 164, height: 24),
+                  18, .semibold, foreground, centred ? .center : .left)
+            label(secondaryText, centred ? NSRect(x: 16, y: 49, width: 288, height: 18)
+                                         : NSRect(x: 146, y: 110, width: 164, height: 18),
+                  13, .regular, muted, centred ? .center : .left)
+            for (i, name) in ["backward.fill", "play.fill", "forward.fill"].enumerated() {
+                let x = centred ? 92 + 60 * i : 160 + 54 * i
+                symbol(name, rect: NSRect(x: CGFloat(x), y: 21, width: 17, height: 15), color: muted)
+            }
         case .dashboard:
             label(primaryText, NSRect(x: 16, y: 193, width: 288, height: 23), 16, .semibold, foreground, .left)
             let items = Array(metrics.prefix(4))
@@ -350,6 +378,7 @@ final class EchoDeskAdaptiveStackView: NSStackView {
     private let wideAlignment: NSLayoutConstraint.Attribute
     private let wideGap: CGFloat
     private let compactGap: CGFloat
+    private var stackedWidths: [NSLayoutConstraint] = []
 
     init(views: [NSView], collapseBelow: CGFloat, equalColumns: Bool = true,
          wideAlignment: NSLayoutConstraint.Attribute = .top, wideGap: CGFloat = 16, compactGap: CGFloat = 12) {
@@ -366,6 +395,7 @@ final class EchoDeskAdaptiveStackView: NSStackView {
         for view in views {
             addArrangedSubview(view)
         }
+        stackedWidths = views.map { $0.widthAnchor.constraint(equalTo: widthAnchor) }
         spacing = wideGap
         orientation = .horizontal
         alignment = wideAlignment
@@ -378,8 +408,10 @@ final class EchoDeskAdaptiveStackView: NSStackView {
         let compact = newSize.width > 0 && newSize.width < collapseBelow
         let next: NSUserInterfaceLayoutOrientation = compact ? .vertical : .horizontal
         if orientation != next {
+            if !compact { NSLayoutConstraint.deactivate(stackedWidths) }
             orientation = next
-            alignment = compact ? .width : wideAlignment
+            alignment = compact ? .leading : wideAlignment
+            if compact { NSLayoutConstraint.activate(stackedWidths) }
             spacing = compact ? compactGap : wideGap
             distribution = compact ? .fill : (equalColumns ? .fillEqually : .fill)
             invalidateIntrinsicContentSize()
@@ -712,7 +744,7 @@ extension SettingsWindowController {
         let stage = NSView()
         let body = NSStackView(views: [banner, stage])
         body.orientation = .vertical
-        body.alignment = .width
+        body.alignment = .leading
         body.spacing = 0
         body.detachesHiddenViews = true
         body.translatesAutoresizingMaskIntoConstraints = false
@@ -722,6 +754,8 @@ extension SettingsWindowController {
             body.trailingAnchor.constraint(equalTo: canvas.trailingAnchor),
             body.topAnchor.constraint(equalTo: canvas.safeAreaLayoutGuide.topAnchor),
             body.bottomAnchor.constraint(equalTo: canvas.safeAreaLayoutGuide.bottomAnchor),
+            banner.widthAnchor.constraint(equalTo: body.widthAnchor),
+            stage.widthAnchor.constraint(equalTo: body.widthAnchor),
         ])
 
         let pages: [NSView] = [
@@ -1084,7 +1118,7 @@ extension SettingsWindowController {
                 preview: preview(.nowPlaying, .nowPlaying, primary: "Song title", secondary: "Artist"),
                 content: nowPlaying)),
             (.codex, echoDeskFocusedSettingsSection(.codex,
-                preview: preview(.codex, .home, primary: "Codex Usage", secondary: "Session and weekly limits"),
+                preview: preview(.codex, .dashboard, primary: "Codex Usage", secondary: "Usage windows"),
                 content: codex)),
             (.performance, echoDeskFocusedSettingsSection(.performance,
                 preview: preview(.performance, .dashboard, primary: "Performance", secondary: "Live PC metrics"),
@@ -2379,6 +2413,7 @@ extension SettingsWindowController {
 
     @objc private func echoDeskDesktopAppearanceChanged(_ sender: NSPopUpButton) {
         applyEchoDeskDesktopAppearance(sender.indexOfSelectedItem)
+        refreshEchoDeskCustomisationPreviews()
         UserDefaults.standard.set(sender.indexOfSelectedItem, forKey: "EchoDeskDesktopAppearance")
     }
 
@@ -3078,18 +3113,26 @@ extension SettingsWindowController {
 
     private func refreshEchoDeskCustomisationPreviews() {
         let dark = echoDeskQuickTheme?.selectedSegment != 0
-        echoDeskCustomisationPreviews[EchoDeskCustomisationSection.display.rawValue]?.dark = dark
+        for preview in echoDeskCustomisationPreviews.values { preview.dark = dark }
         echoDeskOverviewPreview?.dark = dark
         echoDeskCustomisationPreviews[EchoDeskCustomisationSection.preferences.rawValue]?.dark =
             NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         if let popup = echoDeskSettingControls["clockFormat"] as? NSPopUpButton {
-            echoDeskCustomisationPreviews[EchoDeskCustomisationSection.clock.rawValue]?.primaryText =
-                popup.selectedItem?.representedObject as? String == "24h" ? "18:42" : "6:42"
+            let clock = echoDeskCustomisationPreviews[EchoDeskCustomisationSection.clock.rawValue]
+            let timezone = echoDeskSettingControls["timezone"] as? NSPopUpButton
+            let format = DateFormatter()
+            if let zone = timezone?.selectedItem?.representedObject as? String { format.timeZone = TimeZone(identifier: zone) }
+            format.dateFormat = popup.selectedItem?.representedObject as? String == "24h" ? "HH:mm" : "h:mm a"
+            clock?.primaryText = format.string(from: Date())
+            clock?.secondaryText = timezone?.titleOfSelectedItem ?? "Device time"
         }
-        if let layout = echoDeskSettingControls["nowPlayingLayout"] as? NSPopUpButton {
-            echoDeskCustomisationPreviews[EchoDeskCustomisationSection.nowPlaying.rawValue]?.secondaryText =
-                layout.titleOfSelectedItem ?? "Now Playing"
-        }
+        let music = echoDeskCustomisationPreviews[EchoDeskCustomisationSection.nowPlaying.rawValue]
+        music?.musicLayout = (echoDeskSettingControls["nowPlayingLayout"] as? NSPopUpButton)?.selectedItem?.representedObject as? String ?? "albumCover"
+        music?.musicBackground = (echoDeskSettingControls["nowPlayingBackground"] as? NSPopUpButton)?.selectedItem?.representedObject as? String ?? "blurredAlbumCover"
+        let window = (echoDeskSettingControls["codexPreferredDisplay"] as? NSPopUpButton)?.selectedItem?.representedObject as? String
+        let mode = (echoDeskSettingControls["codexPercentageMode"] as? NSPopUpButton)?.titleOfSelectedItem ?? "Used"
+        let windows = window == "session" ? ["5-hour"] : (window == "weekly" ? ["Weekly"] : ["5-hour", "Weekly"])
+        echoDeskCustomisationPreviews[EchoDeskCustomisationSection.codex.rawValue]?.metrics = windows.map { $0 + " · " + mode }
         let selectedMetrics = echoDeskPcDashboardPopups.compactMap { $0.selectedItem?.title }.filter { $0 != "None" }
         let dashboard = echoDeskCustomisationPreviews[EchoDeskCustomisationSection.pcDashboard.rawValue]
         dashboard?.secondaryText = "Choose your metrics"

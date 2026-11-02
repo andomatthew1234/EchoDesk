@@ -216,9 +216,28 @@ private final class LayoutReview {
             view.subviews.forEach(inspect)
         }
         inspect(root)
-        results[name] = ["requestedParentWidth": requestedSize.width, "requestedParentHeight": requestedSize.height,
-                         "windowWidth": window.frame.width, "windowHeight": window.frame.height,
-                         "pixelsWide": rep.pixelsWide, "pixelsHigh": rep.pixelsHigh, "items": frames]
+        var record: [String: Any] = ["requestedParentWidth": requestedSize.width, "requestedParentHeight": requestedSize.height,
+                                     "windowWidth": window.frame.width, "windowHeight": window.frame.height,
+                                     "pixelsWide": rep.pixelsWide, "pixelsHigh": rep.pixelsHigh, "items": frames]
+        if override == nil && controller.echoDeskFirstRunOverlay == nil,
+           let scroll = controller.echoDeskPageViews[controller.echoDeskSelectedPage.rawValue] as? NSScrollView,
+           let document = scroll.documentView, let page = document.subviews.first {
+            func position(_ view: NSView?) -> [String: CGFloat] {
+                guard let view else { return [:] }
+                let rect = view.convert(view.bounds, to: root)
+                return ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height]
+            }
+            record["pageLayout"] = ["sidebar": position(controller.echoDeskSidebarView),
+                                    "stage": position(scroll.superview), "scroll": position(scroll),
+                                    "clip": position(scroll.contentView), "document": position(document),
+                                    "page": position(page)]
+            let sidebar = controller.echoDeskSidebarView?.convert(controller.echoDeskSidebarView!.bounds, to: root)
+            let pageRect = page.convert(page.bounds, to: root)
+            if let sidebar, pageRect.minX - sidebar.maxX > max(56, window.frame.width * 0.08) {
+                print("LARGE LEADING GAP: \(name), sidebar ends at \(sidebar.maxX); page starts at \(pageRect.minX)")
+            }
+        }
+        results[name] = record
         if override == nil && requestedSize != window.frame.size {
             print("WINDOW GREW: \(name), requested \(requestedSize), settled \(window.frame.size)")
         }
