@@ -741,22 +741,33 @@ extension SettingsWindowController {
         banner = NotificationBanner()
         banner.isHidden = true
         banner.translatesAutoresizingMaskIntoConstraints = false
+        // A detached arranged banner can impose its fitting width on the
+        // entire NSWindow even while hidden. Anchor the page viewport directly
+        // to the canvas; the banner only changes its top edge when visible.
         let stage = NSView()
-        let body = NSStackView(views: [banner, stage])
-        body.orientation = .vertical
-        body.alignment = .leading
-        body.spacing = 0
-        body.detachesHiddenViews = true
-        body.translatesAutoresizingMaskIntoConstraints = false
-        canvas.addSubview(body)
+        stage.translatesAutoresizingMaskIntoConstraints = false
+        canvas.addSubview(stage)
+        canvas.addSubview(banner)
+        let unobstructed = stage.topAnchor.constraint(equalTo: canvas.safeAreaLayoutGuide.topAnchor)
+        let belowNotice = stage.topAnchor.constraint(equalTo: banner.bottomAnchor, constant: 6)
         NSLayoutConstraint.activate([
-            body.leadingAnchor.constraint(equalTo: canvas.leadingAnchor),
-            body.trailingAnchor.constraint(equalTo: canvas.trailingAnchor),
-            body.topAnchor.constraint(equalTo: canvas.safeAreaLayoutGuide.topAnchor),
-            body.bottomAnchor.constraint(equalTo: canvas.safeAreaLayoutGuide.bottomAnchor),
-            banner.widthAnchor.constraint(equalTo: body.widthAnchor),
-            stage.widthAnchor.constraint(equalTo: body.widthAnchor),
+            stage.leadingAnchor.constraint(equalTo: canvas.leadingAnchor),
+            stage.trailingAnchor.constraint(equalTo: canvas.trailingAnchor),
+            stage.bottomAnchor.constraint(equalTo: canvas.safeAreaLayoutGuide.bottomAnchor),
+            unobstructed,
+            banner.leadingAnchor.constraint(equalTo: canvas.leadingAnchor, constant: EchoDeskDesign.pageInset),
+            banner.trailingAnchor.constraint(equalTo: canvas.trailingAnchor, constant: -EchoDeskDesign.pageInset),
+            banner.topAnchor.constraint(equalTo: canvas.safeAreaLayoutGuide.topAnchor, constant: 8),
         ])
+        banner.visibilityChanged = { visible in
+            if visible {
+                unobstructed.isActive = false
+                belowNotice.isActive = true
+            } else {
+                belowNotice.isActive = false
+                unobstructed.isActive = true
+            }
+        }
 
         let pages: [NSView] = [
             buildEchoDeskOverviewPage(),

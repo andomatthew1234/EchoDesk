@@ -25,6 +25,8 @@ final class NotificationBanner: NSView {
     private let closeButton = NSButton()
 
     private var action: (() -> Void)?
+    /// EchoDesk's viewport only reserves space for a visible notice.
+    var visibilityChanged: ((Bool) -> Void)?
     /// Wofuer das Banner gerade steht. Erlaubt es, einen Hinweis gezielt
     /// wieder einzuklappen, wenn sich sein Anlass erledigt hat.
     private(set) var noticeID: String?
@@ -129,6 +131,7 @@ final class NotificationBanner: NSView {
 
         setAccessibilityLabel("\(title). \(detail)")
         isHidden = false
+        visibilityChanged?(true)
     }
 
     @objc private func performAction() {
@@ -139,6 +142,7 @@ final class NotificationBanner: NSView {
 
     @objc func dismiss() {
         isHidden = true
+        visibilityChanged?(false)
         action = nil
         noticeID = nil
     }
