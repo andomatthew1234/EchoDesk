@@ -33,6 +33,17 @@ def prepare(temp):
                  "presentEchoDeskClockConfiguration", "closeEchoDeskClockWindow"):
         source = source.replace(f"private func {name}(", f"fileprivate func {name}(")
     ui.write_text(source)
+    # A hosted Mac can have a 1024x768 virtual screen. Override just the
+    # WindowServer's "fit on this monitor" placement policy in the review build;
+    # otherwise a requested 1440x900 window silently shrinks to 1024x677.
+    # Every content view, sheet, toolbar and real size-dependent constraint
+    # continues to be the one from the selected revision.
+    settings = sources / "SettingsWindow.swift"
+    shell = settings.read_text()
+    marker = "convenience init() {\n        let window = NSWindow("
+    if shell.count(marker) != 1:
+        raise RuntimeError("Main NSWindow initializer changed; inspect the capture harness")
+    settings.write_text(shell.replace(marker, marker.replace("= NSWindow(", "= ReviewWindow(")))
     with ui.open("a") as f:
         f.write("\n" + (HERE / "LayoutCapture.swift").read_text())
 
