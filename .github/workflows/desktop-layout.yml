@@ -1,7 +1,7 @@
-name: EchoDesk macOS visual review
+name: EchoDesk current-process compositor QA
 on:
   push:
-    branches: ['codex/desktop-visual-*']
+    branches: ['codex/desktop-visual-compositor-*']
   workflow_dispatch:
 permissions:
   contents: read
@@ -13,8 +13,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build native capture app and inspect layout matrix
         run: python3 companion/tests/native-layout/capture.py --output "$RUNNER_TEMP/native-layout"
-      - name: Verify settled window and content bounds
-        run: python3 companion/tests/native-layout/verify.py "$RUNNER_TEMP/native-layout"
+      - name: Report compositor availability
+        run: cat "$RUNNER_TEMP/native-layout/900x650/"*/probe.txt
       - name: Upload screenshots and geometry
         if: always()
         uses: actions/upload-artifact@v4

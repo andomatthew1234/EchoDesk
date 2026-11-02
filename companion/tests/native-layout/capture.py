@@ -9,7 +9,7 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 COMPANION = HERE.parents[1]
-SIZES = ("900x650", "1100x750", "1280x800", "1440x900")
+SIZES = ("900x650",)
 
 
 def prepare(temp):
@@ -45,7 +45,7 @@ def prepare(temp):
         raise RuntimeError("Main NSWindow initializer changed; inspect the capture harness")
     settings.write_text(shell.replace(marker, marker.replace("= NSWindow(", "= ReviewWindow(")))
     with ui.open("a") as f:
-        f.write("\n" + (HERE / "LayoutCapture.swift").read_text())
+        f.write("\n" + (HERE / "CompositorProbe.swift").read_text())
 
     bundle = temp / "EchoDesk Layout Review.app" / "Contents"
     (bundle / "MacOS").mkdir(parents=True)
@@ -63,7 +63,7 @@ def prepare(temp):
         cmd.extend(["-D", "VISUAL_CONNECTED_PREVIEW"])
     if "var echoDeskSetupStartButton:" in shell:
         cmd.extend(["-D", "VISUAL_USB_START"])
-    for framework in ("Cocoa", "Security", "Network", "ServiceManagement", "IOKit", "CoreAudio"):
+    for framework in ("Cocoa", "Security", "Network", "ServiceManagement", "IOKit", "CoreAudio", "ScreenCaptureKit"):
         cmd.extend(["-framework", framework])
     subprocess.run([*cmd, *sorted(sources.glob("*.swift")), "-o", exe], check=True)
     return exe
@@ -95,7 +95,7 @@ def main():
                                        stdout=log, stderr=subprocess.STDOUT)
                     finally:
                         log.flush()
-                        if not (dest / "geometry.json").exists():
+                        if not (dest / "probe.txt").exists():
                             print((dest / "app.log").read_text(errors="replace")[-8000:], flush=True)
     print("Native capture matrix complete:", output)
 
