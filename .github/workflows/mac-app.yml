@@ -235,7 +235,7 @@ jobs:
           version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
           test "EchoDesk-Desktop-v$version-macos-universal" = "$RELEASE_STEM"
           executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
-          lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/$executable"
+          lipo "$app/Contents/MacOS/$executable" -verify_arch arm64 x86_64
 
       - name: Smoke test bundled display-plugin helper
         run: |
