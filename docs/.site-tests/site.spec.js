@@ -213,7 +213,7 @@ for (const size of sizes) {
     await expect(page.locator(".download-primary")).toHaveAttribute("href", "./download-windows.html");
     await expect(page.locator(".download-portable")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.10/EchoDesk-Desktop-v0.2.10-win-x64.zip");
     await expect(page.locator(".download-macos")).toHaveAttribute("href", "./download-macos.html");
-    await expect(page.locator(".download-macos-zip")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.10/EchoDesk-Desktop-v0.2.10-macos-universal.zip");
+    await expect(page.locator(".download-macos-zip")).toHaveAttribute("href", "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.11/EchoDesk-Desktop-v0.2.11-macos-universal.zip");
     await expect(page.locator("[data-installer-sha256]")).toHaveText(/Pending final|^[A-F0-9]{64}$/);
     await expect(page.locator("[data-portable-sha256]")).toHaveText(/Pending final|^[A-F0-9]{64}$/);
     await expect(page.locator("[data-macos-dmg-sha256]")).toHaveText(/Pending final|^[A-F0-9]{64}$/);
@@ -234,8 +234,8 @@ const guidePages = [
   {
     name: "macOS",
     path: "./download-macos.html",
-    url: "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.10/EchoDesk-Desktop-v0.2.10-macos-universal.dmg",
-    filename: "EchoDesk-Desktop-v0.2.10-macos-universal.dmg",
+    url: "https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.11/EchoDesk-Desktop-v0.2.11-macos-universal.dmg",
+    filename: "EchoDesk-Desktop-v0.2.11-macos-universal.dmg",
     steps: 6
   },
   {

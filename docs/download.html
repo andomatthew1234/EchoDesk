@@ -82,7 +82,7 @@
           <button class="icon-button theme-toggle" type="button" aria-label="Switch to dark theme" data-theme-toggle>
             <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/><circle cx="12" cy="12" r="4"/></svg>
           </button>
-          <a class="button button-dark nav-buy" href="#download">Download 0.2.10</a>
+          <a class="button button-dark nav-buy" href="#download">Choose a download</a>
           <button class="menu-toggle" type="button" aria-label="Open navigation" aria-controls="mobile-menu" aria-expanded="false" data-menu-toggle>
             <span></span><span></span><span></span>
           </button>
@@ -95,7 +95,7 @@
           <a href="./index.html#utilities">Utilities</a>
           <a href="./index.html#mini">EchoDesk Mini</a>
           <a href="./download.html" aria-current="page">Download Desktop App</a>
-          <a class="button button-light" href="#download">Download 0.2.10</a>
+          <a class="button button-light" href="#download">Choose a download</a>
         </nav>
       </div>
     </header>
@@ -104,7 +104,7 @@
       <section class="download-hero section" aria-labelledby="download-title">
         <div class="wrap download-hero-grid">
           <div class="download-copy reveal">
-            <p class="eyebrow">EchoDesk Desktop 0.2.10</p>
+            <p class="eyebrow">EchoDesk Desktop</p>
             <h1 id="download-title">Your EchoDesk,<br>ready on desktop.</h1>
             <p class="download-lead">The same guided setup, recovery and device controls on Windows and macOS. Connect by USB by default, or choose the optional guided Wi-Fi setup.</p>
             <div class="release-chips" aria-label="Release compatibility">
@@ -152,15 +152,16 @@
           <article class="release-card reveal">
             <div class="release-heading">
               <div class="mac-mark" aria-hidden="true">⌘</div>
-              <div><p class="eyebrow">macOS</p><h2 id="mac-release-title">Mac disk image</h2><p>Version 0.2.10 · Universal</p></div>
+              <div><p class="eyebrow">macOS</p><h2 id="mac-release-title">Mac disk image</h2><p>Version 0.2.11 · Universal</p></div>
             </div>
             <p>The universal app brings the same setup, recovery and device controls to Apple silicon and Intel Macs, including USB and optional Wi-Fi setup for supported EchoDesk Mini hardware.</p>
             <a class="button button-dark download-macos" href="./download-macos.html">Download for macOS <span aria-hidden="true">↓</span></a>
-            <p class="artifact-meta">Disk image size: <span data-macos-dmg-size>63,848,536 bytes (60.9 MiB)</span>. SHA-256 is published below.</p>
+            <p class="artifact-meta">Disk image size: <span data-macos-dmg-size>64,013,074 bytes (61.0 MiB)</span>. SHA-256 is published below.</p>
+            <p class="artifact-meta"><a href="https://github.com/andomatthew1234/EchoDesk/tree/main/docs/downloads/macos-0.2.11">See what changed in 0.2.11, with before and after screenshots.</a></p>
           </article>
 
           <aside class="release-details reveal reveal-delay-1" aria-label="macOS release details">
-            <div><span>Release</span><strong>Desktop 0.2.10</strong></div>
+            <div><span>Release</span><strong>Desktop 0.2.11</strong></div>
             <div><span>Bundled firmware</span><strong>EchoDesk OS 2.33.0</strong></div>
             <div><span>Platform</span><strong>macOS 14+ universal</strong></div>
             <div><span>Processors</span><strong>Apple silicon + Intel</strong></div>
@@ -185,10 +186,10 @@
           <div class="hash-card reveal">
             <div><span>Installer SHA-256</span><code data-installer-sha256>9B62F6328B2A4A3E4650EB206253FBDA598487D3657FDCFF2A76BBBC52E7A867</code></div>
             <div><span>Portable ZIP SHA-256</span><code data-portable-sha256>992FF936D52E21556517EE04169B4EB50AD40FEA4FE25E9F61613D633A498EC9</code></div>
-            <div><span>macOS DMG SHA-256</span><code data-macos-dmg-sha256>EE475648DF9B9F73B4F8B724D33D48AB9C2AC770D4C8E6E64652D381607A6C52</code></div>
-            <div><span>macOS ZIP SHA-256</span><code data-macos-zip-sha256>4A5E4511D2064CA73D08EA3E32C573190BCBAB20555DC3258828D6EDF6AEF9DE</code></div>
+            <div><span>macOS DMG SHA-256</span><code data-macos-dmg-sha256>AC2F9C236C31AB066CBE2746368186E2697F87B1589A61FB09D412027AD0AD74</code></div>
+            <div><span>macOS ZIP SHA-256</span><code data-macos-zip-sha256>F150C77DAB849C10933614D7C2A4F5318EE6322031CB09246E4970A835F4123D</code></div>
             <p>PowerShell: <code>Get-FileHash .\EchoDesk-Desktop-v0.2.10-win-x64-setup.exe -Algorithm SHA256</code></p>
-            <p>macOS Terminal: <code>shasum -a 256 EchoDesk-Desktop-v0.2.10-macos-universal.dmg</code></p>
+            <p>macOS Terminal: <code>shasum -a 256 EchoDesk-Desktop-v0.2.11-macos-universal.dmg</code></p>
           </div>
         </div>
       </section>
@@ -198,7 +199,7 @@
           <div><p class="eyebrow">Alternate packages</p><h2 id="portable-title">Prefer a ZIP?</h2><p>On Windows, extract the entire folder and run <strong>EchoDesk Desktop.exe</strong>. On macOS, extract and move <strong>EchoDesk Desktop.app</strong> to Applications. Keep bundled components and firmware together.</p></div>
           <div class="portable-actions">
             <a class="button button-quiet download-portable" href="https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.10/EchoDesk-Desktop-v0.2.10-win-x64.zip" download>Windows ZIP <span aria-hidden="true">↓</span></a>
-            <a class="button button-quiet download-macos-zip" href="https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.10/EchoDesk-Desktop-v0.2.10-macos-universal.zip" download>macOS ZIP <span aria-hidden="true">↓</span></a>
+            <a class="button button-quiet download-macos-zip" href="https://github.com/andomatthew1234/EchoDesk/releases/download/v0.2.11/EchoDesk-Desktop-v0.2.11-macos-universal.zip" download>macOS ZIP <span aria-hidden="true">↓</span></a>
           </div>
         </div>
       </section>
