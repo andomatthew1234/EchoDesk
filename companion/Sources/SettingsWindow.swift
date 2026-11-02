@@ -146,6 +146,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskFirmwareLabel: NSTextField!
     var echoDeskHardwareLabel: NSTextField!
     var echoDeskActiveAppLabel: NSTextField!
+    var echoDeskOverviewBrightness: NSSlider!
+    var echoDeskOverviewBrightnessValue: NSTextField!
+    var echoDeskOverviewTheme: NSSegmentedControl!
+    var echoDeskCommandStatus: NSTextField!
+    var echoDeskDeviceControlStatus: NSTextField!
     var echoDeskComponentStatus: NSTextField!
     var echoDeskComponentDetail: NSTextField!
     var echoDeskComponentUpdated: NSTextField!
@@ -186,8 +191,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskRecoveryStatus: NSTextField!
     var echoDeskRecoveryProgress: NSProgressIndicator!
     var echoDeskRecoveryCompletion: NSView!
+    var echoDeskRecoveryInstalledVersion: NSTextField!
+    var echoDeskRecoveryAvailableVersion: NSTextField!
+    var echoDeskRecoveryUpdateStatus: NSTextField!
     var echoDeskQuickTheme: NSSegmentedControl!
     var echoDeskQuickClockFormat: NSPopUpButton!
+    var echoDeskCustomisationLanding: NSView?
+    var echoDeskCustomisationSections: [String: NSView] = [:]
+    var echoDeskCustomisationPreviews: [String: EchoDeskScreenPreview] = [:]
     var echoDeskSettingControls: [String: NSControl] = [:]
     var echoDeskPendingSettingChanges: [String: Any] = [:]
     var echoDeskApplyingSettingChanges = false
@@ -209,6 +220,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskPcDashboardPopups: [NSPopUpButton] = []
     var echoDeskPcDashboardRevision: Int = 0
     var echoDeskPcDashboardAutoApplyWorkItem: DispatchWorkItem?
+    var echoDeskPcDashboardStatus: NSTextField?
+    var echoDeskPcDashboardRetryButton: NSButton?
+    var echoDeskPcDashboardPendingMetrics: [String]?
+    var echoDeskPcDashboardInFlightMetrics: [String]?
+    var echoDeskPcDashboardFailedMetrics: [String]?
+    var echoDeskPcDashboardApplyInFlight = false
+    var echoDeskPcDashboardExpectedPort: String?
+    var echoDeskPcDashboardExpectedMAC: String?
+    var echoDeskPcDashboardRetryAfterRefresh = false
+    var echoDeskPcDashboardRequestInFlight = false
+    var echoDeskPcDashboardDidRetryStaleRevision = false
     var echoDeskBedsideRevision: Int = 0
     var echoDeskBedsideStatePort: String?
     var echoDeskBedsideStateRequestInFlight = false

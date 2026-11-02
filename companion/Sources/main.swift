@@ -2138,6 +2138,7 @@ class SerialPortManager {
     /// manager remains the only owner of the port.
     var onMusicControl: (([String: Any]) -> Void)?
     var onClockConfigRequest: (([String: Any]) -> Void)?
+    var onEchoDeskState: (([String: Any]) -> Void)?
     /// Angefangene Zeile aus `drainInput()`, damit ein Ereignis, das genau
     /// waehrend des Leerens ankommt, nicht zerschnitten verloren geht.
     private var unsolicitedLine = [UInt8]()
@@ -2859,6 +2860,9 @@ class SerialPortManager {
                   let mode = json["mode"] as? String,
                   mode == "countdown" || mode == "focus" else { return }
             DispatchQueue.main.async { [weak self] in self?.onClockConfigRequest?(json) }
+        case "echodesk_state":
+            guard json["version"] as? Int == 1 else { return }
+            DispatchQueue.main.async { [weak self] in self?.onEchoDeskState?(json) }
         default:
             break
         }
@@ -2903,6 +2907,7 @@ class UsageMonitor {
     /// Nach jedem Connect: gemeldetes Panel und laufende Firmware-Variante.
     var onPanelReported: ((_ panel: String?, _ firmwareVariant: String?) -> Void)?
     var onClockConfigRequest: ((_ mode: String) -> Void)?
+    var onEchoDeskState: (() -> Void)?
     private var heartbeatTimer: Timer?
     /// Ausstehender, gebuendelter Usage-/Notice-Frame (siehe scheduleUsageSend).
     private var pendingUsageSend: DispatchWorkItem?
@@ -3295,6 +3300,7 @@ class UsageMonitor {
             guard let mode = message["mode"] as? String else { return }
             self?.onClockConfigRequest?(mode)
         }
+        serialPort.onEchoDeskState = { [weak self] _ in self?.onEchoDeskState?() }
         echoDeskTelemetry.start()
 #endif
 
@@ -3309,7 +3315,8 @@ class UsageMonitor {
             guard let self = self, self.serialPort.isReadyForCommands,
                   self.firmwareSupportsViews()
                     || (self.serialPort.deviceMusicProtocol ?? 0) >= 1
-                    || (self.serialPort.deviceEchoDeskClockProtocol ?? 0) >= 1 else { return }
+                    || (self.serialPort.deviceEchoDeskClockProtocol ?? 0) >= 1
+                    || (self.serialPort.deviceEchoDeskPcDashboardProtocol ?? 0) >= 1 else { return }
             self.serialSendQueue.async { self.serialPort.pollUnsolicitedInput() }
         }
 
@@ -3332,6 +3339,7 @@ class UsageMonitor {
         echoDeskTelemetry.stop()
         serialPort.onMusicControl = nil
         serialPort.onClockConfigRequest = nil
+        serialPort.onEchoDeskState = nil
 #endif
         serialPort.stopScanning()
     }
@@ -4270,6 +4278,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 #if ECHODESK_DESKTOP
         monitor.onClockConfigRequest = { [weak self] mode in
             self?.settingsController?.showEchoDeskClockUtility(requestedMode: mode)
+        }
+        monitor.onEchoDeskState = { [weak self] in
+            self?.settingsController?.handleUnsolicitedEchoDeskState()
         }
 #endif
         monitor.start()

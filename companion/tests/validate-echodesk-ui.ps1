@@ -90,13 +90,18 @@ foreach ($polishContract in @(
 
 foreach ($redesignContract in @(
     'final class EchoDeskSidebarButton: NSButton',
+    'final class EchoDeskActionTile: NSButton',
+    'final class EchoDeskScreenPreview: NSView',
     'navigationGroup("General", generalButtons)',
     'navigationGroup("Device Management", managementButtons)',
     'echoDeskSidebarDeviceName',
     'EchoDeskDesign.sidebarWidth',
     'let components = echoDeskAdaptiveColumns([component, notificationCard]',
-    'let deviceBasics = echoDeskAdaptiveColumns([quick, general]',
+    '@objc private func echoDeskOpenCustomisationSection(_ sender: NSButton)',
+    'private func echoDeskFocusedSettingsSection(_ section: EchoDeskCustomisationSection,',
     'popup.action = #selector(echoDeskApplyPcDashboard)',
+    'queueEchoDeskPcDashboardApply(metrics)',
+    'flushPendingEchoDeskPcDashboardApplyIfReady()',
     'echoDeskPendingSetupQuickTheme = theme',
     'retryPendingEchoDeskSetupQuickSettingsIfReady()',
     'echoDeskLastStatePort == expectedPort',
@@ -186,9 +191,12 @@ if ($dashboardApplyStart -lt 0 -or $dashboardApplyEnd -le $dashboardApplyStart) 
     throw 'PC Dashboard Apply implementation could not be isolated.'
 }
 $dashboardApply = $source.Substring($dashboardApplyStart, $dashboardApplyEnd - $dashboardApplyStart)
-if (-not $dashboardApply.Contains('requestEchoDeskPcDashboardState { [weak self] ready in') -or
-    -not $dashboardApply.Contains('sendEchoDeskPcDashboardConfig(metrics)')) {
-    throw 'PC Dashboard Apply does not preflight a fresh device revision before sending its configuration.'
+if (-not $dashboardApply.Contains('queueEchoDeskPcDashboardApply(metrics)') -or
+    -not $dashboardApply.Contains('echoDeskPcDashboardAutoApplyWorkItem')) {
+    throw 'PC Dashboard Apply does not feed the serialized latest-wins synchronization queue.'
+}
+if ($dashboardApply.Contains('requestEchoDeskPcDashboardState { [weak self] ready in')) {
+    throw 'PC Dashboard Apply still starts independent preflight transactions that can race revisions.'
 }
 
 $onboardingStart = $source.IndexOf('private func presentEchoDeskFirstRunOnboardingIfNeeded')
