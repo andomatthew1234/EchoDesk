@@ -270,16 +270,16 @@ foreach ($brokenInterpolation in @(
 }
 
 if ($source.Contains('Terms & Privacy') -or $source.Contains('IsGuidedTermsStep')) {
-    throw 'The macOS 0.2.10 setup must not contain a Terms step.'
+    throw 'The macOS 0.2.11 setup must not contain a Terms step.'
 }
-Assert-Contains $main 'let kAppVersion = "0.2.10"'
+Assert-Contains $main 'let kAppVersion = "0.2.11"'
 Assert-Contains $main 'removeMenuBarStatusItem()'
 Assert-Contains $main 'var availableUpdateAsset: GitHubAsset?'
 Assert-Contains $main '$0.name.hasPrefix("EchoDesk-Desktop-v")'
 Assert-Contains $main '$0.name.hasSuffix("-macos-universal.zip")'
-Assert-Contains $build 'APP_VERSION="0.2.10"'
+Assert-Contains $build 'APP_VERSION="0.2.11"'
 Assert-Contains $build 'SettingsWindow+EchoDeskDesktop.swift'
-Assert-Contains $workflow 'EchoDesk-Desktop-v0.2.10-macos-universal'
+Assert-Contains $workflow 'EchoDesk-Desktop-v0.2.11-macos-universal'
 
 if (-not (Test-Path -LiteralPath $dmgBackgroundPath)) {
     throw 'EchoDesk DMG background asset is missing.'
@@ -346,8 +346,8 @@ if (-not $settingsSource.Contains('echoDeskBedsidePreviewTimer?.invalidate()')) 
 }
 
 $versionNode = $plist.SelectSingleNode("//key[.='CFBundleShortVersionString']/following-sibling::*[1]")
-if ($null -eq $versionNode -or $versionNode.InnerText -ne '0.2.10') {
-    throw 'EchoDesk Info.plist version is not 0.2.10.'
+if ($null -eq $versionNode -or $versionNode.InnerText -ne '0.2.11') {
+    throw 'EchoDesk Info.plist version is not 0.2.11.'
 }
 
-Write-Host 'EchoDesk macOS 0.2.10 parity UI validation passed.'
+Write-Host 'EchoDesk macOS 0.2.11 parity UI validation passed.'

@@ -32,7 +32,7 @@ import Darwin
 // ============================================================
 
 #if ECHODESK_DESKTOP
-let kAppVersion = "0.2.10"
+let kAppVersion = "0.2.11"
 let kProductName = "EchoDesk Desktop"
 let kProductRepository = "andomatthew1234/EchoDesk"
 let kProductBundleIdentifier = "com.echodesk.desktop"
@@ -172,7 +172,7 @@ let kFirmwareCheckInterval: TimeInterval = 6 * 3600
 let kFirmwareUpdateBannerID = "firmware-update"
 let kFlashBaudRate = 460800
 #if ECHODESK_DESKTOP
-let kAppAssetName = "EchoDesk-Desktop-v0.2.10-macos-universal.zip"
+let kAppAssetName = "EchoDesk-Desktop-v0.2.11-macos-universal.zip"
 #else
 let kAppAssetName = "AIMonitor.zip"
 #endif
