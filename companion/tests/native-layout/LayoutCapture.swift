@@ -105,6 +105,15 @@ private final class LayoutReview {
         ]
         _ = controller.perform(NSSelectorFromString("echoDeskBedsideShowAlarms"))
         try shot("bedside-alarms")
+        controller.echoDeskBedsideConfig.alarms = (1...4).map { index in
+            EchoDeskBedsideAlarm(id: index, enabled: true, minuteOfDay: 360 + 30 * index,
+                                 weekdays: 62, label: "Weekday alarm \(index)")
+        }
+        _ = controller.perform(NSSelectorFromString("echoDeskBedsideShowAlarms"))
+        try shot("bedside-several-alarms")
+        controller.echoDeskBedsideConfig.alarms = []
+        _ = controller.perform(NSSelectorFromString("echoDeskBedsideShowAlarms"))
+        try shot("bedside-empty-alarms")
         _ = controller.perform(NSSelectorFromString("echoDeskBedsideShowDisplay"))
         try shot("bedside-display")
         try scrolled("bedside-display-lower")

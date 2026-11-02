@@ -12,6 +12,7 @@ def verify(root):
             records = json.loads((folder / "geometry.json").read_text())
             expected = {"first-launch", "first-device", "overview", "overview-disconnected",
                         "device-control", "customisation", "bedside", "bedside-alarms", "bedside-display",
+                        "bedside-several-alarms", "bedside-empty-alarms",
                         "setup-connect", "setup-usb", "setup-wifi", "setup-install-choice",
                         "setup-install-progress", "setup-quick-settings", "setup-ready",
                         "recovery", "recovery-maintenance", "recovery-complete",
@@ -37,6 +38,14 @@ def verify(root):
                         errors.append(f"{here}: viewport does not span the workspace")
                     if abs(page["x"] - clip["x"] - 24) > 1 or abs(page["width"] - clip["width"] + 48) > 1:
                         errors.append(f"{here}: page does not use its viewport")
+                    if name in {"bedside-alarms", "bedside-several-alarms", "bedside-empty-alarms"}:
+                        # A dynamically shrinking document can fit its bounds
+                        # yet leave the page's actual Back control above them.
+                        for field, key in (("button", "Bedside Mode"), ("text", "Manage alarms")):
+                            matches = [r for r in record["items"] if r.get(field) == key]
+                            if not any(clip["y"] - 1 <= r["y"] and
+                                       r["y"] + r["height"] <= clip["y"] + clip["height"] + 1 for r in matches):
+                                errors.append(f"{here}: {key} not visible at the top of the alarm editor")
             log = (folder / "app.log").read_text(errors="replace")
             if "Unable to simultaneously satisfy constraints" in log:
                 errors.append(f"{folder.relative_to(root)}: AppKit reported conflicting constraints")

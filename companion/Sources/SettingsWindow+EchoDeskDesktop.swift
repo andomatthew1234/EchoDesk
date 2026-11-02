@@ -909,6 +909,15 @@ extension SettingsWindowController {
         if let scroll = target as? NSScrollView {
             scroll.contentView.scroll(to: .zero)
             scroll.reflectScrolledClipView(scroll.contentView)
+            // AppKit measures multiline controls and reflows columns on the
+            // first pass after a window opens. Anchor the chosen page after
+            // that measurement; a superseded navigation must never scroll it.
+            DispatchQueue.main.async { [weak self, weak scroll] in
+                guard let self, let scroll, self.echoDeskPageTransitionGeneration == transitionGeneration else { return }
+                self.window?.contentView?.layoutSubtreeIfNeeded()
+                scroll.contentView.scroll(to: .zero)
+                scroll.reflectScrolledClipView(scroll.contentView)
+            }
         }
         if previousPage != page && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             // Fade in laid-out content only. Never superimpose two sets of

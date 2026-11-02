@@ -660,19 +660,40 @@ extension SettingsWindowController {
         echoDeskBedsideAlarmRows.removeAll()
         echoDeskBedsideStatus = bedsideMuted(bedsideStatusText)
         var views: [NSView] = [bedsideHeader("Manage alarms", "Alarms are stored and evaluated directly on EchoDesk.")]
-        var cards = echoDeskBedsideAlarmDrafts.sorted(by: { $0.id < $1.id }).map(buildEchoDeskBedsideAlarmRow)
+        let cards = echoDeskBedsideAlarmDrafts.sorted(by: { $0.id < $1.id }).map(buildEchoDeskBedsideAlarmRow)
+        if cards.isEmpty {
+            views.append(bedsideCard(bedsideStack([bedsideSectionTitle("No alarms yet"),
+                bedsideMuted("Add an alarm. It will work whenever the Mini has power and a valid time.")], spacing: 8)))
+        }
+        for index in stride(from: 0, to: cards.count, by: 2) {
+            if index + 1 < cards.count {
+                views.append(EchoDeskAdaptiveStackView(views: [cards[index], cards[index + 1]], collapseBelow: 720))
+            } else {
+                // One unpaired alarm stays a readable editor. Its neighbour
+                // isn't an alarm; keep Add as a separate, persistent action.
+                let row = NSView()
+                let card = cards[index]
+                card.translatesAutoresizingMaskIntoConstraints = false
+                row.addSubview(card)
+                let fill = card.widthAnchor.constraint(equalTo: row.widthAnchor)
+                fill.priority = .defaultHigh
+                NSLayoutConstraint.activate([
+                    card.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+                    card.topAnchor.constraint(equalTo: row.topAnchor),
+                    card.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+                    card.widthAnchor.constraint(lessThanOrEqualTo: row.widthAnchor),
+                    card.widthAnchor.constraint(lessThanOrEqualToConstant: 576), fill
+                ])
+                views.append(row)
+            }
+        }
         let add = NSButton(title: "Add alarm", target: self, action: #selector(echoDeskBedsideAddAlarm))
         add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
         add.imagePosition = .imageLeading
         add.isEnabled = bedsideStateReady && cards.count < 8
-        if cards.count < 8 {
-            cards.append(bedsideCard(bedsideStack([
-                bedsideSectionTitle(cards.isEmpty ? "No alarms yet" : "Add another alarm"),
-                bedsideMuted("Keep up to eight alarms on the Mini. They work from power alone after it has the time."),
-                add
-            ], spacing: 10)))
-        }
-        views.append(EchoDeskFlowGrid(views: cards, minimumCellWidth: 355, maximumColumns: 2))
+        let actions = NSStackView(views: [add, bedsideMuted("Changes save automatically on EchoDesk.")])
+        actions.orientation = .horizontal; actions.alignment = .centerY; actions.spacing = 10
+        views.append(actions)
         views.append(bedsideStatusRow())
         return views
     }
