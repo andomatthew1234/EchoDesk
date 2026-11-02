@@ -9,7 +9,7 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 COMPANION = HERE.parents[1]
-SIZES = ("900x650", "1100x750", "1280x800", "1440x900")
+SIZES = ("820x580", "960x680", "1050x700")
 
 
 def prepare(temp):

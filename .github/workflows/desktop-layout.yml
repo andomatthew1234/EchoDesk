@@ -1,7 +1,7 @@
-name: EchoDesk macOS visual review
+name: EchoDesk macOS compact and threshold QA
 on:
   push:
-    branches: ['codex/desktop-visual-*']
+    branches: ['codex/desktop-visual-compact-*']
   workflow_dispatch:
 permissions:
   contents: read

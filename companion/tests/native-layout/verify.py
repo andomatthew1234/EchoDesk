@@ -6,7 +6,7 @@ from pathlib import Path
 
 def verify(root):
     errors = []
-    for width, height in [(900, 650), (1100, 750), (1280, 800), (1440, 900)]:
+    for width, height in [(820, 580), (960, 680), (1050, 700)]:
         for style in ("light", "dark"):
             folder = root / f"{width}x{height}" / style
             records = json.loads((folder / "geometry.json").read_text())
@@ -51,7 +51,7 @@ def verify(root):
                 errors.append(f"{folder.relative_to(root)}: AppKit reported conflicting constraints")
     if errors:
         raise SystemExit("\n".join(errors[:24]) + f"\n{len(errors)} layout errors")
-    print("All eight native size/appearance combinations held their requested window and content bounds.")
+    print("The six compact review windows held their requested frame and content bounds.")
 
 
 if __name__ == "__main__":
