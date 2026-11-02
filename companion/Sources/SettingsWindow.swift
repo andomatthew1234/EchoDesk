@@ -130,6 +130,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     // owners remain below this presentation layer; these references are only
     // the native desktop-window state and never duplicate hardware ownership.
     var echoDeskSidebarButtons: [NSButton] = []
+    weak var echoDeskSidebarView: NSView?
+    var echoDeskSidebarWidthConstraint: NSLayoutConstraint?
     var echoDeskPageViews: [NSView] = []
     var echoDeskSelectedPage: EchoDeskDesktopPage = .overview
     var echoDeskPageTransitionGeneration = 0
@@ -149,6 +151,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskOverviewBrightness: NSSlider!
     var echoDeskOverviewBrightnessValue: NSTextField!
     var echoDeskOverviewTheme: NSSegmentedControl!
+    var echoDeskDeviceBrightness: NSSlider!
     var echoDeskCommandStatus: NSTextField!
     var echoDeskDeviceControlStatus: NSTextField!
     var echoDeskComponentStatus: NSTextField!
@@ -165,6 +168,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskFooterStatus: NSTextField!
     var echoDeskSetupViews: [NSView] = []
     var echoDeskSetupStepLabels: [NSTextField] = []
+    var echoDeskSetupStepper: NSSegmentedControl!
     var echoDeskSetupStep: EchoDeskSetupStep = .connect
     var echoDeskSetupUSBPopup: NSPopUpButton!
     var echoDeskSetupDeviceName: NSTextField!
@@ -1598,27 +1602,56 @@ final class FlippedClipView: NSClipView {
 
 extension SettingsWindowController: NSToolbarDelegate {
 
+#if ECHODESK_DESKTOP
+    private var echoDeskToggleSidebarIdentifier: NSToolbarItem.Identifier {
+        NSToolbarItem.Identifier("com.echodesk.desktop.toggle-sidebar")
+    }
+#endif
+
     private var sectionIdentifiers: [NSToolbarItem.Identifier] {
         SettingsSection.allCases.map(\.toolbarIdentifier)
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+#if ECHODESK_DESKTOP
+        return [echoDeskToggleSidebarIdentifier, .flexibleSpace]
+#else
         sectionIdentifiers
+#endif
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+#if ECHODESK_DESKTOP
+        return [echoDeskToggleSidebarIdentifier, .flexibleSpace]
+#else
         sectionIdentifiers
+#endif
     }
 
     /// Nur selektierbare Items bekommen im .preference-Stil die
     /// Auswahl-Hervorhebung.
     func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+#if ECHODESK_DESKTOP
+        return []
+#else
         sectionIdentifiers
+#endif
     }
 
     func toolbar(_ toolbar: NSToolbar,
                  itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+#if ECHODESK_DESKTOP
+        guard itemIdentifier == echoDeskToggleSidebarIdentifier else { return nil }
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.label = "Show or Hide Sidebar"
+        item.paletteLabel = item.label
+        item.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: item.label)
+        item.toolTip = item.label
+        item.target = self
+        item.action = #selector(echoDeskToggleSidebar)
+        return item
+#else
         guard let section = SettingsSection(toolbarIdentifier: itemIdentifier) else { return nil }
 
         let item = NSToolbarItem(itemIdentifier: itemIdentifier)
@@ -1631,5 +1664,6 @@ extension SettingsWindowController: NSToolbarDelegate {
         item.target = self
         item.action = #selector(toolbarSectionChosen(_:))
         return item
+#endif
     }
 }

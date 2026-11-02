@@ -5,11 +5,11 @@ import UserNotifications
 private let echoDeskFirstRunOnboardingKey = "EchoDeskFirstRunOnboardingCompletedV1"
 
 private enum EchoDeskDesign {
-    static let sidebarWidth: CGFloat = 226
-    static let pageInset: CGFloat = 26
-    static let cardRadius: CGFloat = 13
-    static let sectionSpacing: CGFloat = 16
-    static let contentWidth: CGFloat = 980
+    static let sidebarWidth: CGFloat = 218
+    static let pageInset: CGFloat = 20
+    static let cardRadius: CGFloat = 9
+    static let sectionSpacing: CGFloat = 18
+    static let contentWidth: CGFloat = 880
     static let compactWidth: CGFloat = 680
     static let controlHeight: CGFloat = 34
 }
@@ -79,14 +79,17 @@ final class EchoDeskSurfaceView: NSView {
     override func updateLayer() {
         switch kind {
         case .sidebar:
-            layer?.backgroundColor = NSColor.windowBackgroundColor.blended(withFraction: 0.025, of: .labelColor)?.cgColor
+            layer?.backgroundColor = NSColor.clear.cgColor
             layer?.borderColor = NSColor.separatorColor.cgColor
-            layer?.borderWidth = 0.5
+            layer?.borderWidth = 0
         case .card:
-            layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-            layer?.borderColor = NSColor.separatorColor.cgColor
-            layer?.borderWidth = 0.75
-            layer?.cornerRadius = EchoDeskDesign.cardRadius
+            // Settings groups are deliberately flat. A separator is installed
+            // by echoDeskCard(_:padding:) so pages read like native macOS forms
+            // instead of a collection of web-dashboard cards.
+            layer?.backgroundColor = NSColor.clear.cgColor
+            layer?.borderColor = NSColor.clear.cgColor
+            layer?.borderWidth = 0
+            layer?.cornerRadius = 0
         case .canvas:
             layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         }
@@ -102,7 +105,7 @@ final class EchoDeskSidebarButton: NSButton {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 9
+        layer?.cornerRadius = 6
         layer?.cornerCurve = .continuous
         selectionBar.cornerRadius = 1.5
         layer?.addSublayer(selectionBar)
@@ -111,7 +114,7 @@ final class EchoDeskSidebarButton: NSButton {
         imagePosition = .imageLeading
         imageScaling = .scaleProportionallyDown
         alignment = .left
-        font = .systemFont(ofSize: 13, weight: .medium)
+        font = .systemFont(ofSize: 12.5, weight: .medium)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -133,7 +136,7 @@ final class EchoDeskSidebarButton: NSButton {
     }
     override func layout() {
         super.layout()
-        selectionBar.frame = NSRect(x: 3, y: 9, width: 3, height: max(0, bounds.height - 18))
+        selectionBar.frame = NSRect(x: 2, y: 8, width: 3, height: max(0, bounds.height - 16))
     }
 
     private func refreshAppearance() {
@@ -163,23 +166,23 @@ final class EchoDeskActionTile: NSButton {
         self.action = action
         isBordered = false
         wantsLayer = true
-        layer?.cornerRadius = EchoDeskDesign.cardRadius
+        layer?.cornerRadius = 7
         layer?.cornerCurve = .continuous
-        layer?.borderWidth = 0.75
+        layer?.borderWidth = 0
         focusRingType = .exterior
 
         symbolView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        symbolView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 20, weight: .medium)
+        symbolView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 17, weight: .medium)
         symbolView.contentTintColor = .controlAccentColor
         symbolView.imageScaling = .scaleProportionallyDown
         symbolView.translatesAutoresizingMaskIntoConstraints = false
-        symbolView.widthAnchor.constraint(equalToConstant: 34).isActive = true
-        symbolView.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        symbolView.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        symbolView.heightAnchor.constraint(equalToConstant: 28).isActive = true
 
         titleLabel.stringValue = title
         titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
         detailLabel.stringValue = detail
-        detailLabel.font = .systemFont(ofSize: 11.5)
+        detailLabel.font = .systemFont(ofSize: 11)
         detailLabel.textColor = .secondaryLabelColor
         detailLabel.maximumNumberOfLines = 2
         let labels = NSStackView(views: [titleLabel, detailLabel])
@@ -197,11 +200,11 @@ final class EchoDeskActionTile: NSButton {
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 15),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            row.topAnchor.constraint(equalTo: topAnchor, constant: 13),
-            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -13),
-            heightAnchor.constraint(greaterThanOrEqualToConstant: 78),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            row.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 58),
         ])
         setAccessibilityLabel(title)
         setAccessibilityHelp(detail)
@@ -226,11 +229,19 @@ final class EchoDeskActionTile: NSButton {
     }
 
     private func refreshAppearance() {
-        layer?.borderColor = (hovered ? NSColor.controlAccentColor.withAlphaComponent(0.45)
-                                     : NSColor.separatorColor).cgColor
-        layer?.backgroundColor = (hovered ? NSColor.controlAccentColor.withAlphaComponent(0.075)
-                                         : NSColor.controlBackgroundColor).cgColor
+        layer?.borderColor = NSColor.clear.cgColor
+        layer?.backgroundColor = (hovered ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.12)
+                                         : NSColor.clear).cgColor
     }
+}
+
+/// Read-only segmented progress control. It provides the compact visual
+/// language of a native macOS assistant without implying that future setup
+/// stages can be selected before validation succeeds.
+final class EchoDeskSetupProgressControl: NSSegmentedControl {
+    override var acceptsFirstResponder: Bool { false }
+    override func mouseDown(with event: NSEvent) { /* progress is not navigation */ }
+    override func keyDown(with event: NSEvent) { /* progress is not navigation */ }
 }
 
 final class EchoDeskScreenPreview: NSView {
@@ -331,8 +342,8 @@ private final class EchoDeskPopupButton: NSPopUpButton {
     override init(frame buttonFrame: NSRect, pullsDown flag: Bool) {
         super.init(frame: buttonFrame, pullsDown: flag)
         bezelStyle = .rounded
-        controlSize = .large
-        font = .systemFont(ofSize: 13, weight: .medium)
+        controlSize = .regular
+        font = .systemFont(ofSize: 13, weight: .regular)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
@@ -342,27 +353,35 @@ extension SettingsWindowController {
 
     func buildEchoDeskDesktopUI(in root: NSView) {
         if UserDefaults.standard.string(forKey: "NSWindow Frame SettingsWindow") == nil {
-            window?.setContentSize(NSSize(width: 1120, height: 760))
+            window?.setContentSize(NSSize(width: 1080, height: 720))
         }
-        window?.minSize = NSSize(width: 860, height: 600)
-        window?.titleVisibility = .hidden
-        window?.titlebarAppearsTransparent = true
-        window?.toolbar = nil
-        window?.styleMask.insert(.fullSizeContentView)
-        window?.titlebarSeparatorStyle = .none
+        window?.minSize = NSSize(width: 820, height: 580)
+        window?.title = "EchoDesk"
+        window?.subtitle = "Desktop"
+        window?.titleVisibility = .visible
+        window?.titlebarAppearsTransparent = false
+        window?.styleMask.remove(.fullSizeContentView)
+        window?.titlebarSeparatorStyle = .automatic
         window?.isMovableByWindowBackground = false
+        installEchoDeskNativeToolbar()
 
-        let sidebar = EchoDeskSurfaceView(.sidebar)
+        let sidebar = NSVisualEffectView()
+        sidebar.material = .sidebar
+        sidebar.blendingMode = .behindWindow
+        sidebar.state = .active
         let canvas = EchoDeskSurfaceView(.canvas)
         sidebar.translatesAutoresizingMaskIntoConstraints = false
         canvas.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(sidebar)
         root.addSubview(canvas)
+        let sidebarWidth = sidebar.widthAnchor.constraint(equalToConstant: EchoDeskDesign.sidebarWidth)
+        echoDeskSidebarView = sidebar
+        echoDeskSidebarWidthConstraint = sidebarWidth
         NSLayoutConstraint.activate([
             sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: root.topAnchor),
             sidebar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            sidebar.widthAnchor.constraint(equalToConstant: EchoDeskDesign.sidebarWidth),
+            sidebarWidth,
             canvas.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
             canvas.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             canvas.topAnchor.constraint(equalTo: root.topAnchor),
@@ -380,6 +399,40 @@ extension SettingsWindowController {
         }
         selectEchoDeskPage(.overview)
         presentEchoDeskFirstRunOnboardingIfNeeded(in: root)
+    }
+
+    private func installEchoDeskNativeToolbar() {
+        let toolbar = NSToolbar(identifier: "com.echodesk.desktop.window-toolbar")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        toolbar.autosavesConfiguration = false
+        window?.toolbar = toolbar
+        window?.toolbarStyle = .unifiedCompact
+    }
+
+    @objc func echoDeskToggleSidebar() {
+        guard let sidebar = echoDeskSidebarView,
+              let width = echoDeskSidebarWidthConstraint else { return }
+        let showing = width.constant > 0
+        let geometry = {
+            width.constant = showing ? 0 : EchoDeskDesign.sidebarWidth
+            sidebar.alphaValue = showing ? 0 : 1
+            self.window?.contentView?.layoutSubtreeIfNeeded()
+        }
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            geometry()
+            sidebar.isHidden = showing
+        } else {
+            if !showing { sidebar.isHidden = false }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.18
+                context.allowsImplicitAnimation = true
+                geometry()
+            } completionHandler: {
+                if showing { sidebar.isHidden = true }
+            }
+        }
     }
 
     private func presentEchoDeskFirstRunOnboardingIfNeeded(in root: NSView) {
@@ -520,7 +573,7 @@ extension SettingsWindowController {
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
                 .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 16, weight: .medium))
             button.translatesAutoresizingMaskIntoConstraints = false
-            button.heightAnchor.constraint(equalToConstant: 38).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 32).isActive = true
             button.setAccessibilityLabel(title)
             return button
         }
@@ -548,12 +601,12 @@ extension SettingsWindowController {
             let buttonStack = NSStackView(views: buttons)
             buttonStack.orientation = .vertical
             buttonStack.alignment = .leading
-            buttonStack.spacing = 2
+            buttonStack.spacing = 1
             buttons.forEach { $0.widthAnchor.constraint(equalTo: buttonStack.widthAnchor).isActive = true }
             let group = NSStackView(views: [groupLabel(title), buttonStack])
             group.orientation = .vertical
             group.alignment = .leading
-            group.spacing = 7
+            group.spacing = 5
             buttonStack.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
             return group
         }
@@ -561,7 +614,7 @@ extension SettingsWindowController {
                                       navigationGroup("Device Management", managementButtons)])
         nav.orientation = .vertical
         nav.alignment = .leading
-        nav.spacing = 21
+        nav.spacing = 14
         nav.arrangedSubviews.forEach { $0.widthAnchor.constraint(equalTo: nav.widthAnchor).isActive = true }
 
         echoDeskSidebarConnectionDot = StatusIndicator(state: .inactive)
@@ -581,7 +634,7 @@ extension SettingsWindowController {
         footerStack.orientation = .vertical
         footerStack.alignment = .leading
         footerStack.spacing = 4
-        let footer = echoDeskCard(footerStack, padding: 12)
+        let footer = echoDeskCard(footerStack, padding: 8)
         footer.setAccessibilityElement(true)
         footer.setAccessibilityRole(.group)
         footer.setAccessibilityLabel("Connected EchoDesk")
@@ -593,10 +646,10 @@ extension SettingsWindowController {
         NSLayoutConstraint.activate([
             brandRow.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 18),
             brandRow.trailingAnchor.constraint(lessThanOrEqualTo: sidebar.trailingAnchor, constant: -14),
-            brandRow.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 21),
+            brandRow.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 14),
             nav.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 10),
             nav.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -10),
-            nav.topAnchor.constraint(equalTo: brandRow.bottomAnchor, constant: 25),
+            nav.topAnchor.constraint(equalTo: brandRow.bottomAnchor, constant: 18),
             footer.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 14),
             footer.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -14),
             footer.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -18),
@@ -663,16 +716,27 @@ extension SettingsWindowController {
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
-        scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 22, right: 0)
+        scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 18, right: 0)
         scroll.contentView = FlippedClipView()
         scroll.contentView.drawsBackground = false
+        let wrapper = NSView()
+        wrapper.translatesAutoresizingMaskIntoConstraints = false
         document.translatesAutoresizingMaskIntoConstraints = false
-        scroll.documentView = document
+        wrapper.addSubview(document)
+        scroll.documentView = wrapper
+        let readableWidth = document.widthAnchor.constraint(lessThanOrEqualToConstant: EchoDeskDesign.contentWidth)
+        readableWidth.priority = .required
         NSLayoutConstraint.activate([
-            document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
-            document.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
-            document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
-            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            wrapper.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            wrapper.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
+            wrapper.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            wrapper.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            document.topAnchor.constraint(equalTo: wrapper.topAnchor, constant: 6),
+            document.centerXAnchor.constraint(equalTo: wrapper.centerXAnchor),
+            document.leadingAnchor.constraint(greaterThanOrEqualTo: wrapper.leadingAnchor),
+            document.trailingAnchor.constraint(lessThanOrEqualTo: wrapper.trailingAnchor),
+            readableWidth,
+            wrapper.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: 18),
         ])
         return scroll
     }
@@ -685,6 +749,14 @@ extension SettingsWindowController {
     func selectEchoDeskPage(_ page: EchoDeskDesktopPage) {
         let previousPage = echoDeskSelectedPage
         echoDeskSelectedPage = page
+        switch page {
+        case .overview: window?.subtitle = "Overview"
+        case .deviceControl: window?.subtitle = "Device Control"
+        case .customisation: window?.subtitle = "Customisation"
+        case .bedside: window?.subtitle = "Bedside Mode"
+        case .setup: window?.subtitle = "Set Up New Device"
+        case .recovery: window?.subtitle = "Recovery & Updates"
+        }
         echoDeskPageTransitionGeneration += 1
         let transitionGeneration = echoDeskPageTransitionGeneration
         let target = echoDeskPageViews[page.rawValue]
@@ -707,8 +779,9 @@ extension SettingsWindowController {
         if let current, !current.isHidden {
             current.setAccessibilityHidden(true)
             target.alphaValue = 0
+            let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.14
+                context.duration = reduceMotion ? 0 : 0.12
                 current.animator().alphaValue = 0
                 target.animator().alphaValue = 1
             } completionHandler: { [weak self] in
@@ -857,9 +930,15 @@ extension SettingsWindowController {
         preview.heightAnchor.constraint(equalTo: preview.widthAnchor, multiplier: 0.586).isActive = true
         echoDeskDeviceControlStatus = echoDeskMuted("Waiting for a connected EchoDesk…")
         echoDeskDeviceControlStatus.maximumNumberOfLines = 2
+        echoDeskDeviceBrightness = NSSlider(value: Double(Settings.shared.lastKnownBrightness), minValue: 10,
+                                             maxValue: 100, target: self,
+                                             action: #selector(echoDeskOverviewBrightnessChanged(_:)))
+        echoDeskDeviceBrightness.isContinuous = false
+        echoDeskDeviceBrightness.setAccessibilityLabel("EchoDesk brightness")
         let liveState = echoDeskCard(echoDeskPageStack([
             echoDeskSectionTitle("Physical device"),
             echoDeskDeviceControlStatus,
+            echoDeskLabeledControl("Brightness", echoDeskDeviceBrightness),
             echoDeskMuted("A command is only reported as complete after EchoDesk confirms it."),
         ], spacing: 8))
         let deviceHero = echoDeskAdaptiveColumns([preview, liveState], collapseBelow: 660)
@@ -1255,19 +1334,14 @@ extension SettingsWindowController {
 
     private func buildEchoDeskSetupPage() -> NSView {
         let header = echoDeskPageHeader("Setup new device", "A guided setup for EchoDesk Mini.")
-        let stepNames = ["1  Connect", "2  Choose", "3  Install", "4  Quick settings", "5  Ready"]
-        echoDeskSetupStepLabels = stepNames.map { name in
-            let label = NSTextField(labelWithString: name)
-            label.font = .systemFont(ofSize: 11, weight: .medium)
-            label.alignment = .center
-            label.textColor = .secondaryLabelColor
-            return label
-        }
-        let stepper = NSStackView(views: echoDeskSetupStepLabels)
-        stepper.orientation = .horizontal
-        stepper.distribution = .fillEqually
-        stepper.spacing = 6
-        let stepperCard = echoDeskCard(stepper, padding: 12)
+        echoDeskSetupStepLabels = []
+        echoDeskSetupStepper = EchoDeskSetupProgressControl(
+            labels: ["Connect", "Choose", "Install", "Quick Settings", "Ready"],
+            trackingMode: .selectOne, target: nil, action: nil)
+        echoDeskSetupStepper.segmentStyle = .rounded
+        echoDeskSetupStepper.controlSize = .regular
+        echoDeskSetupStepper.selectedSegment = 0
+        echoDeskSetupStepper.setAccessibilityLabel("Setup progress")
         let connect = buildEchoDeskSetupConnectStep()
         let usb = buildEchoDeskSetupUSBStep()
         let wifi = buildEchoDeskSetupWiFiStep()
@@ -1279,7 +1353,7 @@ extension SettingsWindowController {
         echoDeskPendingSetupPort = UserDefaults.standard.string(forKey: "EchoDeskPendingSetupPortV2")
         let restored = EchoDeskSetupStep(rawValue: UserDefaults.standard.integer(forKey: "EchoDeskGuidedSetupStepV2")) ?? .connect
         setEchoDeskSetupStep(restored == .working && echoDeskPendingSetupPort == nil ? .connect : restored)
-        return echoDeskPageStack([header, stepperCard] + echoDeskSetupViews)
+        return echoDeskPageStack([header, echoDeskSetupStepper] + echoDeskSetupViews)
     }
 
     private func buildEchoDeskRecoveryPage() -> NSView {
@@ -1308,11 +1382,11 @@ extension SettingsWindowController {
 
         let update = echoDeskRecoveryAction(0, "Update EchoDesk OS",
             "Update EchoDesk OS to the latest version while keeping your device settings.")
-        let maintenanceActions = echoDeskAdaptiveColumns([
+        let maintenanceActions = echoDeskPageStack([
             echoDeskRecoveryAction(1, "Reinstall EchoDesk OS", "Install a fresh version of EchoDesk OS."),
             echoDeskRecoveryAction(2, "Repair device", "Repair and reset EchoDesk OS if on older firmware."),
             echoDeskRecoveryAction(3, "Recovery", "Fully reset EchoDesk without checks after confirming the target is an ESP32."),
-        ], collapseBelow: 760)
+        ], spacing: 0)
         echoDeskRecoveryActions = NSStackView(views: [update, echoDeskSectionTitle("Maintenance"), maintenanceActions])
         echoDeskRecoveryActions.orientation = .vertical
         echoDeskRecoveryActions.alignment = .leading
@@ -1474,10 +1548,7 @@ extension SettingsWindowController {
         case .quickSettings: progressIndex = 3
         case .welcome: progressIndex = 4
         }
-        for (index, label) in echoDeskSetupStepLabels.enumerated() {
-            label.textColor = index <= progressIndex ? .controlAccentColor : .secondaryLabelColor
-            label.font = .systemFont(ofSize: 11, weight: index == progressIndex ? .semibold : .medium)
-        }
+        echoDeskSetupStepper?.selectedSegment = progressIndex
         UserDefaults.standard.set(step.rawValue, forKey: "EchoDeskGuidedSetupStepV2")
         if echoDeskPageViews.indices.contains(EchoDeskDesktopPage.setup.rawValue),
            let scroll = echoDeskPageViews[EchoDeskDesktopPage.setup.rawValue] as? NSScrollView {
@@ -1525,6 +1596,7 @@ extension SettingsWindowController {
             ? "Connected to \(profile?.friendlyName ?? "EchoDesk Mini") through USB."
             : "No EchoDesk is connected. App and maintenance controls are unavailable."
         echoDeskOverviewBrightness?.isEnabled = ready
+        echoDeskDeviceBrightness?.isEnabled = ready
         echoDeskOverviewTheme?.isEnabled = ready
         echoDeskSidebarDeviceName?.stringValue = ready ? "EchoDesk Mini" : "No device connected"
         echoDeskFooterStatus?.stringValue = serial.connectedPort ?? "Waiting…"
@@ -2192,6 +2264,8 @@ extension SettingsWindowController {
     @objc private func echoDeskOverviewBrightnessChanged(_ sender: NSSlider) {
         let value = Int(sender.doubleValue.rounded())
         echoDeskOverviewBrightnessValue?.stringValue = "\(value)%"
+        echoDeskOverviewBrightness?.doubleValue = Double(value)
+        echoDeskDeviceBrightness?.doubleValue = Double(value)
         if let detailed = echoDeskSettingControls["brightness"] as? NSSlider { detailed.doubleValue = Double(value) }
         applyEchoDeskSetting("brightness", value: value)
     }
@@ -2212,6 +2286,7 @@ extension SettingsWindowController {
         guard let key = sender.identifier?.rawValue else { return }
         if key == "brightness" {
             echoDeskOverviewBrightness?.doubleValue = sender.doubleValue
+            echoDeskDeviceBrightness?.doubleValue = sender.doubleValue
             echoDeskOverviewBrightnessValue?.stringValue = "\(Int(sender.doubleValue.rounded()))%"
         }
         applyEchoDeskSetting(key, value: Int(sender.doubleValue.rounded()))
@@ -2243,6 +2318,7 @@ extension SettingsWindowController {
         }
         if let number = settings["brightness"] as? NSNumber {
             echoDeskOverviewBrightness?.doubleValue = number.doubleValue
+            echoDeskDeviceBrightness?.doubleValue = number.doubleValue
             echoDeskOverviewBrightnessValue?.stringValue = "\(number.intValue)%"
         }
         if let theme = settings["theme"] as? String {
@@ -2846,26 +2922,26 @@ extension SettingsWindowController {
 
     private func echoDeskPageHeader(_ title: String, _ subtitle: String) -> NSView {
         let heading = NSTextField(labelWithString: title)
-        heading.font = .systemFont(ofSize: 30, weight: .semibold)
+        heading.font = .systemFont(ofSize: 26, weight: .semibold)
         let detail = echoDeskMuted(subtitle)
         return echoDeskPageStack([heading, detail], spacing: 4)
     }
 
     private func echoDeskHero(_ text: String) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: text)
-        label.font = .systemFont(ofSize: 24, weight: .semibold)
+        label.font = .systemFont(ofSize: 20, weight: .semibold)
         return label
     }
 
     private func echoDeskSectionTitle(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 18, weight: .semibold)
+        label.font = .systemFont(ofSize: 15, weight: .semibold)
         return label
     }
 
     private func echoDeskMuted(_ text: String) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: text)
-        label.font = .systemFont(ofSize: 13)
+        label.font = .systemFont(ofSize: 12.5)
         label.textColor = .secondaryLabelColor
         label.maximumNumberOfLines = 0
         return label
@@ -2900,7 +2976,7 @@ extension SettingsWindowController {
         let heading = echoDeskPageStack([back, title], spacing: 8)
         preview.translatesAutoresizingMaskIntoConstraints = false
         preview.heightAnchor.constraint(equalTo: preview.widthAnchor, multiplier: 0.586).isActive = true
-        let previewCard = echoDeskCard(echoDeskPageStack([
+        let previewCard = echoDeskNativeGroup(echoDeskPageStack([
             echoDeskMuted("LIVE DEVICE PREVIEW"), preview,
             echoDeskMuted("Previewed at the physical EchoDesk Mini’s 320 × 240 landscape ratio."),
         ], spacing: 9), padding: 14)
@@ -2954,27 +3030,55 @@ extension SettingsWindowController {
                                   equalColumns: equalColumns)
     }
 
-    private func echoDeskCard(_ content: NSView, padding: CGFloat = 18) -> NSView {
+    private func echoDeskCard(_ content: NSView, padding: CGFloat = 10) -> NSView {
         let card = EchoDeskSurfaceView(.card)
         content.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(content)
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: padding),
-            content.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -padding),
-            content.topAnchor.constraint(equalTo: card.topAnchor, constant: padding),
-            content.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -padding),
-        ])
+        let horizontalInset = min(padding, 14)
+        if padding <= 20 {
+            let separator = NSBox()
+            separator.boxType = .separator
+            separator.translatesAutoresizingMaskIntoConstraints = false
+            card.addSubview(separator)
+            NSLayoutConstraint.activate([
+                content.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: horizontalInset),
+                content.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -horizontalInset),
+                content.topAnchor.constraint(equalTo: card.topAnchor, constant: 6),
+                content.bottomAnchor.constraint(equalTo: separator.topAnchor, constant: -12),
+                separator.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: horizontalInset),
+                separator.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -horizontalInset),
+                separator.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                content.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: padding),
+                content.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -padding),
+                content.topAnchor.constraint(equalTo: card.topAnchor, constant: padding),
+                content.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -padding),
+            ])
+        }
         return card
+    }
+
+    /// Genuine AppKit group box, reserved for surfaces that are meaningfully
+    /// selectable or self-contained (for example connection choices and the
+    /// physical-device preview). Ordinary settings sections stay flat.
+    private func echoDeskNativeGroup(_ content: NSView, padding: CGFloat = 14) -> NSBox {
+        let box = NSBox()
+        box.boxType = .primary
+        box.titlePosition = .noTitle
+        box.contentViewMargins = NSSize(width: padding, height: padding)
+        box.contentView = content
+        return box
     }
 
     private func echoDeskPrimaryButton(_ title: String, _ action: Selector) -> NSButton {
         let button = NSButton(title: title, target: self, action: action)
         button.bezelStyle = .rounded
         button.bezelColor = .controlAccentColor
-        button.controlSize = .large
-        button.font = .systemFont(ofSize: 13, weight: .semibold)
+        button.controlSize = .regular
+        button.font = .systemFont(ofSize: 13, weight: .medium)
         button.keyEquivalent = ""
-        button.contentTintColor = .white
         return button
     }
 
@@ -2997,7 +3101,9 @@ extension SettingsWindowController {
         headingRow.orientation = .horizontal; headingRow.alignment = .centerY; headingRow.spacing = 10
         let description = echoDeskMuted(detail)
         description.maximumNumberOfLines = 5
-        return echoDeskCard(echoDeskPageStack([headingRow, description, echoDeskPrimaryButton(buttonTitle, action)]))
+        return echoDeskNativeGroup(
+            echoDeskPageStack([headingRow, description, echoDeskPrimaryButton(buttonTitle, action)]),
+            padding: 14)
     }
 
     private func echoDeskRecoveryAction(_ tag: Int, _ title: String, _ detail: String) -> NSView {
@@ -3017,15 +3123,16 @@ extension SettingsWindowController {
     }
 
     private func echoDeskLabeledControl(_ label: String, _ control: NSView) -> NSView {
-        let caption = NSTextField(labelWithString: label)
-        caption.font = .systemFont(ofSize: 13, weight: .medium)
+        let caption = NSTextField(wrappingLabelWithString: label)
+        caption.font = .systemFont(ofSize: 13, weight: .regular)
         caption.translatesAutoresizingMaskIntoConstraints = false
-        caption.widthAnchor.constraint(equalToConstant: 180).isActive = true
-        let row = NSStackView(views: [caption, control])
+        caption.maximumNumberOfLines = 2
+        caption.widthAnchor.constraint(equalToConstant: 155).isActive = true
+        let row = NSStackView(views: [caption, NSView(), control])
         row.orientation = .horizontal; row.alignment = .centerY; row.spacing = 16
-        control.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let minimumControlWidth = control.widthAnchor.constraint(greaterThanOrEqualToConstant: 180)
+        control.setContentHuggingPriority(.required, for: .horizontal)
+        control.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        let minimumControlWidth = control.widthAnchor.constraint(greaterThanOrEqualToConstant: 170)
         minimumControlWidth.priority = .defaultHigh
         minimumControlWidth.isActive = true
         return row
@@ -3041,7 +3148,7 @@ extension SettingsWindowController {
             popup.lastItem?.representedObject = value
         }
         popup.translatesAutoresizingMaskIntoConstraints = false
-        popup.widthAnchor.constraint(greaterThanOrEqualToConstant: 230).isActive = true
+        popup.widthAnchor.constraint(greaterThanOrEqualToConstant: 210).isActive = true
         echoDeskSettingControls[key] = popup
         return popup
     }
@@ -3065,8 +3172,9 @@ extension SettingsWindowController {
                 button.identifier = NSUserInterfaceItemIdentifier(id)
                 button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
                 button.imagePosition = .imageLeading; button.alignment = .left; button.bezelStyle = .rounded
+                button.controlSize = .regular
                 button.translatesAutoresizingMaskIntoConstraints = false
-                button.heightAnchor.constraint(equalToConstant: 46).isActive = true
+                button.heightAnchor.constraint(equalToConstant: 38).isActive = true
                 button.isEnabled = false
                 echoDeskAppButtons[id, default: []].append(button)
                 return button
@@ -3102,8 +3210,8 @@ extension SettingsWindowController {
     private func styleEchoDeskDropdowns(in view: NSView) {
         if let popup = view as? NSPopUpButton {
             popup.bezelStyle = .rounded
-            popup.controlSize = .large
-            popup.font = .systemFont(ofSize: 13, weight: .medium)
+            popup.controlSize = .regular
+            popup.font = .systemFont(ofSize: 13, weight: .regular)
         }
         view.subviews.forEach(styleEchoDeskDropdowns)
     }

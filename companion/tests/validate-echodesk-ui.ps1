@@ -7,6 +7,7 @@ $buildPath = Join-Path $repo 'companion\build.sh'
 $plistPath = Join-Path $repo 'companion\Resources\EchoDesk-Info.plist'
 $workflowPath = Join-Path $repo '.github\workflows\mac-app.yml'
 $dmgBackgroundPath = Join-Path $repo 'companion\Resources\DMG\EchoDesk-DMG-Background.png'
+$nativeArchitecturePath = Join-Path $repo 'companion\NATIVE-UI-ARCHITECTURE.md'
 
 function Assert-Contains([string] $Text, [string] $Needle) {
     if (-not $Text.Contains($Needle)) { throw "EchoDesk macOS parity UI is missing: $Needle" }
@@ -108,6 +109,27 @@ foreach ($redesignContract in @(
     'echoDeskLastStateMAC == expectedMAC',
     'echoDeskApplyingSetupQuickSettings = true'
 )) { Assert-Contains $source $redesignContract }
+
+foreach ($nativeContract in @(
+    'window?.titleVisibility = .visible',
+    'window?.titlebarAppearsTransparent = false',
+    'window?.toolbarStyle = .unifiedCompact',
+    'let sidebar = NSVisualEffectView()',
+    'sidebar.material = .sidebar',
+    'final class EchoDeskSetupProgressControl: NSSegmentedControl',
+    'echoDeskSetupStepper = EchoDeskSetupProgressControl(',
+    'NSWorkspace.shared.accessibilityDisplayShouldReduceMotion',
+    'document.widthAnchor.constraint(lessThanOrEqualToConstant: EchoDeskDesign.contentWidth)',
+    'private func echoDeskNativeGroup(',
+    'control.setContentHuggingPriority(.required, for: .horizontal)',
+    'echoDeskDeviceBrightness = NSSlider('
+)) { Assert-Contains $source $nativeContract }
+if ($source.Contains('layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor')) {
+    throw 'EchoDesk settings sections regressed to web-style filled cards.'
+}
+if (-not (Test-Path -LiteralPath $nativeArchitecturePath)) {
+    throw 'The native macOS migration architecture document is missing.'
+}
 
 if ($source.Contains('NSButton(title: "Apply dashboard"')) {
     throw 'PC Dashboard still exposes a redundant Apply button instead of auto-applying changes.'
@@ -300,7 +322,7 @@ foreach ($layoutNeedle in @(
     'button.layer?.backgroundColor = selected',
     'button.bezelColor = .controlAccentColor',
     'label.maximumNumberOfLines = 0',
-    'scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 22, right: 0)'
+    'scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 18, right: 0)'
 )) {
     if (-not $source.Contains($layoutNeedle)) {
         throw "EchoDesk macOS shell polish regression: missing $layoutNeedle"
