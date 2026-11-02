@@ -1737,10 +1737,22 @@ extension SettingsWindowController: NSToolbarDelegate {
         let item = NSToolbarItem(itemIdentifier: itemIdentifier)
         item.label = "Show or Hide Sidebar"
         item.paletteLabel = item.label
-        item.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: item.label)
+        item.isBordered = false
         item.toolTip = item.label
         item.target = self
         item.action = #selector(echoDeskToggleSidebar)
+        // A native borderless toolbar button keeps the template glyph legible
+        // in both appearances without drawing a white capsule behind it.
+        let button = NSButton(frame: NSRect(x: 0, y: 0, width: 36, height: 26))
+        button.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: nil)
+        button.imagePosition = .imageOnly
+        button.isBordered = false
+        button.contentTintColor = .labelColor
+        button.toolTip = item.label
+        button.setAccessibilityLabel(item.label)
+        button.target = self
+        button.action = #selector(echoDeskToggleSidebar)
+        item.view = button
         return item
 #else
         guard let section = SettingsSection(toolbarIdentifier: itemIdentifier) else { return nil }

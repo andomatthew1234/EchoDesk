@@ -785,6 +785,7 @@ extension SettingsWindowController {
         let brightnessExact = NSStackView(views: [echoDeskBedsideSchedulePointBrightness!,
                                                    echoDeskBedsideSchedulePointStepper!])
         brightnessExact.orientation = .horizontal; brightnessExact.alignment = .centerY; brightnessExact.spacing = 5
+        echoDeskBedsideSchedulePointBrightness?.widthAnchor.constraint(equalToConstant: 64).isActive = true
         let deletePoint = NSButton(title: "Remove point", target: self,
                                    action: #selector(echoDeskBedsideDeleteSelectedSchedule))
         deletePoint.contentTintColor = .systemRed
@@ -1376,7 +1377,8 @@ extension SettingsWindowController {
         let label = bedsideLabel(title, size: 13, weight: .medium)
         label.setContentHuggingPriority(.defaultLow, for: .horizontal)
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let row = NSStackView(views: [label, control])
+        let displayed: NSView = (control as? NSSegmentedControl).map { echoDeskAppearanceField($0) } ?? control
+        let row = NSStackView(views: [label, displayed])
         row.orientation = .horizontal; row.alignment = .centerY; row.spacing = 10
         (control as? NSControl)?.setAccessibilityLabel(title)
         if control is NSTextField || control is NSSlider {

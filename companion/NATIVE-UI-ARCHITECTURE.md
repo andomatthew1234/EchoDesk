@@ -21,9 +21,12 @@ The current controller owns a large set of asynchronous serial and firmware work
 - Standard titled, resizable macOS window with a unified toolbar.
 - Collapsible sidebar using the system sidebar material.
 - Semantic colours and SF Symbols.
-- Content centred at a readable maximum width and independently scrollable.
+- A window-owned viewport separates form sizing from window sizing. The sidebar occupies 200 points. Each independently scrollable page uses 24-point margins and the available width, up to 1,320 points on an ultrawide display.
+- Workspaces change columns based on their own available width, including when the sidebar is hidden. App launchers and metric grids keep the same controls and reading order during resizing.
 - Flat grouped settings rows with native controls; rounded panels are reserved for the physical-device preview or a genuine selection surface.
 - Native sheets and `NSAlert` confirmation for modal and destructive workflows.
 - Full keyboard-focus, VoiceOver labels, reduced-motion-aware page transitions, and system light/dark appearance.
 
 This keeps the protocol and release surface stable while allowing individual pages to move to SwiftUI later without rewriting the device stack.
+
+The [native layout review](tests/native-layout/README.md) runs the real AppKit interface, records its settled window and content bounds, and captures the pages and sheets for visual inspection.

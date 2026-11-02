@@ -96,7 +96,6 @@ final class EchoDeskSurfaceView: NSView {
 }
 
 final class EchoDeskSidebarButton: NSButton {
-    private let selectionBar = CALayer()
     private var tracking: NSTrackingArea?
     private var hovered = false
     var isCurrentPage = false { didSet { refreshAppearance() } }
@@ -106,8 +105,6 @@ final class EchoDeskSidebarButton: NSButton {
         wantsLayer = true
         layer?.cornerRadius = 6
         layer?.cornerCurve = .continuous
-        selectionBar.cornerRadius = 1.5
-        layer?.addSublayer(selectionBar)
         isBordered = false
         bezelStyle = .recessed
         imagePosition = .imageLeading
@@ -133,15 +130,9 @@ final class EchoDeskSidebarButton: NSButton {
         super.viewDidChangeEffectiveAppearance()
         refreshAppearance()
     }
-    override func layout() {
-        super.layout()
-        selectionBar.frame = NSRect(x: 2, y: 8, width: 3, height: max(0, bounds.height - 16))
-    }
 
     private func refreshAppearance() {
         contentTintColor = isCurrentPage ? .controlAccentColor : .labelColor
-        selectionBar.backgroundColor = NSColor.controlAccentColor.cgColor
-        selectionBar.isHidden = !isCurrentPage
         layer?.backgroundColor = isCurrentPage
             ? NSColor.controlAccentColor.withAlphaComponent(0.13).cgColor
             : hovered ? NSColor.labelColor.withAlphaComponent(0.055).cgColor : NSColor.clear.cgColor
@@ -200,17 +191,19 @@ final class EchoDeskActionTile: NSButton {
         disclosure.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
         disclosure.contentTintColor = .tertiaryLabelColor
         disclosure.widthAnchor.constraint(equalToConstant: 12).isActive = true
-        let row = NSStackView(views: [symbolView, labels, disclosure])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 12
-        row.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(row)
+        for view: NSView in [symbolView, labels, disclosure] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            row.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            symbolView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            symbolView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            labels.leadingAnchor.constraint(equalTo: symbolView.trailingAnchor, constant: 12),
+            labels.trailingAnchor.constraint(equalTo: disclosure.leadingAnchor, constant: -12),
+            labels.centerYAnchor.constraint(equalTo: centerYAnchor),
+            labels.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 8),
+            disclosure.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            disclosure.centerYAnchor.constraint(equalTo: centerYAnchor),
             heightAnchor.constraint(greaterThanOrEqualToConstant: 58),
         ])
         setAccessibilityLabel(title)
@@ -681,7 +674,19 @@ extension SettingsWindowController {
             button.tag = page.rawValue
             let glyph = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
                 ?? NSImage(systemSymbolName: "plus.circle", accessibilityDescription: nil)
-            button.image = glyph?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 16, weight: .medium))
+            // SF Symbols have different natural widths. Give each a common
+            // footprint so every native button's title begins on the same line.
+            if let symbol = glyph?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 16, weight: .medium)) {
+                let image = NSImage(size: NSSize(width: 24, height: 18), flipped: false) { rect in
+                    let factor = min(18 / max(symbol.size.width, 1), 18 / max(symbol.size.height, 1))
+                    let size = NSSize(width: symbol.size.width * factor, height: symbol.size.height * factor)
+                    symbol.draw(in: NSRect(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2,
+                                           width: size.width, height: size.height))
+                    return true
+                }
+                image.isTemplate = true
+                button.image = image
+            }
             button.translatesAutoresizingMaskIntoConstraints = false
             button.heightAnchor.constraint(equalToConstant: 32).isActive = true
             button.setAccessibilityLabel(title)
@@ -983,6 +988,7 @@ extension SettingsWindowController {
         ], spacing: 10)
         echoDeskOverviewBrightness.widthAnchor.constraint(equalTo: quickControls.widthAnchor).isActive = true
         let workspace = echoDeskAdaptiveColumns([previewFrame, quickControls], collapseBelow: 610)
+        previewFrame.widthAnchor.constraint(equalTo: quickControls.widthAnchor).isActive = true
 
         let info = EchoDeskFlowGrid(views: [
             echoDeskCompactFact("Model", echoDeskHardwareLabel), echoDeskCompactFact("Firmware", echoDeskFirmwareLabel),
@@ -1507,11 +1513,12 @@ extension SettingsWindowController {
         let caption = NSTextField(labelWithString: title)
         caption.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
         control.setAccessibilityLabel(title)
-        let field = NSStackView(views: [caption, control])
+        let displayed: NSView = (control as? NSSegmentedControl).map { echoDeskAppearanceField($0) } ?? control
+        let field = NSStackView(views: [caption, displayed])
         field.orientation = .vertical; field.alignment = .leading; field.spacing = 4
         caption.widthAnchor.constraint(equalTo: field.widthAnchor).isActive = true
-        if control is NSTextField || control is NSPopUpButton {
-            control.widthAnchor.constraint(equalTo: field.widthAnchor).isActive = true
+        if control is NSTextField || control is NSPopUpButton || control is NSSegmentedControl {
+            displayed.widthAnchor.constraint(equalTo: field.widthAnchor).isActive = true
         }
         return field
     }
@@ -1522,7 +1529,7 @@ extension SettingsWindowController {
         let wifi = echoDeskChoiceCard("Setup with WiFi",
             "Setup EchoDesk without plugging into your PC. You'll still need to use USB connection for some utilities.",
             "Setup with WiFi", #selector(echoDeskChooseWiFi))
-        let choices = echoDeskAdaptiveColumns([usb, wifi], collapseBelow: 580)
+        let choices = EchoDeskFlowGrid(views: [usb, wifi], minimumCellWidth: 282, maximumColumns: 2, spacing: 16)
         return echoDeskPageStack([
             echoDeskHero("How do you want to set up EchoDesk?"),
             echoDeskMuted("USB is recommended. WiFi setup starts only when you choose it."), choices,
@@ -1565,6 +1572,8 @@ extension SettingsWindowController {
     private func buildEchoDeskSetupWiFiStep() -> NSView {
         echoDeskGuidedWiFiStatus = echoDeskMuted("Join EchoDesk-XXXX, then find WiFi devices.")
         echoDeskGuidedWiFiDevicePopup = EchoDeskPopupButton(frame: .zero, pullsDown: false)
+        echoDeskGuidedWiFiDevicePopup.addItem(withTitle: "No setup device selected")
+        echoDeskGuidedWiFiDevicePopup.isEnabled = false
         echoDeskGuidedWiFiCode = NSTextField(); echoDeskGuidedWiFiCode.placeholderString = "8-digit setup code"
         echoDeskGuidedWiFiSSID = NSTextField(); echoDeskGuidedWiFiSSID.placeholderString = "Home WiFi name (SSID)"
         echoDeskGuidedWiFiPassword = NSSecureTextField(); echoDeskGuidedWiFiPassword.placeholderString = "Home WiFi password"
@@ -1602,7 +1611,7 @@ extension SettingsWindowController {
         let update = echoDeskChoiceCard("Check for updates",
             "EchoDesk will find your current device firmware and update it if a newer version is available.",
             "Check for updates", #selector(echoDeskCheckUpdatesDuringSetup))
-        let row = echoDeskAdaptiveColumns([now, update], collapseBelow: 580)
+        let row = EchoDeskFlowGrid(views: [now, update], minimumCellWidth: 282, maximumColumns: 2, spacing: 16)
         return echoDeskPageStack([echoDeskHero("Choose how to get started"), echoDeskSetupChoiceStatus, row], spacing: 14)
     }
 
@@ -2570,7 +2579,8 @@ extension SettingsWindowController {
         let titles = entries.isEmpty ? [placeholder] : entries.map { $0.1 }
         // Refresh runs regularly while these menus may be open. Preserve the
         // live NSMenu (including keyboard focus) unless its contents changed.
-        if popup.itemTitles != titles {
+        let currentIDs = popup.itemArray.compactMap { $0.representedObject as? String }
+        if popup.itemTitles != titles || currentIDs != entries.map({ $0.0 }) {
             let selected = popup.selectedItem?.representedObject as? String
             popup.removeAllItems()
             if entries.isEmpty { popup.addItem(withTitle: placeholder) }
@@ -2843,21 +2853,17 @@ extension SettingsWindowController {
 
     private func refreshEchoDeskGuidedWiFi() {
         let manager = EchoDeskWiFiSetupManager.shared
-        echoDeskGuidedWiFiDevicePopup.removeAllItems()
-        for device in manager.devices where device.setupMode {
-            echoDeskGuidedWiFiDevicePopup.addItem(withTitle: "\(device.displayName) — \(device.setupSSID ?? device.address)")
-            echoDeskGuidedWiFiDevicePopup.lastItem?.representedObject = device.deviceId
+        let choices = manager.devices.filter { $0.setupMode }.map {
+            ($0.deviceId, "\($0.displayName) — \($0.setupSSID ?? $0.address)")
         }
-        if echoDeskGuidedWiFiDevicePopup.numberOfItems == 0 {
-            echoDeskGuidedWiFiDevicePopup.addItem(withTitle: "No EchoDesk setup device found")
-            echoDeskGuidedWiFiDevicePopup.isEnabled = false
-        } else { echoDeskGuidedWiFiDevicePopup.isEnabled = true }
+        updateEchoDeskDeviceChoices(echoDeskGuidedWiFiDevicePopup, entries: choices,
+                                    placeholder: "No EchoDesk setup device found")
         if case .provisioning = manager.status { echoDeskGuidedWiFiConnectButton?.isEnabled = false }
         else { echoDeskGuidedWiFiConnectButton?.isEnabled = echoDeskGuidedWiFiDevicePopup.isEnabled }
         switch manager.status {
         case .idle: echoDeskGuidedWiFiStatus.stringValue = "Join EchoDesk-XXXX, then find WiFi devices."
         case .scanning: echoDeskGuidedWiFiStatus.stringValue = "Looking for EchoDesk…"
-        case .found: echoDeskGuidedWiFiStatus.stringValue = "EchoDesk found. Complete the form below."
+        case .found: echoDeskGuidedWiFiStatus.stringValue = "Enter the setup code and home Wi-Fi details."
         case .notFound: echoDeskGuidedWiFiStatus.stringValue = "No EchoDesk found. Confirm macOS is joined to EchoDesk-XXXX."
         case .provisioning: echoDeskGuidedWiFiStatus.stringValue = "Sending WiFi settings securely…"
         case .provisioned(let ssid): echoDeskGuidedWiFiStatus.stringValue = "EchoDesk joined \(ssid)."
@@ -3304,9 +3310,29 @@ extension SettingsWindowController {
         if title == "Setup with USB" || title == "Get started now" {
             button.bezelColor = .controlAccentColor
         }
-        return echoDeskNativeGroup(
-            echoDeskPageStack([headingRow, description, button], spacing: 9),
-            padding: 14)
+        let body = NSView()
+        for child: NSView in [headingRow, description, button] {
+            child.translatesAutoresizingMaskIntoConstraints = false
+            body.addSubview(child)
+        }
+        // Adjacent choices share a grid row; the longer description sets its
+        // height. Both actions stay on the same baseline without prescribing a
+        // fixed card height when the grid changes to a single column.
+        let naturalGap = button.topAnchor.constraint(equalTo: description.bottomAnchor, constant: 10)
+        naturalGap.priority = .fittingSizeCompression
+        NSLayoutConstraint.activate([
+            headingRow.topAnchor.constraint(equalTo: body.topAnchor),
+            headingRow.leadingAnchor.constraint(equalTo: body.leadingAnchor),
+            headingRow.trailingAnchor.constraint(equalTo: body.trailingAnchor),
+            description.topAnchor.constraint(equalTo: headingRow.bottomAnchor, constant: 8),
+            description.leadingAnchor.constraint(equalTo: body.leadingAnchor),
+            description.trailingAnchor.constraint(equalTo: body.trailingAnchor),
+            button.topAnchor.constraint(greaterThanOrEqualTo: description.bottomAnchor, constant: 10),
+            naturalGap, button.bottomAnchor.constraint(equalTo: body.bottomAnchor),
+            button.leadingAnchor.constraint(equalTo: body.leadingAnchor),
+            button.trailingAnchor.constraint(lessThanOrEqualTo: body.trailingAnchor)
+        ])
+        return echoDeskNativeGroup(body, padding: 14)
     }
 
     private func echoDeskRecoveryAction(_ tag: Int, _ title: String, _ detail: String) -> NSView {
@@ -3318,7 +3344,6 @@ extension SettingsWindowController {
         button.tag = tag; button.bezelStyle = .rounded
         if tag == 0 {
             button.bezelColor = .controlAccentColor
-            button.contentTintColor = .white
         } else if tag == 3 {
             button.contentTintColor = .systemRed
         }
@@ -3327,9 +3352,40 @@ extension SettingsWindowController {
         description.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let row = NSStackView(views: [description, button])
-        row.orientation = .horizontal; row.alignment = .centerY; row.spacing = 16
+        let row = NSView()
+        for child: NSView in [description, button] {
+            child.translatesAutoresizingMaskIntoConstraints = false
+            row.addSubview(child)
+        }
+        NSLayoutConstraint.activate([
+            description.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            description.topAnchor.constraint(equalTo: row.topAnchor),
+            description.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+            description.trailingAnchor.constraint(equalTo: button.leadingAnchor, constant: -16),
+            button.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            button.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            row.heightAnchor.constraint(greaterThanOrEqualTo: button.heightAnchor),
+        ])
         return echoDeskCard(row)
+    }
+
+    /// A stack can compress a segmented control into a single "…" cell and
+    /// keep it compressed even after the window grows. Give the native text
+    /// choices their own fitting space; the surrounding form may stretch.
+    func echoDeskAppearanceField(_ control: NSSegmentedControl) -> NSView {
+        let wrapper = NSView()
+        control.segmentDistribution = .fillEqually
+        for index in 0..<control.segmentCount { control.setWidth(72, forSegment: index) }
+        control.translatesAutoresizingMaskIntoConstraints = false
+        wrapper.addSubview(control)
+        NSLayoutConstraint.activate([
+            control.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+            control.trailingAnchor.constraint(lessThanOrEqualTo: wrapper.trailingAnchor),
+            control.widthAnchor.constraint(equalToConstant: 148),
+            control.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            control.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor)
+        ])
+        return wrapper
     }
 
     private func echoDeskLabeledControl(_ label: String, _ control: NSView) -> NSView {
@@ -3339,13 +3395,14 @@ extension SettingsWindowController {
         caption.setContentHuggingPriority(.defaultLow, for: .horizontal)
         caption.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         control.setAccessibilityLabel(label)
-        control.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        let fieldWidth = control.widthAnchor.constraint(equalToConstant: 196)
+        let displayed: NSView = (control as? NSSegmentedControl).map { echoDeskAppearanceField($0) } ?? control
+        displayed.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        let fieldWidth = displayed.widthAnchor.constraint(equalToConstant: 196)
         fieldWidth.priority = .defaultHigh
         fieldWidth.isActive = true
         // A narrow inspector puts the label above the control rather than
         // truncating it or forcing the entire page into horizontal overflow.
-        let row = EchoDeskAdaptiveStackView(views: [caption, control], collapseBelow: 352,
+        let row = EchoDeskAdaptiveStackView(views: [caption, displayed], collapseBelow: 352,
                                            equalColumns: false, wideAlignment: .centerY, wideGap: 16, compactGap: 4)
         return row
     }
@@ -3398,8 +3455,20 @@ extension SettingsWindowController {
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
         if action == #selector(echoDeskFactoryReset) { button.contentTintColor = .systemRed }
         echoDeskMaintenanceButtons.append(button)
-        let row = NSStackView(views: [text, button])
-        row.orientation = .horizontal; row.alignment = .centerY; row.spacing = 16
+        let row = NSView()
+        for view: NSView in [text, button] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            row.addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            text.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            text.trailingAnchor.constraint(equalTo: button.leadingAnchor, constant: -16),
+            text.topAnchor.constraint(equalTo: row.topAnchor),
+            text.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+            button.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            button.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            row.heightAnchor.constraint(greaterThanOrEqualTo: button.heightAnchor)
+        ])
         return echoDeskCard(row)
     }
 

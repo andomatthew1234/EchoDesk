@@ -10,6 +10,17 @@ def verify(root):
         for style in ("light", "dark"):
             folder = root / f"{width}x{height}" / style
             records = json.loads((folder / "geometry.json").read_text())
+            expected = {"first-launch", "first-device", "overview", "overview-disconnected",
+                        "device-control", "customisation", "bedside", "bedside-alarms", "bedside-display",
+                        "setup-connect", "setup-usb", "setup-wifi", "setup-install-choice",
+                        "setup-install-progress", "setup-quick-settings", "setup-ready",
+                        "recovery", "recovery-maintenance", "recovery-complete",
+                        "clock-chooser", "clock-countdown", "clock-focus", "clock-stopwatch",
+                        "firmware-confirmation", "confirm-reset", "confirm-restart"}
+            if missing := expected.difference(records):
+                errors.append(f"{folder.relative_to(root)}: missing views {sorted(missing)}")
+            if width == 1440 and not (folder / "live-resize.json").is_file():
+                errors.append(f"{folder.relative_to(root)}: missing live resizing results")
             for name, record in records.items():
                 if (name.startswith(("clock-", "confirm-")) or name == "firmware-confirmation"):
                     continue  # Sheets have a content-dependent fitting size.

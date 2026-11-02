@@ -4,6 +4,7 @@ On a Mac with Xcode and a logged-in window session, run:
 
 ```sh
 python3 companion/tests/native-layout/capture.py --output /tmp/echodesk-captures
+python3 companion/tests/native-layout/verify.py /tmp/echodesk-captures
 ```
 
 The same command runs on the **EchoDesk macOS visual review** Actions runner.
@@ -18,7 +19,8 @@ about presentation, not tests of device communication.
 Inspect the PNGs under **native-layout / window size / light or dark** at full
 size. Each folder also includes:
 
-- `geometry.json`: window size, native bitmap resolution and label/button frames.
+- `geometry.json`: requested and settled window sizes, scroll viewport, usable page width, native bitmap resolution and label/button frames.
+- `live-resize.json` in the 1440-point folders: the same Clock settings window resized through all four breakpoints with the sidebar visible and hidden.
 - `app.log`: AppKit diagnostics, including any conflicting constraints.
 
 The snapshots use AppKit's own view bitmap cache. They include the title bar and
