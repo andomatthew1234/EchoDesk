@@ -1,0 +1,23 @@
+name: EchoDesk macOS visual review
+on:
+  push:
+    branches: ['codex/desktop-visual-*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  render:
+    runs-on: macos-26
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native capture app and inspect layout matrix
+        run: python3 companion/tests/native-layout/capture.py --output "$RUNNER_TEMP/native-layout"
+      - name: Upload screenshots and geometry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-layout
+          path: ${{ runner.temp }}/native-layout
+          if-no-files-found: error
+          retention-days: 14
