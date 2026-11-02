@@ -660,24 +660,20 @@ extension SettingsWindowController {
         echoDeskBedsideAlarmRows.removeAll()
         echoDeskBedsideStatus = bedsideMuted(bedsideStatusText)
         var views: [NSView] = [bedsideHeader("Manage alarms", "Alarms are stored and evaluated directly on EchoDesk.")]
-        if echoDeskBedsideAlarmDrafts.isEmpty {
-            views.append(bedsideCard(bedsideStack([
-                bedsideSectionTitle("No alarms yet"),
-                bedsideMuted("Add an alarm. It will work whenever EchoDesk has power and valid network time."),
-            ])))
-        } else {
-            let cards = echoDeskBedsideAlarmDrafts.sorted(by: { $0.id < $1.id }).map(buildEchoDeskBedsideAlarmRow)
-            views.append(EchoDeskFlowGrid(views: cards, minimumCellWidth: 355, maximumColumns: 2))
-        }
+        var cards = echoDeskBedsideAlarmDrafts.sorted(by: { $0.id < $1.id }).map(buildEchoDeskBedsideAlarmRow)
         let add = NSButton(title: "Add alarm", target: self, action: #selector(echoDeskBedsideAddAlarm))
         add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
         add.imagePosition = .imageLeading
-        add.isEnabled = bedsideStateReady && echoDeskBedsideAlarmDrafts.count < 8
-        let autoSave = bedsideMuted("Changes save automatically on EchoDesk.")
-        let actions = NSStackView(views: [autoSave, NSView(), add])
-        actions.orientation = .horizontal; actions.alignment = .centerY
+        add.isEnabled = bedsideStateReady && cards.count < 8
+        if cards.count < 8 {
+            cards.append(bedsideCard(bedsideStack([
+                bedsideSectionTitle(cards.isEmpty ? "No alarms yet" : "Add another alarm"),
+                bedsideMuted("Keep up to eight alarms on the Mini. They work from power alone after it has the time."),
+                add
+            ], spacing: 10)))
+        }
+        views.append(EchoDeskFlowGrid(views: cards, minimumCellWidth: 355, maximumColumns: 2))
         views.append(bedsideStatusRow())
-        views.append(actions)
         return views
     }
 
