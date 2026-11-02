@@ -138,7 +138,7 @@ if ($bedside.Contains('preview.widthAnchor.constraint(equalToConstant: 416)')) {
     throw 'Bedside layout regression: the preview must compress with the page instead of forcing overflow at 820px.'
 }
 Assert-Contains $bedside 'preview.heightAnchor.constraint(equalTo: preview.widthAnchor'
-Assert-Contains $bedside 'icon.setAccessibilityHidden(true)'
+Assert-Contains $bedside 'EchoDeskActionTile(title: title, detail: detail, symbol: symbol, target: self, action: action)'
 if ($bedside.Contains('max(0.65, min(1.0')) {
     throw 'Bedside preview drawing no longer fits the supported 240-point compact preview width.'
 }

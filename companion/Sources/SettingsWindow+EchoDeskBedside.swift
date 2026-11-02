@@ -235,7 +235,7 @@ final class EchoDeskBrightnessTimelineView: NSView {
     private var isDraggingPoint = false
 
     override var acceptsFirstResponder: Bool { true }
-    override var intrinsicContentSize: NSSize { NSSize(width: 620, height: 226) }
+    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 216) }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -432,12 +432,12 @@ final class EchoDeskBedsideAppearancePreview: NSView {
 final class EchoDeskBedsidePreviewView: NSView {
     var config = EchoDeskBedsideConfig.defaults { didSet { needsDisplay = true } }
 
-    override var intrinsicContentSize: NSSize { NSSize(width: 416, height: 234) }
+    override var intrinsicContentSize: NSSize { NSSize(width: 320, height: 240) }
     override var wantsUpdateLayer: Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        let scale = max(0.01, min(1.0, min(bounds.width / 416, bounds.height / 234)))
+        let scale = max(0.01, min(bounds.width / 320, bounds.height / 240))
         let currentMinute = Calendar.current.component(.hour, from: Date()) * 60
             + Calendar.current.component(.minute, from: Date())
         let dark = config.themeScheduleEnabled
@@ -471,15 +471,17 @@ final class EchoDeskBedsidePreviewView: NSView {
 
         let widgetY: CGFloat = 24 * scale
         var widgetX: CGFloat = 22 * scale
+        let available = bounds.width - 44 * scale
+        let half = (available - 8 * scale) / 2
         if config.nextAlarmWidget {
             drawWidget(title: "NEXT ALARM", value: nextAlarmText(), x: widgetX, y: widgetY,
-                       width: config.weatherWidget ? 178 * scale : bounds.width - 44 * scale,
+                       width: config.weatherWidget ? half : available,
                        foreground: foreground, scale: scale)
-            widgetX += 190 * scale
+            widgetX += half + 8 * scale
         }
         if config.weatherWidget {
             drawWidget(title: "WEATHER", value: "Coming soon", x: widgetX, y: widgetY,
-                       width: config.nextAlarmWidget ? 178 * scale : bounds.width - 44 * scale,
+                       width: config.nextAlarmWidget ? half : available,
                        foreground: foreground, scale: scale)
         }
         if !config.nextAlarmWidget && !config.weatherWidget {
@@ -534,6 +536,7 @@ extension SettingsWindowController {
     }
 
     @objc func echoDeskOpenBedsideCustomisation() {
+        if echoDeskBedsideSection != "root" { renderEchoDeskBedsideSection("root") }
         selectEchoDeskPage(.bedside)
     }
 
@@ -552,6 +555,7 @@ extension SettingsWindowController {
     }
 
     private func renderEchoDeskBedsideSection(_ section: String) {
+        let enteringSection = echoDeskBedsideSection != section
         echoDeskBedsideSection = section
         guard let document = echoDeskBedsideDocument else { return }
         document.arrangedSubviews.forEach { view in document.removeArrangedSubview(view); view.removeFromSuperview() }
@@ -565,48 +569,51 @@ extension SettingsWindowController {
         views.forEach { $0.widthAnchor.constraint(equalTo: document.widthAnchor).isActive = true }
         document.needsLayout = true
         document.layoutSubtreeIfNeeded()
+        if enteringSection, let scroll = document.enclosingScrollView {
+            scroll.documentView?.layoutSubtreeIfNeeded()
+            scroll.contentView.scroll(to: .zero)
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
     }
 
     private func bedsideHeader(_ title: String, _ subtitle: String, root: Bool = false) -> NSView {
-        let back = NSButton(image: NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back")!,
-                            target: self,
+        let back = NSButton(title: root ? "All Customisation" : "Bedside Mode", target: self,
                             action: root ? #selector(echoDeskBedsideBackToCustomisation) : #selector(echoDeskBedsideShowRoot))
-        back.bezelStyle = .texturedRounded
-        back.controlSize = .large
-        let heading = bedsideLabel(title, size: 29, weight: .semibold)
+        back.image = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: nil)
+        back.imagePosition = .imageLeading; back.bezelStyle = .inline
+        let heading = bedsideLabel(title, size: 26, weight: .semibold)
         let detail = bedsideMuted(subtitle)
         let text = bedsideStack([heading, detail], spacing: 3)
-        let row = NSStackView(views: [back, text, NSView()])
-        row.orientation = .horizontal; row.alignment = .centerY; row.spacing = 14
-        return row
+        return bedsideStack([back, text], spacing: 8)
     }
 
     private func buildEchoDeskBedsideRootSection() -> [NSView] {
         let preview = EchoDeskBedsidePreviewView()
         preview.config = echoDeskBedsideConfig
         preview.translatesAutoresizingMaskIntoConstraints = false
-        let previewMaximumWidth = preview.widthAnchor.constraint(lessThanOrEqualToConstant: 416)
-        previewMaximumWidth.priority = .defaultHigh
-        previewMaximumWidth.isActive = true
-        let previewMinimumWidth = preview.widthAnchor.constraint(greaterThanOrEqualToConstant: 240)
-        previewMinimumWidth.priority = .defaultHigh
-        previewMinimumWidth.isActive = true
-        preview.heightAnchor.constraint(equalTo: preview.widthAnchor, multiplier: 234 / 416).isActive = true
+        preview.heightAnchor.constraint(equalTo: preview.widthAnchor, multiplier: 0.75).isActive = true
         preview.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let stage = NSView()
+        stage.addSubview(preview)
+        let preferredWidth = preview.widthAnchor.constraint(equalTo: stage.widthAnchor)
+        preferredWidth.priority = .defaultHigh
+        NSLayoutConstraint.activate([preferredWidth, preview.widthAnchor.constraint(lessThanOrEqualTo: stage.widthAnchor),
+            preview.widthAnchor.constraint(lessThanOrEqualToConstant: 304),
+            preview.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
+            preview.topAnchor.constraint(equalTo: stage.topAnchor), preview.bottomAnchor.constraint(equalTo: stage.bottomAnchor)])
+        preview.setAccessibilityElement(true); preview.setAccessibilityRole(.image)
+        preview.setAccessibilityLabel("Bedside clock and selected widgets preview")
         echoDeskBedsidePreview = preview
 
         echoDeskBedsideStatus = bedsideMuted(bedsideStatusText)
         let open = bedsidePrimaryButton("Open on EchoDesk", #selector(echoDeskBedsideOpenOnDevice))
         open.isEnabled = bedsideCapabilityAvailable
         let intro = bedsideCard(bedsideStack([
-            bedsideLabel("Bedside Mode", size: 22, weight: .semibold),
-            bedsideMuted("A calm, standalone clock with alarms and a display schedule separate from the rest of EchoDesk OS."),
+            bedsideSectionTitle("On your EchoDesk"),
+            bedsideMuted("The Mini keeps these settings for Bedside Mode, separate from its usual display settings."),
             bedsideStatusRow(), open,
         ], spacing: 12))
-        let hero = EchoDeskAdaptiveStackView(views: [preview, intro], collapseBelow: 640, equalColumns: false)
-        let previewShare = preview.widthAnchor.constraint(equalTo: hero.widthAnchor, multiplier: 0.5, constant: -8)
-        previewShare.priority = .defaultHigh
-        previewShare.isActive = true
+        let hero = EchoDeskAdaptiveStackView(views: [stage, intro], collapseBelow: 625)
 
         echoDeskBedsideClockFormat = bedsidePopup([("12-hour", "12h"), ("24-hour", "24h")],
                                                    selected: echoDeskBedsideConfig.clockFormat,
@@ -621,7 +628,7 @@ extension SettingsWindowController {
         echoDeskBedsideShowSeconds?.isEnabled = bedsideStateReady
         let clock = bedsideCard(bedsideStack([
             bedsideSectionTitle("Clock"),
-            bedsideMuted("Choose the clock appearance used only inside Bedside Mode. Changes apply automatically."),
+            bedsideMuted("Set the face shown in the top half of the display."),
             bedsideControlRow("Time format", echoDeskBedsideClockFormat!),
             bedsideControlRow("Appearance", echoDeskBedsideClockStyle!),
             echoDeskBedsideShowSeconds!,
@@ -636,7 +643,7 @@ extension SettingsWindowController {
         echoDeskBedsideWeatherWidget?.isEnabled = false
         let widgets = bedsideCard(bedsideStack([
             bedsideSectionTitle("Widgets"),
-            bedsideMuted("Widgets live in the lower half and save automatically. Weather is designed here but intentionally unavailable until its data source ships."),
+            bedsideMuted("Choose what appears below the clock."),
             echoDeskBedsideNextAlarmWidget!, echoDeskBedsideWeatherWidget!,
         ], spacing: 11))
         let choices = EchoDeskAdaptiveStackView(views: [clock, widgets], collapseBelow: 660)
@@ -659,9 +666,8 @@ extension SettingsWindowController {
                 bedsideMuted("Add an alarm. It will work whenever EchoDesk has power and valid network time."),
             ])))
         } else {
-            for alarm in echoDeskBedsideAlarmDrafts.sorted(by: { $0.id < $1.id }) {
-                views.append(buildEchoDeskBedsideAlarmRow(alarm))
-            }
+            let cards = echoDeskBedsideAlarmDrafts.sorted(by: { $0.id < $1.id }).map(buildEchoDeskBedsideAlarmRow)
+            views.append(EchoDeskFlowGrid(views: cards, minimumCellWidth: 355, maximumColumns: 2))
         }
         let add = NSButton(title: "Add alarm", target: self, action: #selector(echoDeskBedsideAddAlarm))
         add.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
@@ -695,9 +701,8 @@ extension SettingsWindowController {
         [enabled, time, days, label, remove].forEach { $0.isEnabled = bedsideStateReady }
         let top = NSStackView(views: [bedsideSectionTitle(alarm.label.isEmpty ? "Alarm \(alarm.id)" : alarm.label), NSView(), enabled, remove])
         top.orientation = .horizontal; top.alignment = .centerY; top.spacing = 10
-        let controls = NSStackView(views: [bedsideControlRow("Time", time), bedsideControlRow("Repeats", days),
-                                           bedsideControlRow("Label", label)])
-        controls.orientation = .vertical; controls.alignment = .leading; controls.spacing = 9
+        let controls = bedsideStack([bedsideControlRow("Time", time), bedsideControlRow("Repeats", days),
+                                     bedsideControlRow("Label", label)], spacing: 9)
         echoDeskBedsideAlarmRows.append(.init(id: alarm.id, enabled: enabled, time: time,
                                                days: days, label: label, remove: remove))
         return bedsideCard(bedsideStack([top, controls], spacing: 12))
@@ -784,7 +789,7 @@ extension SettingsWindowController {
         deletePoint.contentTintColor = .systemRed
         echoDeskBedsideScheduleDeleteButton = deletePoint
         let exactEditor = bedsideStack([
-            bedsideMuted("Selected point — use these controls for exact keyboard-accessible values."),
+            bedsideSectionTitle("Selected point"),
             bedsideControlRow("Point", echoDeskBedsideSchedulePointPopup!),
             bedsideControlRow("Starts at", echoDeskBedsideSchedulePointTime!),
             bedsideControlRow("Brightness", brightnessExact), deletePoint,
@@ -793,7 +798,8 @@ extension SettingsWindowController {
         addTime.image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
         addTime.isEnabled = bedsideStateReady && echoDeskBedsideScheduleDrafts.count < 8
         echoDeskBedsideScheduleAddButton = addTime
-        echoDeskBedsideScheduleDetails = bedsideStack([timeline, exactEditor, addTime], spacing: 10)
+        let timelineTools = EchoDeskAdaptiveStackView(views: [timeline, exactEditor], collapseBelow: 820)
+        echoDeskBedsideScheduleDetails = bedsideStack([timelineTools, addTime], spacing: 10)
         echoDeskBedsideManualBrightnessDetails = bedsideControlRow("Manual brightness",
                                                                     echoDeskBedsideManualBrightness!)
         let schedule = bedsideCard(bedsideStack([
@@ -814,9 +820,8 @@ extension SettingsWindowController {
         [echoDeskBedsideNightStart, echoDeskBedsideNightEnd].forEach {
             $0?.target = self; $0?.action = #selector(echoDeskBedsideDisplayChanged)
         }
-        let nightTimes = NSStackView(views: [bedsideControlRow("From", echoDeskBedsideNightStart!),
-                                             bedsideControlRow("Until", echoDeskBedsideNightEnd!)])
-        nightTimes.orientation = .horizontal; nightTimes.distribution = .fillEqually; nightTimes.spacing = 12
+        let nightTimes = bedsideStack([bedsideControlRow("From", echoDeskBedsideNightStart!),
+                                       bedsideControlRow("Until", echoDeskBedsideNightEnd!)], spacing: 6)
         echoDeskBedsideNightScheduleDetails = nightTimes
         echoDeskBedsideNightManualDetails = echoDeskBedsideNightManual
         let warmth = EchoDeskBedsideTemperatureStrip()
@@ -838,9 +843,8 @@ extension SettingsWindowController {
         [echoDeskBedsideThemeStart, echoDeskBedsideThemeEnd].forEach {
             $0?.target = self; $0?.action = #selector(echoDeskBedsideDisplayChanged)
         }
-        let themeTimes = NSStackView(views: [bedsideControlRow("Dark from", echoDeskBedsideThemeStart!),
-                                             bedsideControlRow("Light from", echoDeskBedsideThemeEnd!)])
-        themeTimes.orientation = .horizontal; themeTimes.distribution = .fillEqually; themeTimes.spacing = 12
+        let themeTimes = bedsideStack([bedsideControlRow("Dark from", echoDeskBedsideThemeStart!),
+                                       bedsideControlRow("Light from", echoDeskBedsideThemeEnd!)], spacing: 6)
         echoDeskBedsideThemeScheduleDetails = themeTimes
         echoDeskBedsideThemeManualDetails = bedsideControlRow("Appearance", echoDeskBedsideThemeManualDark!)
         echoDeskBedsideThemeEffective = bedsideMuted("")
@@ -869,7 +873,7 @@ extension SettingsWindowController {
         refreshEchoDeskBedsideEffectiveBrightness()
         updateEchoDeskBedsideDisplayDisclosure()
         return [bedsideHeader("Auto-brightness and display", "Schedules repeat locally without EchoDesk Desktop."),
-                schedule, night, theme, bedsideStatusRow()]
+                schedule, EchoDeskAdaptiveStackView(views: [night, theme], collapseBelow: 680), bedsideStatusRow()]
     }
 
     @objc private func echoDeskBedsideAddSchedule() {
@@ -1318,7 +1322,8 @@ extension SettingsWindowController {
         let stack = NSStackView(views: views)
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = spacing
         for view in views {
-            if view is NSTextField || view is NSStackView || view is EchoDeskBrightnessTimelineView {
+            if view is NSTextField || view is NSStackView || view is EchoDeskBrightnessTimelineView ||
+                view is EchoDeskBedsideTemperatureStrip || view is EchoDeskFlowGrid {
                 view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             }
         }
@@ -1330,10 +1335,10 @@ extension SettingsWindowController {
         content.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(content)
         NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 18),
-            content.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
-            content.topAnchor.constraint(equalTo: card.topAnchor, constant: 18),
-            content.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -18),
+            content.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
+            content.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
+            content.topAnchor.constraint(equalTo: card.topAnchor, constant: 10),
+            content.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -10),
         ])
         return card
     }
@@ -1345,7 +1350,7 @@ extension SettingsWindowController {
         return label
     }
 
-    private func bedsideSectionTitle(_ text: String) -> NSTextField { bedsideLabel(text, size: 18, weight: .semibold) }
+    private func bedsideSectionTitle(_ text: String) -> NSTextField { bedsideLabel(text, size: 15, weight: .semibold) }
     private func bedsideMuted(_ text: String) -> NSTextField {
         let label = bedsideLabel(text, size: 13, weight: .regular)
         label.textColor = .secondaryLabelColor; label.maximumNumberOfLines = 0
@@ -1354,7 +1359,7 @@ extension SettingsWindowController {
 
     private func bedsidePrimaryButton(_ title: String, _ action: Selector) -> NSButton {
         let button = NSButton(title: title, target: self, action: action)
-        button.bezelStyle = .rounded; button.controlSize = .large
+        button.bezelStyle = .rounded; button.controlSize = .regular
         button.keyEquivalent = ""
         button.contentTintColor = .controlAccentColor
         return button
@@ -1362,28 +1367,30 @@ extension SettingsWindowController {
 
     private func bedsideNavigationCard(_ title: String, _ detail: String, _ symbol: String,
                                        _ action: Selector) -> NSView {
-        let icon = NSImageView()
-        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        icon.setAccessibilityHidden(true)
-        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 26, weight: .medium)
-        icon.contentTintColor = .controlAccentColor
-        let button = bedsidePrimaryButton("Open…", action)
-        return bedsideCard(bedsideStack([icon, bedsideSectionTitle(title), bedsideMuted(detail), button], spacing: 9))
+        EchoDeskActionTile(title: title, detail: detail, symbol: symbol, target: self, action: action)
     }
 
     private func bedsideControlRow(_ title: String, _ control: NSView) -> NSView {
         let label = bedsideLabel(title, size: 13, weight: .medium)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.widthAnchor.constraint(equalToConstant: 145).isActive = true
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let row = NSStackView(views: [label, control])
-        row.orientation = .horizontal; row.alignment = .centerY; row.spacing = 12
+        row.orientation = .horizontal; row.alignment = .centerY; row.spacing = 10
+        (control as? NSControl)?.setAccessibilityLabel(title)
+        if control is NSTextField || control is NSSlider {
+            let width = control.widthAnchor.constraint(equalToConstant: 148)
+            width.priority = .defaultHigh
+            width.isActive = true
+        } else {
+            control.setContentHuggingPriority(.required, for: .horizontal)
+        }
         return row
     }
 
     private func bedsidePopup(_ options: [(String, String)], selected: String,
                               action: Selector?) -> NSPopUpButton {
         let popup = NSPopUpButton(frame: .zero, pullsDown: false)
-        popup.bezelStyle = .rounded; popup.controlSize = .large
+        popup.bezelStyle = .rounded; popup.controlSize = .regular
         popup.target = action == nil ? nil : self; popup.action = action
         for (title, value) in options {
             popup.addItem(withTitle: title); popup.lastItem?.representedObject = value

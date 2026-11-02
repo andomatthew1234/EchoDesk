@@ -79,7 +79,9 @@ foreach ($polishContract in @(
     'private func buildEchoDeskClockConfiguration(mode: String) -> NSView',
     'echoDeskClockSelectedMode = mode',
     'echoDeskClockFinishConfiguration',
-    'window.styleMask = [.titled, .closable, .fullSizeContentView]',
+    'private func makeEchoDeskClockWindow(title: String, width: CGFloat)',
+    'content.fittingSize.height + 2 * verticalPadding',
+    'initialFirstResponder = focusOrder.compactMap',
     'private func presentEchoDeskNotificationSetup()',
     'echoDeskNotificationSetupWindow',
     'echoDeskNotificationSyncedPort',
@@ -121,7 +123,9 @@ foreach ($nativeContract in @(
     'NSWorkspace.shared.accessibilityDisplayShouldReduceMotion',
     'document.widthAnchor.constraint(lessThanOrEqualToConstant: EchoDeskDesign.contentWidth)',
     'private func echoDeskNativeGroup(',
-    'control.setContentHuggingPriority(.required, for: .horizontal)',
+    'collapseBelow: 352',
+    'fill.priority = NSLayoutConstraint.Priority(999)',
+    'final class EchoDeskAdaptiveStackView: NSStackView',
     'echoDeskDeviceBrightness = NSSlider('
 )) { Assert-Contains $source $nativeContract }
 if ($source.Contains('layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor')) {
@@ -322,7 +326,8 @@ foreach ($layoutNeedle in @(
     'button.layer?.backgroundColor = selected',
     'button.bezelColor = .controlAccentColor',
     'label.maximumNumberOfLines = 0',
-    'scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 18, right: 0)'
+    'scroll.hasHorizontalScroller = false',
+    'let wrapper = EchoDeskPageDocument()'
 )) {
     if (-not $source.Contains($layoutNeedle)) {
         throw "EchoDesk macOS shell polish regression: missing $layoutNeedle"

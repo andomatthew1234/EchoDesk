@@ -5047,15 +5047,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard appMgr.hasUpdate else { return }
         let alert = NSAlert()
         alert.messageText = L("update.available.title")
-        let assetNames = appMgr.latestRelease?.assets.map(\.name).joined(separator: ", ") ?? "—"
         let hasZip = appMgr.availableUpdateAsset != nil
 #if ECHODESK_DESKTOP
         let hasDMG = appMgr.latestRelease?.assets.contains {
             $0.name.hasPrefix("EchoDesk-Desktop-v") && $0.name.hasSuffix("-macos-universal.dmg")
         } ?? false
+        alert.messageText = "EchoDesk Desktop \(appMgr.latestVersionDisplay) is available"
+        var info = "Installed version: \(kAppVersion). "
+        info += hasZip ? "Download the update to continue." :
+            (hasDMG ? "Open the release page to download the Mac installer." : "Visit the release page for available downloads.")
 #else
+        let assetNames = appMgr.latestRelease?.assets.map(\.name).joined(separator: ", ") ?? "—"
         let hasDMG = appMgr.latestRelease?.assets.contains { $0.name == "AIMonitor.dmg" } ?? false
-#endif
         var info = """
         Version: \(appMgr.latestVersionDisplay)
         Installiert: v\(kAppVersion)
@@ -5064,6 +5067,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         macOS prüft Signatur und Notarisierung beim Start der App.
         Assets: \(assetNames)
         """
+#endif
         if let body = appMgr.latestRelease?.body, !body.isEmpty {
             let plain = body
                 .replacingOccurrences(of: "## ", with: "")

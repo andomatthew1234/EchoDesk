@@ -91,6 +91,7 @@ SWIFT_SOURCES=(
   Sources/EchoDeskFirmwareUpdates.swift
   Sources/EchoDeskTelemetry.swift
   Sources/SettingsWindow+EchoDeskWifiSetup.swift
+  Sources/EchoDeskWorkspaceLayout.swift
   Sources/SettingsWindow+EchoDeskDesktop.swift
   Sources/SettingsWindow+EchoDeskBedside.swift
 )

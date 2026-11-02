@@ -131,7 +131,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     // the native desktop-window state and never duplicate hardware ownership.
     var echoDeskSidebarButtons: [NSButton] = []
     weak var echoDeskSidebarView: NSView?
-    var echoDeskSidebarWidthConstraint: NSLayoutConstraint?
+    var echoDeskSidebarOrigin: NSLayoutConstraint?
     var echoDeskPageViews: [NSView] = []
     var echoDeskSelectedPage: EchoDeskDesktopPage = .overview
     var echoDeskPageTransitionGeneration = 0
@@ -154,6 +154,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskDeviceBrightness: NSSlider!
     var echoDeskCommandStatus: NSTextField!
     var echoDeskDeviceControlStatus: NSTextField!
+    var echoDeskOverviewPreview: EchoDeskScreenPreview?
+    var echoDeskMaintenanceButtons: [NSButton] = []
     var echoDeskComponentStatus: NSTextField!
     var echoDeskComponentDetail: NSTextField!
     var echoDeskComponentUpdated: NSTextField!
@@ -176,6 +178,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskSetupDeviceFirmware: NSTextField!
     var echoDeskSetupDeviceSerial: NSTextField!
     var echoDeskSetupTroubleButton: NSButton!
+    var echoDeskSetupStartButton: NSButton!
     var echoDeskShowUnknownDevices = false
     var echoDeskSetupChoiceStatus: NSTextField!
     var echoDeskSetupProgress: NSProgressIndicator!
@@ -190,6 +193,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskGuidedWiFiCode: NSTextField!
     var echoDeskGuidedWiFiSSID: NSTextField!
     var echoDeskGuidedWiFiPassword: NSSecureTextField!
+    var echoDeskGuidedWiFiConnectButton: NSButton!
     var echoDeskRecoveryDevicePopup: NSPopUpButton!
     var echoDeskRecoveryActions: NSStackView!
     var echoDeskRecoveryStatus: NSTextField!
@@ -219,6 +223,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     var echoDeskClockFocusMinutes: NSTextField?
     var echoDeskClockBreakMinutes: NSTextField?
     var echoDeskClockRounds: NSTextField?
+    var echoDeskClockFeedback: NSTextField?
+    var echoDeskClockDone: NSButton?
     var echoDeskClockRefreshTimer: Timer?
     var echoDeskClockStateRequestInFlight = false
     var echoDeskPcDashboardPopups: [NSPopUpButton] = []
@@ -1335,7 +1341,7 @@ final class TimeZoneTableSource: NSObject, NSTableViewDataSource, NSTableViewDel
 /// CYD-Revisionen (ILI9341 vs. ST7789) am Produktnamen nicht unterscheidbar
 /// sind. Der Dialog wird per `presentModal(info:defaultVariant:completion:)`
 /// angezeigt und liefert die gewaehlte Variante (oder `nil` bei Abbruch).
-final class FlashDialogController: NSWindowController {
+final class FlashDialogController: NSWindowController, NSWindowDelegate {
 
     /// Einstiegspunkt. Blockiert nicht (runModal wird selbst aufgerufen).
     /// `defaultVariant` waehlt den Radio-Button vor (aus DeviceProfile oder
@@ -1358,15 +1364,26 @@ final class FlashDialogController: NSWindowController {
                                                detectedChip: detectedChip)
         controller.completion = completion
         guard let window = controller.window else { completion(nil); return }
+#if ECHODESK_DESKTOP
+        if let parent = NSApp.mainWindow, parent.isVisible, parent.attachedSheet == nil {
+            parent.beginSheet(window) { _ in
+                let callback = controller.completion
+                controller.completion = nil
+                callback?(controller.sheetSelection)
+            }
+            return
+        }
+#endif
         // Modal gegenueber dem Settings-Fenster (falls offen), sonst
         // standalone-Modal. runModal blockiert den Main-Thread — ok, wir
         // kommen aus einer UI-Action.
         window.center()
-        NSApp.runModal(for: window)
+        withExtendedLifetime(controller) { _ = NSApp.runModal(for: window) }
         window.orderOut(nil)
     }
 
     private var completion: ((String?) -> Void)?
+    private var sheetSelection: String?
     private var radioStandard: NSButton!
     private var radioAlternative: NSButton!
     private var radioS3: NSButton!
@@ -1402,6 +1419,7 @@ final class FlashDialogController: NSWindowController {
         window.title = L("flashdlg.title")
         window.isReleasedWhenClosed = false
         super.init(window: window)
+        window.delegate = self
         buildUI()
     }
 
@@ -1415,13 +1433,17 @@ final class FlashDialogController: NSWindowController {
         title.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(title)
 
-        let infoLabel = NSTextField(labelWithString: infoText)
+        let infoLabel = NSTextField(wrappingLabelWithString: infoText)
         infoLabel.font = NSFont.appFont(.callout)
         infoLabel.textColor = .secondaryLabelColor
         infoLabel.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(infoLabel)
 
+#if ECHODESK_DESKTOP
+        let preflightTitle = NSTextField(labelWithString: "Before installing")
+#else
         let preflightTitle = NSTextField(labelWithString: "Preflight-Check")
+#endif
         preflightTitle.font = NSFont.appFont(.callout, weight: .medium)
         preflightTitle.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(preflightTitle)
@@ -1552,6 +1574,15 @@ final class FlashDialogController: NSWindowController {
             cancelBtn.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -18),
             cancelBtn.trailingAnchor.constraint(equalTo: startBtn.leadingAnchor, constant: -10),
         ])
+#if ECHODESK_DESKTOP
+        // The warning, preflight checks and localised hint can each wrap.
+        // Size to their measured height so that neither footer button covers them.
+        content.layoutSubtreeIfNeeded()
+        let bodyHeight = content.bounds.maxY - hint.frame.minY
+        let footerHeight = max(cancelBtn.fittingSize.height, startBtn.fittingSize.height)
+        window?.setContentSize(NSSize(width: content.bounds.width, height: ceil(bodyHeight + 18 + footerHeight + 18)))
+        window?.initialFirstResponder = cancelBtn
+#endif
     }
 
     @objc private func variantChanged(_ sender: NSButton) {
@@ -1570,15 +1601,28 @@ final class FlashDialogController: NSWindowController {
         } else {
             chosen = kDisplayVariantILI9341
         }
-        NSApp.stopModal()
-        completion?(chosen)
-        completion = nil
+        finish(chosen)
     }
 
     @objc private func onCancel() {
-        NSApp.stopModal()
-        completion?(nil)
-        completion = nil
+        finish(nil)
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        finish(nil)
+        return false
+    }
+
+    private func finish(_ selection: String?) {
+        if let window, let parent = window.sheetParent {
+            sheetSelection = selection
+            parent.endSheet(window)
+        } else {
+            NSApp.stopModal()
+            let callback = completion
+            completion = nil
+            callback?(selection)
+        }
     }
 }
 
