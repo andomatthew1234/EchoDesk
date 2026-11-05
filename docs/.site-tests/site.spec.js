@@ -102,7 +102,7 @@ test("product pricing presents the Mini and both planned Pro models", async ({ p
   await expect(page.locator("#professional .pro-model-options")).toContainText("EchoDesk Pro");
   await expect(page.locator("#professional .pro-model-options")).toContainText("A$229.99");
   await expect(page.locator("#professional .pro-model-options")).toContainText("EchoDesk Pro with battery");
-  await expect(page.locator("#professional .pro-model-options")).toContainText("A$399.99");
+  await expect(page.locator("#professional .pro-model-options")).toContainText("A$299.99");
   await expect(page.locator(".purchase-grid .purchase-card")).toHaveCount(3);
 });
 
