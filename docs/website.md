@@ -67,9 +67,8 @@ concept-only utility panels are labelled separately.
 ## Purchase behaviour
 
 The repository contains no legitimate retail EchoDesk checkout. Mini purchase
-actions therefore open a clearly labelled availability email to
-`matthew@andomail.com`; they do not place an order. EchoDesk Professional remains
-disabled and marked Coming Soon.
+actions open the configured Stripe checkout. EchoDesk Pro and EchoDesk Pro with
+battery remain disabled and marked Coming Soon.
 
 ## Validation
 

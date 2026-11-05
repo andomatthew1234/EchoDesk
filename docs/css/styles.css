@@ -266,6 +266,11 @@ html[data-theme="dark"] .visual-note { color: #c7c7cb; }
 .pro-card .muted-list, .pro-card .product-note { color: #a9a9af; }
 .pro-card .tick-list li { border-color: var(--dark-line); }
 .pro-card .tick-list li::before { color: #fff; }
+.pro-model-options { display: grid; gap: 10px; width: 100%; margin-top: 6px; }
+.pro-model-options > div { display: grid; grid-template-columns: 1fr auto; gap: 3px 14px; padding: 13px 14px; border: 1px solid rgba(255,255,255,.16); border-radius: 14px; background: rgba(255,255,255,.06); }
+.pro-model-options strong { font-size: .9rem; }
+.pro-model-options b { font-size: .88rem; }
+.pro-model-options span { grid-column: 1 / -1; color: #bcbcc2; font-size: .74rem; }
 .pro-visual { position: relative; height: 300px; overflow: hidden; background: #0c0d12; }
 .pro-visual::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(0,0,0,.04) 50%, rgba(0,0,0,.38)); }
 .pro-visual img { width: 100%; height: 100%; object-fit: cover; object-position: center; transition: transform 800ms var(--ease); }
@@ -385,7 +390,7 @@ html[data-theme="dark"] .cable-visual img { filter: invert(1) drop-shadow(0 10px
 
 /* Purchase and footer */
 .purchase-section { background: var(--surface); }
-.purchase-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.purchase-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
 .purchase-card { min-height: 420px; display: flex; flex-direction: column; justify-content: space-between; padding: clamp(28px, 4vw, 48px); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-2); }
 .purchase-card > div > span { font-size: .67rem; font-weight: 900; letter-spacing: .13em; }
 .purchase-card h3 { margin-top: 65px; font-size: clamp(2rem, 4vw, 4rem); }

@@ -20,6 +20,7 @@
   .box-visual { min-height: 520px; }
   .software-included { grid-template-columns: 1fr 1fr; }
   .software-included > .eyebrow { grid-column: 1 / -1; padding-bottom: 0; }
+  .purchase-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 760px) {

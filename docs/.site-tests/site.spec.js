@@ -96,6 +96,16 @@ test("Mini purchase calls to action use the EchoDesk Stripe checkout", async ({ 
   await expect(page.locator(".purchase-mini small").filter({ hasText: "Secure checkout powered by Stripe." })).toHaveText("Secure checkout powered by Stripe.");
 });
 
+test("product pricing presents the Mini and both planned Pro models", async ({ page }) => {
+  await page.goto("./#buy", { waitUntil: "networkidle" });
+  await expect(page.locator(".mini-card .price")).toContainText("A$229.99");
+  await expect(page.locator("#professional .pro-model-options")).toContainText("EchoDesk Pro");
+  await expect(page.locator("#professional .pro-model-options")).toContainText("A$229.99");
+  await expect(page.locator("#professional .pro-model-options")).toContainText("EchoDesk Pro with battery");
+  await expect(page.locator("#professional .pro-model-options")).toContainText("A$399.99");
+  await expect(page.locator(".purchase-grid .purchase-card")).toHaveCount(3);
+});
+
 test("setup step uses the USB icon asset", async ({ page }) => {
   await page.goto("./#setup", { waitUntil: "networkidle" });
   const icon = page.locator(".cable-visual img");
